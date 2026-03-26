@@ -9,4 +9,4 @@ COPY apps/web/ .
 RUN npm run build
 
 EXPOSE 3000
-CMD ["node", "build/server/index.js"]
+CMD ["node", "--experimental-require-module", "build/server/index.js"]
