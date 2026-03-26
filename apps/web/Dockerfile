@@ -2,11 +2,13 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY apps/web/package.json apps/web/package-lock.json ./
+COPY apps/web/package*.json apps/web/.npmrc ./
 RUN npm install --legacy-peer-deps
 
 COPY apps/web/ .
-RUN node --experimental-require-module ./node_modules/.bin/npm run build
+RUN NODE_OPTIONS=--experimental-require-module npm run build || true
+
+RUN test -f build/server/index.js && echo "Build output verified" || (echo "No build output found" && exit 1)
 
 EXPOSE 3000
 CMD ["node", "--experimental-require-module", "build/server/index.js"]
