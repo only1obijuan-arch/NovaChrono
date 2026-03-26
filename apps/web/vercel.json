@@ -4,14 +4,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "build",
   "framework": null,
-  "routes": [
-    {
-      "src": "/assets/(.*)",
-      "dest": "/client/assets/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/server/index.js"
-    }
+  "rewrites": [
+    { "source": "/assets/(.*)", "destination": "/client/assets/$1" },
+    { "source": "/(.*)", "destination": "/server/index.js" }
   ]
 }
