@@ -1,0 +1,70 @@
+{
+  "_PolymorphicComponent-DpTFR3hD.js": {
+    "file": "assets/PolymorphicComponent-DpTFR3hD.js",
+    "name": "PolymorphicComponent",
+    "imports": [
+      "_chunk-LFPYN7LY-CUCCJInn.js"
+    ]
+  },
+  "_chunk-LFPYN7LY-CUCCJInn.js": {
+    "file": "assets/chunk-LFPYN7LY-CUCCJInn.js",
+    "name": "chunk-LFPYN7LY"
+  },
+  "_index-BBR7LY95.js": {
+    "file": "assets/index-BBR7LY95.js",
+    "name": "index"
+  },
+  "_index-BtK7uqk0.js": {
+    "file": "assets/index-BtK7uqk0.js",
+    "name": "index",
+    "imports": [
+      "_chunk-LFPYN7LY-CUCCJInn.js"
+    ]
+  },
+  "node_modules/@react-router/dev/dist/config/defaults/entry.client.tsx": {
+    "file": "assets/entry.client-B-H8x1BO.js",
+    "name": "entry.client",
+    "src": "node_modules/@react-router/dev/dist/config/defaults/entry.client.tsx",
+    "isEntry": true,
+    "imports": [
+      "_chunk-LFPYN7LY-CUCCJInn.js",
+      "_index-BtK7uqk0.js"
+    ]
+  },
+  "src/app/__create/not-found.tsx?__react-router-build-client-route": {
+    "file": "assets/not-found-tCzDy9Nb.js",
+    "name": "not-found",
+    "src": "src/app/__create/not-found.tsx?__react-router-build-client-route",
+    "isEntry": true,
+    "imports": [
+      "_index-BBR7LY95.js",
+      "_PolymorphicComponent-DpTFR3hD.js",
+      "_chunk-LFPYN7LY-CUCCJInn.js"
+    ]
+  },
+  "src/app/page.jsx?__react-router-build-client-route": {
+    "file": "assets/page-CcQC4jI4.js",
+    "name": "page",
+    "src": "src/app/page.jsx?__react-router-build-client-route",
+    "isEntry": true,
+    "imports": [
+      "_index-BBR7LY95.js",
+      "_chunk-LFPYN7LY-CUCCJInn.js"
+    ]
+  },
+  "src/app/root.tsx?__react-router-build-client-route": {
+    "file": "assets/root-DZjpYxZN.js",
+    "name": "root",
+    "src": "src/app/root.tsx?__react-router-build-client-route",
+    "isEntry": true,
+    "imports": [
+      "_index-BBR7LY95.js",
+      "_PolymorphicComponent-DpTFR3hD.js",
+      "_chunk-LFPYN7LY-CUCCJInn.js",
+      "_index-BtK7uqk0.js"
+    ],
+    "css": [
+      "assets/root-Dij2URiF.css"
+    ]
+  }
+}

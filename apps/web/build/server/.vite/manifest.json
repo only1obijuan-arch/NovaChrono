@@ -1,0 +1,31 @@
+{
+  "src/app/api/__create/ssr-test/route.js": {
+    "file": "assets/route-BnYlH1-Z.js",
+    "name": "route",
+    "src": "src/app/api/__create/ssr-test/route.js",
+    "isDynamicEntry": true
+  },
+  "src/app/api/auth/expo-web-success/route.js": {
+    "file": "assets/route-5cxDeLi6.js",
+    "name": "route",
+    "src": "src/app/api/auth/expo-web-success/route.js",
+    "isDynamicEntry": true
+  },
+  "src/app/api/auth/token/route.js": {
+    "file": "assets/route-Bf6xGUNc.js",
+    "name": "route",
+    "src": "src/app/api/auth/token/route.js",
+    "isDynamicEntry": true
+  },
+  "virtual:react-router/server-build": {
+    "file": "index.js",
+    "name": "index",
+    "src": "virtual:react-router/server-build",
+    "isEntry": true,
+    "dynamicImports": [
+      "src/app/api/auth/expo-web-success/route.js",
+      "src/app/api/auth/token/route.js",
+      "src/app/api/__create/ssr-test/route.js"
+    ]
+  }
+}

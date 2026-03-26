@@ -77,6 +77,18 @@ export default defineConfig({
     },
     dedupe: ['react', 'react-dom'],
   },
+build: {
+  target: 'node18',
+  rollupOptions: {
+    external: [
+      '@neondatabase/serverless',
+      'argon2',
+      'ws',
+      'react-router-hono-server/node',
+      'serialize-error',
+    ],
+  },
+},
   clearScreen: false,
   server: {
     allowedHosts: true,
