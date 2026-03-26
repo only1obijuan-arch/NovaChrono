@@ -78,7 +78,8 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
 build: {
-  target: 'node18',
+  target: 'node20',
+  ssr: true,
   rollupOptions: {
     external: [
       '@neondatabase/serverless',
