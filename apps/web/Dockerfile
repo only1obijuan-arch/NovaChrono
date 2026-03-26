@@ -2,8 +2,10 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-COPY . .
+COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm install --legacy-peer-deps
+
+COPY apps/web/ .
 RUN npm run build
 
 EXPOSE 3000
