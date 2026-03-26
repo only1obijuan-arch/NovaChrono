@@ -39,6 +39,19 @@ export default defineConfig({
       serverEntryPoint: './__create/index.ts',
       runtime: 'node',
     }),
+    {
+      name: 'virtual-module-resolver',
+      resolveId(id) {
+        if (id.startsWith('virtual:')) {
+          return id;
+        }
+      },
+      load(id) {
+        if (id.startsWith('virtual:')) {
+          return '';
+        }
+      },
+    },
     babel({
       include: ['src/**/*.{js,jsx,ts,tsx}'],
       exclude: /node_modules/,
@@ -74,13 +87,15 @@ export default defineConfig({
       '@auth/create/react': '@hono/auth-js/react',
       '@auth/create': path.resolve(__dirname, './src/__create/@auth/create'),
       '@': path.resolve(__dirname, 'src'),
+      'virtual:react-router/routes': 'virtual:react-router/routes',
     },
     dedupe: ['react', 'react-dom'],
   },
   build: {
     target: 'node20',
     ssr: {
-      external: ['hono/context-storage'],
+      external: [],
+      noExternal: true,
     },
     rollupOptions: {
       external: [
