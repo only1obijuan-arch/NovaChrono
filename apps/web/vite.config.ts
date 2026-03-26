@@ -40,10 +40,10 @@ export default defineConfig({
       runtime: 'node',
     }),
     babel({
-      include: ['src/**/*.{js,jsx,ts,tsx}'], // or RegExp: /src\/.*\.[tj]sx?$/
-      exclude: /node_modules/, // skip everything else
+      include: ['src/**/*.{js,jsx,ts,tsx}'],
+      exclude: /node_modules/,
       babelConfig: {
-        babelrc: false, // don’t merge other Babel files
+        babelrc: false,
         configFile: false,
         plugins: ['styled-jsx/babel'],
       },
@@ -77,19 +77,18 @@ export default defineConfig({
     },
     dedupe: ['react', 'react-dom'],
   },
-build: {
-  target: 'node20',
-  ssr: true,
-  rollupOptions: {
-    external: [
-      '@neondatabase/serverless',
-      'argon2',
-      'ws',
-      'react-router-hono-server/node',
-      'serialize-error',
-    ],
+  build: {
+    target: 'node20',
+    rollupOptions: {
+      external: [
+        '@neondatabase/serverless',
+        'argon2',
+        'ws',
+        'react-router-hono-server/node',
+        'serialize-error',
+      ],
+    },
   },
-},
   clearScreen: false,
   server: {
     allowedHosts: true,
