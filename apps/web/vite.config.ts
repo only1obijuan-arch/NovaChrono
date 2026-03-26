@@ -79,6 +79,9 @@ export default defineConfig({
   },
   build: {
     target: 'node20',
+    ssr: {
+      external: ['hono/context-storage'],
+    },
     rollupOptions: {
       external: [
         '@neondatabase/serverless',
