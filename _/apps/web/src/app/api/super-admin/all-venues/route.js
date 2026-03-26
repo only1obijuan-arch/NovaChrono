@@ -1,0 +1,39 @@
+import sql from "@/app/api/utils/sql";
+import { auth } from "@/auth";
+
+// Returns all venues across all organizations — super admin only
+export async function GET(request) {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const userCheck = await sql`
+      SELECT role FROM auth_users WHERE id = ${session.user.id}
+    `;
+    if (!userCheck[0] || userCheck[0].role !== "super_admin") {
+      return Response.json(
+        { error: "Super admin access required" },
+        { status: 403 }
+      );
+    }
+
+    const venues = await sql`
+      SELECT 
+        v.id,
+        v.name,
+        v.location,
+        v.organization_id,
+        o.name as organization_name
+      FROM venues v
+      LEFT JOIN organizations o ON o.id = v.organization_id
+      ORDER BY o.name, v.name
+    `;
+
+    return Response.json({ venues });
+  } catch (error) {
+    console.error("GET /api/super-admin/all-venues error:", error);
+    return Response.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+}
