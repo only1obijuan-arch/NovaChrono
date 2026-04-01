@@ -1,11 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { Pool } from "@neondatabase/serverless";
 import { hash, verify } from "argon2";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+import { pool } from "@/app/api/utils/db";
 
 // NeonDB Adapter
 function Adapter(client) {

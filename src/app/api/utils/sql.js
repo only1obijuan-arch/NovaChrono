@@ -1,18 +1,3 @@
-import { neon } from "@neondatabase/serverless";
-
-const NullishQueryFunction = () => {
-  throw new Error(
-    "No database connection string was provided to `neon()`. Perhaps process.env.DATABASE_URL has not been set"
-  );
-};
-NullishQueryFunction.transaction = () => {
-  throw new Error(
-    "No database connection string was provided to `neon()`. Perhaps process.env.DATABASE_URL has not been set"
-  );
-};
-
-const sql = process.env.DATABASE_URL
-  ? neon(process.env.DATABASE_URL)
-  : NullishQueryFunction;
-
-export default sql;
+// Re-export the shared sql tagged-template function from the singleton db module.
+// All API routes that import sql from this file now use the single shared Pool.
+export { sql as default } from "@/app/api/utils/db";

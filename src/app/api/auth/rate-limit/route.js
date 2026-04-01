@@ -1,6 +1,4 @@
-import { Pool } from "@neondatabase/serverless";
-
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+import { pool } from "@/app/api/utils/db";
 
 const MAX_ATTEMPTS = 5;
 const WINDOW_MINUTES = 15;
@@ -56,7 +54,7 @@ export async function POST(request) {
       if (newAttempts >= MAX_ATTEMPTS) {
         const lockedUntil = new Date(now.getTime() + LOCKOUT_MINUTES * 60 * 1000);
         await pool.query(
-          `UPDATE auth_rate_limits 
+          `UPDATE auth_rate_limits
            SET attempts=$2, last_attempt=$3, locked_until=$4
            WHERE identifier=$1`,
           [identifier, newAttempts, now.toISOString(), lockedUntil.toISOString()]
