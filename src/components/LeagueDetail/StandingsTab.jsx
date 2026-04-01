@@ -1,0 +1,38 @@
+export function StandingsTab({ stats }) {
+  if (!stats) return null;
+
+  return (
+    <div className="ld-standings-wrap">
+      <table className="ld-standings-table">
+        <thead>
+          <tr>
+            <th>POS</th><th>TEAM</th><th>P</th><th>W</th><th>D</th><th>L</th>
+            <th>GF</th><th>GA</th><th>GD</th><th>PTS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stats.standings.map((team, idx) => (
+            <tr key={team.slot_id} className={idx < 3 ? "top3" : ""}>
+              <td>
+                <span className={`ld-pos${idx === 0 ? " gold" : idx === 1 ? " silver" : idx === 2 ? " bronze" : ""}`}>
+                  {idx + 1}
+                </span>
+              </td>
+              <td><span className="ld-team-name-cell">{team.team_name || `Slot ${idx + 1}`}</span></td>
+              <td>{team.played}</td>
+              <td><span className="ld-win">{team.wins}</span></td>
+              <td><span className="ld-draw">{team.draws}</span></td>
+              <td><span className="ld-loss">{team.losses}</span></td>
+              <td>{team.goals_for}</td>
+              <td>{team.goals_against}</td>
+              <td style={{ fontWeight: 700, color: team.goal_difference > 0 ? "#00FF9C" : team.goal_difference < 0 ? "rgba(255,0,204,0.7)" : "rgba(180,200,220,0.6)" }}>
+                {team.goal_difference > 0 ? `+${team.goal_difference}` : team.goal_difference}
+              </td>
+              <td><span className="ld-pts">{team.points}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
