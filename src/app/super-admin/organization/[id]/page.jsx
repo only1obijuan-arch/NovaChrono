@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import React, { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ export default function OrganizationManagementPage({ params }) {
   const { data: session } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const orgId = params.id;
+  const { id: orgId } = React.use(params);
 
   const [showAddVenue, setShowAddVenue] = useState(false);
   const [showAddAdmin, setShowAddAdmin] = useState(false);

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -16,7 +16,7 @@ import { ManageTeamModal } from "@/components/LeagueDetail/ManageTeamModal";
 import { NewSeasonModal } from "@/components/LeagueDetail/NewSeasonModal";
 
 export default function LeagueDetail({ params }) {
-  const { id } = params;
+  const { id } = React.use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -219,7 +219,7 @@ export default function LeagueDetail({ params }) {
     });
   };
 
-  if (leagueLoading) return <LoadingState />;
+  if (leagueLoading || !league) return <LoadingState />;
 
   const champion = stats?.standings?.[0];
 
@@ -231,7 +231,7 @@ export default function LeagueDetail({ params }) {
         <div className="ld-grid" />
         <div className="ld-scanline" />
 
-        {league.status === "completed" && champion && (
+        {league?.status === "completed" && champion && (
           <ChampionBanner champion={champion} />
         )}
 

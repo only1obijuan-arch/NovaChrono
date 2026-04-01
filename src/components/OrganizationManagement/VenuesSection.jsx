@@ -35,7 +35,7 @@ export function VenuesSection({
         </div>
       ) : (
         <div className="om-venues">
-          {venuesData.venues.map((venue) => (
+          {venuesData?.venues?.map((venue) => (
             <VenueCard
               key={venue.id}
               venue={venue}
