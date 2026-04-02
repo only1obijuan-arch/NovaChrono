@@ -45,7 +45,7 @@ export async function POST(request) {
         "userId", provider, type, "providerAccountId", password
       )
       VALUES (
-        ${newUser.id}, 'credentials', 'credentials', ${email}, ${hashedPassword}
+        ${newUser.id}, 'credentials', 'credentials', ${newUser.id}, ${hashedPassword}
       )
     `;
 
