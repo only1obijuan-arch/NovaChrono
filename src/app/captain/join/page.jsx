@@ -35,6 +35,7 @@ function JoinForm() {
           email: data.email,
           password: data.password,
           name: data.captainName,
+          role: "captain",
         }),
       });
       const signupData = await signupRes.json();
@@ -43,16 +44,17 @@ function JoinForm() {
       const userId = signupData.user?.id;
       if (!userId) throw new Error("Failed to get user ID after signup");
 
-      // 2. Update role to captain
-      await fetch("/api/super-admin/users", {
+      // 2. Send welcome email
+      await fetch("/api/auth/captain-welcome", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "UPDATE_USER_ROLE",
-          userId,
-          role: "captain",
+          email: data.email,
+          name: data.captainName,
+          teamName: data.teamName,
+          joinCode: data.joinCode,
         }),
-      });
+      }).catch(() => {}); // Don't block on email failure
 
       // 3. Join league — creates team
       const res = await fetch("/api/teams", {
@@ -70,18 +72,6 @@ function JoinForm() {
         throw new Error(err.error || "Failed to join league");
       }
       const team = await res.json();
-
-      // 4. Send welcome email
-      await fetch("/api/auth/captain-welcome", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: data.email,
-          name: data.captainName,
-          teamName: data.teamName,
-          joinCode: data.joinCode,
-        }),
-      }).catch(() => {}); // Don't block on email failure
 
       return team;
     },

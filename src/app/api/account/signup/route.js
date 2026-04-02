@@ -3,7 +3,7 @@ import { hash } from "argon2";
 
 export async function POST(request) {
   try {
-    const { email, password, name } = await request.json();
+    const { email, password, name, role: roleParam } = await request.json();
 
     if (!email || !password || !name) {
       return Response.json(
@@ -11,6 +11,9 @@ export async function POST(request) {
         { status: 400 },
       );
     }
+
+    const validRoles = ["captain", "referee", "venue_admin", "org_admin"];
+    const role = roleParam && validRoles.includes(roleParam) ? roleParam : "captain";
     if (password.length < 8) {
       return Response.json(
         { error: "Password must be at least 8 characters" },
@@ -33,7 +36,7 @@ export async function POST(request) {
 
     const [newUser] = await sql`
       INSERT INTO auth_users (name, email, role)
-      VALUES (${name}, ${email}, 'user')
+      VALUES (${name}, ${email}, ${role})
       RETURNING id, name, email, role
     `;
 
