@@ -1,0 +1,593 @@
+"use client";
+import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Users, ChevronLeft, Shield, X, Calendar, Trophy } from "lucide-react";
+import { NotificationBell } from "@/components/NotificationBell";
+
+export default function TeamDashboard({ params }) {
+  const { id } = React.use(params);
+  const queryClient = useQueryClient();
+  const [showAddPlayer, setShowAddPlayer] = useState(false);
+  const [playerForm, setPlayerForm] = useState({ name: "", playerNumber: "" });
+
+  const { data: team, isLoading: teamLoading } = useQuery({
+    queryKey: ["team", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/teams?teamId=${id}`);
+      return res.json();
+    },
+  });
+
+  const { data: players = [] } = useQuery({
+    queryKey: ["team-players", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/players?teamId=${id}`);
+      return res.json();
+    },
+    enabled: !!team,
+  });
+
+  const { data: matches = [] } = useQuery({
+    queryKey: ["team-matches", team?.league_id],
+    queryFn: async () => {
+      const res = await fetch(`/api/matches?leagueId=${team.league_id}`);
+      return res.json();
+    },
+    enabled: !!team?.league_id,
+  });
+
+  const { data: stats } = useQuery({
+    queryKey: ["league-stats", team?.league_id],
+    queryFn: async () => {
+      const res = await fetch(`/api/stats?leagueId=${team.league_id}`);
+      return res.json();
+    },
+    enabled: !!team?.league_id,
+  });
+
+  const addPlayerMutation = useMutation({
+    mutationFn: async (playerData) => {
+      const res = await fetch("/api/players", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamId: id, ...playerData }),
+      });
+      if (!res.ok) throw new Error("Failed to add player");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success("Player added!");
+      queryClient.invalidateQueries({ queryKey: ["team-players", id] });
+      setShowAddPlayer(false);
+      setPlayerForm({ name: "", playerNumber: "" });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleAddPlayer = (e) => {
+    e.preventDefault();
+    if (!playerForm.name.trim()) {
+      toast.error("Player name is required");
+      return;
+    }
+    addPlayerMutation.mutate(playerForm);
+  };
+
+  if (teamLoading || !team)
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#091833",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              border: "3px solid #00FF9C",
+              borderTopColor: "transparent",
+              borderRadius: "50%",
+              animation: "spin 1s linear infinite",
+              margin: "0 auto 16px",
+            }}
+          />
+          <p
+            style={{
+              color: "#00FF9C",
+              fontFamily: "monospace",
+              letterSpacing: 4,
+              fontSize: 12,
+            }}
+          >
+            LOADING...
+          </p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+
+  const teamMatches = matches.filter(
+    (m) => m.home_slot_id === team.slot_id || m.away_slot_id === team.slot_id,
+  );
+  const upcomingMatches = teamMatches.filter((m) => m.status === "scheduled");
+  const completedMatches = teamMatches.filter((m) => m.status === "final");
+  const nextMatch = upcomingMatches[0];
+
+  const standings = stats?.standings || [];
+  const leaguePosition =
+    standings.findIndex((s) => s.slot_id === team.slot_id) + 1;
+  const teamStanding = standings.find((s) => s.slot_id === team.slot_id);
+
+  const teamScorers = (stats?.topScorers || [])
+    .filter(
+      (s) =>
+        s.team_slot_id === team.slot_id ||
+        players.some((p) => p.name === s.player_name),
+    )
+    .slice(0, 5);
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
+        @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes card-enter { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
+
+        * { box-sizing:border-box; }
+        .td-page { min-height:100vh; background:#091833; font-family:'Rajdhani',sans-serif; position:relative; overflow-x:hidden; }
+        .td-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(0,255,156,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,156,0.025) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
+        .td-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(0,255,156,0.3),transparent); animation:scanline 7s linear infinite; pointer-events:none; z-index:100; }
+        .td-glow { position:fixed; top:-200px; left:-200px; width:600px; height:600px; background:radial-gradient(circle,rgba(0,255,156,0.05) 0%,transparent 70%); pointer-events:none; }
+
+        .td-hero { background:rgba(0,255,156,0.03); border-bottom:1px solid rgba(0,255,156,0.1); padding:32px 24px; position:relative; z-index:1; }
+        .td-hero-inner { max-width:960px; margin:0 auto; }
+        .td-hero-topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+        .td-back { display:inline-flex; align-items:center; gap:6px; color:rgba(0,255,156,0.5); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; transition:all 0.2s; }
+        .td-back:hover { color:#00FF9C; }
+        .td-hero-content { display:flex; align-items:center; gap:24px; }
+        .td-team-avatar { width:80px; height:80px; background:rgba(0,255,156,0.1); border:2px solid rgba(0,255,156,0.4); border-radius:8px; display:flex; align-items:center; justify-content:center; font-family:'Orbitron',monospace; font-size:28px; font-weight:900; color:#00FF9C; flex-shrink:0; box-shadow:0 0 20px rgba(0,255,156,0.2); }
+        .td-team-name { font-family:'Orbitron',monospace; font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:8px; }
+        .td-team-meta { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+        .td-meta-badge { display:inline-flex; align-items:center; gap:6px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.6); letter-spacing:2px; padding:4px 10px; border:1px solid rgba(0,255,156,0.2); border-radius:2px; }
+        .td-league-link { display:inline-flex; align-items:center; gap:6px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.5); letter-spacing:2px; text-decoration:none; padding:4px 10px; border:1px solid rgba(0,255,156,0.2); border-radius:2px; transition:all 0.2s; }
+        .td-league-link:hover { color:#00FF9C; border-color:#00FF9C; background:rgba(0,255,156,0.05); }
+
+        .td-main { max-width:960px; margin:0 auto; padding:32px 24px; display:grid; grid-template-columns:1fr 300px; gap:20px; position:relative; z-index:1; }
+        .td-card { background:rgba(11,20,40,0.9); border:1px solid rgba(0,255,156,0.15); border-radius:8px; overflow:hidden; backdrop-filter:blur(10px); animation:card-enter 0.5s ease both; }
+        .td-card-header { padding:20px 24px; border-bottom:1px solid rgba(0,255,156,0.1); display:flex; align-items:center; justify-content:space-between; }
+        .td-card-title { font-family:'Orbitron',monospace; font-size:13px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
+        .td-card-body { padding:20px 24px; }
+        .td-add-btn { display:inline-flex; align-items:center; gap:6px; background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.3); color:#00FF9C; font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:2px; padding:8px 14px; border-radius:2px; cursor:pointer; transition:all 0.2s; }
+        .td-add-btn:hover { background:rgba(0,255,156,0.14); border-color:#00FF9C; box-shadow:0 0 12px rgba(0,255,156,0.2); }
+        .td-player-list { display:flex; flex-direction:column; gap:8px; }
+        .td-player { display:flex; align-items:center; gap:12px; padding:10px 14px; background:rgba(0,255,156,0.03); border:1px solid rgba(0,255,156,0.08); border-radius:4px; transition:all 0.2s; }
+        .td-player:hover { border-color:rgba(0,255,156,0.2); background:rgba(0,255,156,0.06); }
+        .td-player-num { width:36px; height:36px; background:rgba(0,255,156,0.1); border:1px solid rgba(0,255,156,0.25); border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:'Orbitron',monospace; font-size:11px; color:#00FF9C; flex-shrink:0; }
+        .td-player-name { font-family:'Rajdhani',sans-serif; font-size:16px; font-weight:700; color:#F4F4F9; }
+        .td-player-empty { padding:32px; text-align:center; border:2px dashed rgba(0,255,156,0.1); border-radius:6px; }
+        .td-player-empty-text { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.3); letter-spacing:3px; }
+        .td-next-match { background:rgba(0,255,156,0.05); border:1px solid rgba(0,255,156,0.25); border-radius:6px; padding:20px; }
+        .td-next-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,255,156,0.5); letter-spacing:4px; margin-bottom:12px; }
+        .td-next-date { font-family:'Share Tech Mono',monospace; font-size:11px; color:rgba(0,255,156,0.6); letter-spacing:2px; margin-bottom:8px; }
+        .td-next-opponent { font-family:'Orbitron',monospace; font-size:16px; font-weight:700; color:#F4F4F9; margin-bottom:8px; }
+        .td-next-meta { display:flex; gap:12px; }
+        .td-next-meta-item { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.5); letter-spacing:2px; }
+        .td-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+        .td-stat { background:rgba(0,255,156,0.04); border:1px solid rgba(0,255,156,0.1); border-radius:4px; padding:14px; text-align:center; }
+        .td-stat-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,255,156,0.4); letter-spacing:3px; margin-bottom:6px; }
+        .td-stat-value { font-family:'Orbitron',monospace; font-size:24px; font-weight:900; color:#00FF9C; }
+        .td-position-box { background:rgba(0,255,156,0.06); border:2px solid rgba(0,255,156,0.3); border-radius:6px; padding:20px; text-align:center; margin-bottom:10px; }
+        .td-position-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,255,156,0.5); letter-spacing:4px; margin-bottom:8px; }
+        .td-position-num { font-family:'Orbitron',monospace; font-size:56px; font-weight:900; color:#00FF9C; line-height:1; text-shadow:0 0 20px rgba(0,255,156,0.4); }
+        .td-position-suffix { font-family:'Share Tech Mono',monospace; font-size:16px; color:rgba(0,255,156,0.6); }
+        .td-position-pts { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.4); letter-spacing:3px; margin-top:6px; }
+        .td-scorer-list { display:flex; flex-direction:column; gap:8px; }
+        .td-scorer { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:rgba(0,255,156,0.03); border:1px solid rgba(0,255,156,0.08); border-radius:4px; }
+        .td-scorer-left { display:flex; align-items:center; gap:10px; }
+        .td-scorer-rank { font-family:'Orbitron',monospace; font-size:10px; color:rgba(0,255,156,0.3); width:20px; }
+        .td-scorer-name { font-family:'Rajdhani',sans-serif; font-size:15px; font-weight:700; color:#F4F4F9; }
+        .td-scorer-goals { font-family:'Orbitron',monospace; font-size:18px; font-weight:900; color:#00FF9C; }
+        .td-scorer-empty { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.2); letter-spacing:3px; text-align:center; padding:20px 0; }
+        .td-fixture-list { display:flex; flex-direction:column; gap:8px; }
+        .td-fixture { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:rgba(0,255,156,0.03); border:1px solid rgba(0,255,156,0.08); border-radius:4px; }
+        .td-fixture-date { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.4); letter-spacing:1px; }
+        .td-fixture-teams { font-family:'Rajdhani',sans-serif; font-size:15px; font-weight:700; color:#F4F4F9; text-align:center; flex:1; padding:0 12px; }
+        .td-fixture-score { font-family:'Orbitron',monospace; font-size:14px; font-weight:700; color:#F4F4F9; }
+        .td-fixture-status { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:2px; padding:3px 8px; border-radius:2px; }
+        .td-fixture-status.scheduled { color:rgba(0,245,212,0.7); background:rgba(0,245,212,0.08); border:1px solid rgba(0,245,212,0.2); }
+        .td-fixture-status.final { color:rgba(180,200,220,0.5); background:rgba(180,200,220,0.05); border:1px solid rgba(180,200,220,0.1); }
+        .td-fixture-status.live { color:#FF00CC; background:rgba(255,0,204,0.08); border:1px solid rgba(255,0,204,0.3); }
+        .td-sidebar { display:flex; flex-direction:column; gap:20px; }
+        .td-waiting { background:rgba(255,200,0,0.04); border:1px solid rgba(255,200,0,0.15); border-radius:6px; padding:20px; text-align:center; }
+        .td-waiting-title { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,200,0,0.7); letter-spacing:3px; margin-bottom:6px; }
+        .td-waiting-sub { font-family:'Rajdhani',sans-serif; font-size:13px; color:rgba(255,200,0,0.4); }
+        .td-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px; }
+        .td-modal { background:#0D1B2E; border:1px solid rgba(0,255,156,0.3); border-radius:8px; padding:32px; max-width:420px; width:100%; box-shadow:0 0 60px rgba(0,255,156,0.08); }
+        .td-modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+        .td-modal-title { font-family:'Orbitron',monospace; font-size:16px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
+        .td-modal-close { background:none; border:none; color:rgba(0,255,156,0.4); cursor:pointer; transition:color 0.2s; }
+        .td-modal-close:hover { color:#00FF9C; }
+        .td-modal-label { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.6); letter-spacing:3px; display:block; margin-bottom:8px; }
+        .td-modal-input { width:100%; height:48px; background:rgba(0,255,156,0.05); border:1px solid rgba(0,255,156,0.2); border-radius:4px; padding:0 16px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; transition:all 0.2s; margin-bottom:20px; }
+        .td-modal-input:focus { border-color:#00FF9C; box-shadow:0 0 15px rgba(0,255,156,0.15); }
+        .td-modal-input::placeholder { color:rgba(180,200,220,0.3); }
+        .td-modal-btns { display:flex; gap:12px; }
+        .td-modal-cancel { flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:rgba(180,200,220,0.6); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; padding:12px; border-radius:4px; cursor:pointer; transition:all 0.2s; }
+        .td-modal-cancel:hover { color:#F4F4F9; }
+        .td-modal-submit { flex:1; background:linear-gradient(135deg,#00FF9C,#00CC78); color:#091833; font-family:'Orbitron',monospace; font-size:11px; font-weight:700; letter-spacing:2px; padding:12px; border:none; border-radius:4px; cursor:pointer; transition:all 0.2s; }
+        .td-modal-submit:hover { box-shadow:0 0 20px rgba(0,255,156,0.4); }
+        .td-modal-submit:disabled { opacity:0.4; cursor:not-allowed; }
+
+        @media (max-width:768px) {
+          .td-main { grid-template-columns:1fr; }
+          .td-hero-content { flex-direction:column; align-items:flex-start; }
+          .td-stats { grid-template-columns:1fr 1fr 1fr; }
+        }
+      `}</style>
+
+      <div className="td-page">
+        <div className="td-grid" />
+        <div className="td-scanline" />
+        <div className="td-glow" />
+
+        {/* Hero */}
+        <div className="td-hero">
+          <div className="td-hero-inner">
+            <div className="td-hero-topbar">
+              <a href="/account/signin" className="td-back">
+                <ChevronLeft size={14} /> BACK TO LOGIN
+              </a>
+              <NotificationBell accentColor="#00FF9C" />
+            </div>
+            <div className="td-hero-content">
+              <div className="td-team-avatar">{team.name?.[0]}</div>
+              <div>
+                <h1 className="td-team-name">{team.name}</h1>
+                <div className="td-team-meta">
+                  <span className="td-meta-badge">
+                    <Shield size={10} /> CAPTAIN PORTAL
+                  </span>
+                  <a
+                    href={`/league/${team.league_id}`}
+                    className="td-league-link"
+                  >
+                    VIEW LEAGUE →
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="td-main">
+          {/* Left column */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <div className="td-card">
+              <div className="td-card-header">
+                <span className="td-card-title">// TEAM ROSTER</span>
+                <button
+                  className="td-add-btn"
+                  onClick={() => setShowAddPlayer(true)}
+                >
+                  + ADD PLAYER
+                </button>
+              </div>
+              <div className="td-card-body">
+                {players.length === 0 ? (
+                  <div className="td-player-empty">
+                    <p className="td-player-empty-text">
+                      NO PLAYERS REGISTERED
+                    </p>
+                  </div>
+                ) : (
+                  <div className="td-player-list">
+                    {players.map((player) => (
+                      <div key={player.id} className="td-player">
+                        <div className="td-player-num">
+                          #{player.player_number || "--"}
+                        </div>
+                        <span className="td-player-name">{player.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="td-card" style={{ animationDelay: "0.08s" }}>
+              <div className="td-card-header">
+                <span className="td-card-title">// TOP SCORERS</span>
+              </div>
+              <div className="td-card-body">
+                {teamScorers.length === 0 ? (
+                  <p className="td-scorer-empty">NO GOALS RECORDED YET</p>
+                ) : (
+                  <div className="td-scorer-list">
+                    {teamScorers.map((scorer, idx) => (
+                      <div key={idx} className="td-scorer">
+                        <div className="td-scorer-left">
+                          <span className="td-scorer-rank">#{idx + 1}</span>
+                          <span className="td-scorer-name">
+                            {scorer.player_name}
+                          </span>
+                        </div>
+                        <span className="td-scorer-goals">{scorer.goals}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {teamMatches.length > 0 && (
+              <div className="td-card" style={{ animationDelay: "0.1s" }}>
+                <div className="td-card-header">
+                  <span className="td-card-title">// FIXTURES</span>
+                </div>
+                <div className="td-card-body">
+                  <div className="td-fixture-list">
+                    {teamMatches.map((match) => {
+                      const isHome = match.home_slot_id === team.slot_id;
+                      const opponent = isHome
+                        ? match.away_team_name
+                        : match.home_team_name;
+                      return (
+                        <div key={match.id} className="td-fixture">
+                          <span className="td-fixture-date">
+                            {new Date(match.match_date).toLocaleDateString()}
+                          </span>
+                          <span className="td-fixture-teams">
+                            {isHome ? "HOME" : "AWAY"} vs {opponent || "TBD"}
+                          </span>
+                          {match.status === "final" ? (
+                            <span className="td-fixture-score">
+                              {isHome ? match.home_score : match.away_score} —{" "}
+                              {isHome ? match.away_score : match.home_score}
+                            </span>
+                          ) : (
+                            <span
+                              className={`td-fixture-status ${match.status}`}
+                            >
+                              {match.status?.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Sidebar */}
+          <div className="td-sidebar">
+            {leaguePosition > 0 && (
+              <div className="td-card" style={{ animationDelay: "0.12s" }}>
+                <div className="td-card-header">
+                  <span className="td-card-title">// LEAGUE POSITION</span>
+                </div>
+                <div className="td-card-body">
+                  <div className="td-position-box">
+                    <p className="td-position-label">CURRENT STANDING</p>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        justifyContent: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <span className="td-position-num">{leaguePosition}</span>
+                      <span className="td-position-suffix">
+                        {leaguePosition === 1
+                          ? "ST"
+                          : leaguePosition === 2
+                            ? "ND"
+                            : leaguePosition === 3
+                              ? "RD"
+                              : "TH"}
+                      </span>
+                    </div>
+                    {teamStanding && (
+                      <p className="td-position-pts">
+                        {teamStanding.points} PTS • {standings.length} TEAMS
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="td-card" style={{ animationDelay: "0.15s" }}>
+              <div className="td-card-header">
+                <span className="td-card-title">// NEXT MATCH</span>
+              </div>
+              <div className="td-card-body">
+                {nextMatch ? (
+                  <div className="td-next-match">
+                    <p className="td-next-label">UPCOMING</p>
+                    <p className="td-next-date">
+                      {new Date(nextMatch.match_date).toLocaleDateString()} •{" "}
+                      {nextMatch.time_slot}
+                    </p>
+                    <p className="td-next-opponent">
+                      vs{" "}
+                      {nextMatch.home_slot_id === team.slot_id
+                        ? nextMatch.away_team_name || "TBD"
+                        : nextMatch.home_team_name || "TBD"}
+                    </p>
+                    <div className="td-next-meta">
+                      <span className="td-next-meta-item">
+                        FIELD {nextMatch.field_number}
+                      </span>
+                      <span className="td-next-meta-item">
+                        {nextMatch.home_slot_id === team.slot_id
+                          ? "HOME"
+                          : "AWAY"}
+                      </span>
+                    </div>
+                  </div>
+                ) : matches.length > 0 ? (
+                  <p
+                    style={{
+                      fontFamily: "'Share Tech Mono',monospace",
+                      fontSize: 10,
+                      color: "rgba(180,200,220,0.3)",
+                      letterSpacing: 3,
+                      textAlign: "center",
+                      padding: "20px 0",
+                    }}
+                  >
+                    NO UPCOMING MATCHES
+                  </p>
+                ) : (
+                  <div className="td-waiting">
+                    <p className="td-waiting-title">AWAITING FIXTURES</p>
+                    <p className="td-waiting-sub">
+                      Waiting for admin to close registration
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="td-card" style={{ animationDelay: "0.2s" }}>
+              <div className="td-card-header">
+                <span className="td-card-title">// SEASON STATS</span>
+              </div>
+              <div className="td-card-body">
+                <div className="td-stats">
+                  <div className="td-stat">
+                    <p className="td-stat-label">PLAYED</p>
+                    <p className="td-stat-value">
+                      {teamStanding?.played ?? completedMatches.length}
+                    </p>
+                  </div>
+                  <div className="td-stat">
+                    <p className="td-stat-label">WINS</p>
+                    <p className="td-stat-value">{teamStanding?.wins ?? 0}</p>
+                  </div>
+                  <div className="td-stat">
+                    <p className="td-stat-label">UPCOMING</p>
+                    <p className="td-stat-value">{upcomingMatches.length}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {team?.league_id && (
+              <a
+                href={`/captain/rules/${team.league_id}`}
+                className="td-card"
+                style={{
+                  animationDelay: "0.25s",
+                  textDecoration: "none",
+                  display: "block",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.borderColor = "rgba(0,255,156,0.4)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.borderColor = "rgba(0,255,156,0.15)")
+                }
+              >
+                <div className="td-card-header">
+                  <span className="td-card-title">// LEAGUE RULES</span>
+                  <span
+                    style={{
+                      fontFamily: "'Share Tech Mono',monospace",
+                      fontSize: 10,
+                      color: "rgba(0,255,156,0.5)",
+                      letterSpacing: 2,
+                    }}
+                  >
+                    VIEW →
+                  </span>
+                </div>
+                <div className="td-card-body">
+                  <p
+                    style={{
+                      fontFamily: "'Rajdhani',sans-serif",
+                      fontSize: 14,
+                      color: "rgba(180,200,220,0.5)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Match format, fair play, cards, points system and more.
+                  </p>
+                </div>
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {showAddPlayer && (
+        <div className="td-modal-overlay">
+          <div className="td-modal">
+            <div className="td-modal-header">
+              <h3 className="td-modal-title">// ADD PLAYER</h3>
+              <button
+                className="td-modal-close"
+                onClick={() => setShowAddPlayer(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleAddPlayer}>
+              <label className="td-modal-label">PLAYER NAME *</label>
+              <input
+                required
+                type="text"
+                className="td-modal-input"
+                placeholder="e.g. John Smith"
+                value={playerForm.name}
+                onChange={(e) =>
+                  setPlayerForm({ ...playerForm, name: e.target.value })
+                }
+                autoFocus
+              />
+              <label className="td-modal-label">JERSEY NUMBER (OPTIONAL)</label>
+              <input
+                type="text"
+                className="td-modal-input"
+                placeholder="e.g. 10"
+                value={playerForm.playerNumber}
+                onChange={(e) =>
+                  setPlayerForm({ ...playerForm, playerNumber: e.target.value })
+                }
+              />
+              <div className="td-modal-btns">
+                <button
+                  type="button"
+                  className="td-modal-cancel"
+                  onClick={() => setShowAddPlayer(false)}
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="submit"
+                  className="td-modal-submit"
+                  disabled={addPlayerMutation.isPending}
+                >
+                  {addPlayerMutation.isPending ? "ADDING..." : "ADD PLAYER"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
