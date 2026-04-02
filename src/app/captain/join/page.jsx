@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
+import { signIn } from "next-auth/react";
 import { useMutation } from "@tanstack/react-query";
 import {
   Search,
@@ -16,8 +17,6 @@ function JoinForm() {
   const [captainName, setCaptainName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [done, setDone] = useState(false);
-
   // Pre-fill join code from URL ?code= param
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -41,10 +40,32 @@ function JoinForm() {
       const signupData = await signupRes.json();
       if (!signupRes.ok)
         throw new Error(signupData.error || "Failed to create account");
-      const userId = signupData.user?.id;
-      if (!userId) throw new Error("Failed to get user ID after signup");
 
-      // 2. Send welcome email
+      // 2. Sign in to establish session
+      const signInResult = await signIn("credentials", {
+        email: data.email,
+        password: data.password,
+        isSignup: "false",
+        redirect: false,
+      });
+      if (signInResult?.error)
+        throw new Error("Account created but sign-in failed. Please sign in manually.");
+
+      // 3. Join league — session provides captain user ID
+      const teamsRes = await fetch("/api/teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "JOIN_LEAGUE",
+          joinCode: data.joinCode,
+          teamName: data.teamName,
+        }),
+      });
+      const team = await teamsRes.json();
+      if (!teamsRes.ok)
+        throw new Error(team.error || "Failed to join league");
+
+      // 4. Send welcome email
       await fetch("/api/auth/captain-welcome", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -56,27 +77,10 @@ function JoinForm() {
         }),
       }).catch(() => {}); // Don't block on email failure
 
-      // 3. Join league — creates team
-      const res = await fetch("/api/teams", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "JOIN_LEAGUE",
-          joinCode: data.joinCode,
-          teamName: data.teamName,
-          captainUserId: userId,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to join league");
-      }
-      const team = await res.json();
-
       return team;
     },
     onSuccess: () => {
-      setDone(true);
+      window.location.href = "/captain/team";
     },
     onError: () => {},
   });
@@ -85,72 +89,6 @@ function JoinForm() {
     e.preventDefault();
     mutation.mutate({ joinCode, teamName, captainName, email, password });
   };
-
-  if (done) {
-    return (
-      <div
-        className="join-card"
-        style={{ textAlign: "center", padding: "48px 32px" }}
-      >
-        <div
-          style={{
-            width: 72,
-            height: 72,
-            background: "rgba(0,255,156,0.08)",
-            border: "2px solid rgba(0,255,156,0.4)",
-            borderRadius: "50%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            margin: "0 auto 20px",
-            fontSize: 32,
-          }}
-        >
-          ✓
-        </div>
-        <h2
-          style={{
-            fontFamily: "'Orbitron',monospace",
-            fontSize: 20,
-            color: "#F4F4F9",
-            letterSpacing: 2,
-            marginBottom: 12,
-          }}
-        >
-          YOU&apos;RE IN!
-        </h2>
-        <p
-          style={{
-            fontFamily: "'Rajdhani',sans-serif",
-            fontSize: 15,
-            color: "rgba(180,200,220,0.5)",
-            marginBottom: 28,
-            lineHeight: 1.6,
-          }}
-        >
-          Account created successfully! Check your email for league details,
-          then sign in to access your captain portal.
-        </p>
-        <a
-          href="/account/signin"
-          style={{
-            display: "inline-block",
-            background: "linear-gradient(135deg,#00FF9C,#00CC78)",
-            color: "#091833",
-            fontFamily: "'Orbitron',monospace",
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: 2,
-            padding: "16px 32px",
-            borderRadius: 4,
-            textDecoration: "none",
-          }}
-        >
-          SIGN IN NOW →
-        </a>
-      </div>
-    );
-  }
 
   return (
     <div className="join-card">
