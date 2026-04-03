@@ -1,5 +1,13 @@
 export function StandingsTab({ stats }) {
-  if (!stats) return null;
+  const standings = stats?.standings ?? [];
+
+  if (standings.length === 0) {
+    return (
+      <div style={{ padding: "60px 24px", textAlign: "center", fontFamily: "'Share Tech Mono',monospace", fontSize: 11, color: "rgba(180,200,220,0.3)", letterSpacing: 3 }}>
+        NO STANDINGS YET — FIXTURES MUST BE GENERATED FIRST
+      </div>
+    );
+  }
 
   return (
     <div className="ld-standings-wrap">
@@ -11,7 +19,7 @@ export function StandingsTab({ stats }) {
           </tr>
         </thead>
         <tbody>
-          {stats.standings.map((team, idx) => (
+          {standings.map((team, idx) => (
             <tr key={team.slot_id} className={idx < 3 ? "top3" : ""}>
               <td>
                 <span className={`ld-pos${idx === 0 ? " gold" : idx === 1 ? " silver" : idx === 2 ? " bronze" : ""}`}>
@@ -20,9 +28,9 @@ export function StandingsTab({ stats }) {
               </td>
               <td><span className="ld-team-name-cell">{team.team_name || `Slot ${idx + 1}`}</span></td>
               <td>{team.played}</td>
-              <td><span className="ld-win">{team.wins}</span></td>
-              <td><span className="ld-draw">{team.draws}</span></td>
-              <td><span className="ld-loss">{team.losses}</span></td>
+              <td><span className="ld-win">{team.won}</span></td>
+              <td><span className="ld-draw">{team.drawn}</span></td>
+              <td><span className="ld-loss">{team.lost}</span></td>
               <td>{team.goals_for}</td>
               <td>{team.goals_against}</td>
               <td style={{ fontWeight: 700, color: team.goal_difference > 0 ? "#00FF9C" : team.goal_difference < 0 ? "rgba(255,0,204,0.7)" : "rgba(180,200,220,0.6)" }}>

@@ -191,6 +191,22 @@ export async function POST(request) {
         WHERE id = ${leagueId}
       `;
 
+      // Seed standings rows for every active team, ordered alphabetically
+      const activeTeams = await sql`
+        SELECT t.id as team_id
+        FROM teams t
+        INNER JOIN league_slots ls ON t.slot_id = ls.id
+        WHERE ls.league_id = ${leagueId} AND t.status = 'active'
+        ORDER BY t.name ASC
+      `;
+      for (const team of activeTeams) {
+        await sql`
+          INSERT INTO standings (league_id, team_id, played, won, drawn, lost, goals_for, goals_against, goal_difference, points)
+          VALUES (${leagueId}, ${team.team_id}, 0, 0, 0, 0, 0, 0, 0, 0)
+          ON CONFLICT DO NOTHING
+        `;
+      }
+
       return Response.json({ success: true, endDate: endDateStr });
     }
 
