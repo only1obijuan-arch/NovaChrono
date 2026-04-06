@@ -22,6 +22,15 @@ export default function MatchDetailPage({ params }) {
     refetchInterval: 5000,
   });
 
+  const { data: statsData } = useQuery({
+    queryKey: ["league-stats", data?.match?.league_id],
+    queryFn: async () => {
+      const res = await fetch(`/api/stats?leagueId=${data.match.league_id}`);
+      return res.json();
+    },
+    enabled: !!data?.match?.league_id,
+  });
+
   if (isLoading || !data)
     return (
       <div
@@ -62,6 +71,12 @@ export default function MatchDetailPage({ params }) {
 
   const { match, events = [] } = data;
   const isLive = match.status === "live";
+
+  const standings = statsData?.standings || [];
+  const homePos = standings.findIndex((s) => s.slot_id === match.home_slot_id) + 1;
+  const awayPos = standings.findIndex((s) => s.slot_id === match.away_slot_id) + 1;
+  const ordinal = (n) => n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
+  const posLabel = homePos && awayPos ? `${ordinal(homePos)} vs ${ordinal(awayPos)}` : "—";
 
   return (
     <>
@@ -279,7 +294,7 @@ export default function MatchDetailPage({ params }) {
                   </div>
                   <div>
                     <p className="md-info-label">REFEREE</p>
-                    <p className="md-info-value">Official League Ref</p>
+                    <p className="md-info-value">{match.referee_name || "Official League Ref"}</p>
                   </div>
                 </div>
                 <div className="md-info-row">
@@ -287,8 +302,8 @@ export default function MatchDetailPage({ params }) {
                     <Timer size={14} />
                   </div>
                   <div>
-                    <p className="md-info-label">FORMAT</p>
-                    <p className="md-info-value">2 × 20 Min Halves</p>
+                    <p className="md-info-label">LEAGUE POSITION</p>
+                    <p className="md-info-value">{posLabel}</p>
                   </div>
                 </div>
                 <div className="md-info-row">

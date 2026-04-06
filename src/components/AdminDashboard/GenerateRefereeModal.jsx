@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 
-export function GenerateRefereeModal({ fieldInput, setFieldInput, onClose, onSubmit, isSubmitting }) {
+export function GenerateRefereeModal({ nameInput, setNameInput, fieldInput, setFieldInput, onClose, onSubmit, isSubmitting }) {
   return (
     <div className="ad-modal-overlay">
       <div className="ad-modal">
@@ -13,7 +13,17 @@ export function GenerateRefereeModal({ fieldInput, setFieldInput, onClose, onSub
             <X size={18} />
           </button>
         </div>
-        <label className="ad-modal-label">FIELD NUMBER</label>
+        <label className="ad-modal-label">FULL NAME *</label>
+        <input
+          type="text"
+          required
+          className="ad-modal-input"
+          placeholder="e.g. John Smith"
+          value={nameInput}
+          onChange={(e) => setNameInput(e.target.value)}
+          autoFocus
+        />
+        <label className="ad-modal-label">FIELD NUMBER *</label>
         <input
           type="number"
           min="1"
@@ -21,11 +31,10 @@ export function GenerateRefereeModal({ fieldInput, setFieldInput, onClose, onSub
           placeholder="1"
           value={fieldInput}
           onChange={(e) => setFieldInput(e.target.value)}
-          autoFocus
         />
         <div className="ad-modal-btns">
           <button className="ad-modal-cancel" onClick={onClose}>CANCEL</button>
-          <button className="ad-modal-submit" onClick={onSubmit} disabled={!fieldInput || isSubmitting}>
+          <button className="ad-modal-submit" onClick={onSubmit} disabled={!nameInput.trim() || !fieldInput || isSubmitting}>
             {isSubmitting ? "GENERATING..." : "GENERATE →"}
           </button>
         </div>

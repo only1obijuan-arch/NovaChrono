@@ -30,7 +30,10 @@ export async function POST(request) {
 
     if (action === "RECORD_GOAL") {
       const { type, playerId } = data;
-      await sql`INSERT INTO match_events (match_id, type, player_id) VALUES (${matchId}, ${type}, ${playerId})`;
+      const [matchRow] = await sql`SELECT home_slot_id, away_slot_id FROM matches WHERE id = ${matchId}`;
+      const slotId = type === "goal_home" ? matchRow.home_slot_id : matchRow.away_slot_id;
+      const [team] = await sql`SELECT id FROM teams WHERE slot_id = ${slotId} AND status = 'active' LIMIT 1`;
+      await sql`INSERT INTO match_events (match_id, type, player_id, team_id) VALUES (${matchId}, ${type}, ${playerId ?? null}, ${team?.id ?? null})`;
       if (type === "goal_home") {
         await sql`UPDATE matches SET home_score = home_score + 1 WHERE id = ${matchId}`;
       } else {
@@ -57,6 +60,58 @@ export async function POST(request) {
     if (action === "END_MATCH") {
       await sql`UPDATE matches SET status = 'final', end_time = CURRENT_TIMESTAMP WHERE id = ${matchId}`;
       await sql`INSERT INTO match_events (match_id, type) VALUES (${matchId}, 'end_match')`;
+
+      const [matchRow] = await sql`SELECT league_id, home_slot_id, away_slot_id, home_score, away_score FROM matches WHERE id = ${matchId}`;
+      const [homeTeam] = await sql`SELECT id FROM teams WHERE slot_id = ${matchRow.home_slot_id} AND status = 'active' LIMIT 1`;
+      const [awayTeam] = await sql`SELECT id FROM teams WHERE slot_id = ${matchRow.away_slot_id} AND status = 'active' LIMIT 1`;
+
+      const h = matchRow.home_score;
+      const a = matchRow.away_score;
+      const homeWon = h > a ? 1 : 0;
+      const awayWon = a > h ? 1 : 0;
+      const drawn = h === a ? 1 : 0;
+
+      console.log("[END_MATCH] matchRow:", { league_id: matchRow.league_id, home_slot_id: matchRow.home_slot_id, away_slot_id: matchRow.away_slot_id, home_score: h, away_score: a });
+      console.log("[END_MATCH] homeTeam:", homeTeam ?? "NOT FOUND");
+      console.log("[END_MATCH] awayTeam:", awayTeam ?? "NOT FOUND");
+      console.log("[END_MATCH] calc:", { homeWon, awayWon, drawn, homePoints: homeWon * 3 + drawn, awayPoints: awayWon * 3 + drawn });
+
+      if (homeTeam) {
+        await sql`
+          UPDATE standings SET
+            played = played + 1,
+            won = won + ${homeWon},
+            drawn = drawn + ${drawn},
+            lost = lost + ${awayWon},
+            goals_for = goals_for + ${h},
+            goals_against = goals_against + ${a},
+            goal_difference = goal_difference + ${h - a},
+            points = points + ${homeWon * 3 + drawn}
+          WHERE league_id = ${matchRow.league_id} AND team_id = ${homeTeam.id}
+        `;
+        console.log("[END_MATCH] home standings updated for team_id:", homeTeam.id);
+      } else {
+        console.log("[END_MATCH] SKIPPED home standings — no active team found for slot:", matchRow.home_slot_id);
+      }
+
+      if (awayTeam) {
+        await sql`
+          UPDATE standings SET
+            played = played + 1,
+            won = won + ${awayWon},
+            drawn = drawn + ${drawn},
+            lost = lost + ${homeWon},
+            goals_for = goals_for + ${a},
+            goals_against = goals_against + ${h},
+            goal_difference = goal_difference + ${a - h},
+            points = points + ${awayWon * 3 + drawn}
+          WHERE league_id = ${matchRow.league_id} AND team_id = ${awayTeam.id}
+        `;
+        console.log("[END_MATCH] away standings updated for team_id:", awayTeam.id);
+      } else {
+        console.log("[END_MATCH] SKIPPED away standings — no active team found for slot:", matchRow.away_slot_id);
+      }
+
       return Response.json({ success: true });
     }
 
@@ -79,6 +134,15 @@ export async function POST(request) {
       return Response.json({ success: true });
     }
 
+    if (action === "ASSIGN_REFEREE") {
+      if (!ADMIN_ROLES.includes(user.role)) {
+        return Response.json({ error: "Admin access required" }, { status: 403 });
+      }
+      const { refereeId } = data;
+      await sql`UPDATE matches SET referee_id = ${refereeId ?? null} WHERE id = ${matchId}`;
+      return Response.json({ success: true });
+    }
+
     return Response.json({ error: "Invalid action" }, { status: 400 });
   } catch (error) {
     console.error(error);
@@ -98,12 +162,16 @@ export async function GET(request) {
              th.name as home_team_name,
              ta.name as away_team_name,
              th.id as home_team_id,
-             ta.id as away_team_id
+             ta.id as away_team_id,
+             l.match_duration_minutes,
+             ref.name as referee_name
       FROM matches m
       LEFT JOIN league_slots lsh ON m.home_slot_id = lsh.id
       LEFT JOIN teams th ON th.slot_id = lsh.id AND th.status = 'active'
       LEFT JOIN league_slots lsa ON m.away_slot_id = lsa.id
       LEFT JOIN teams ta ON ta.slot_id = lsa.id AND ta.status = 'active'
+      JOIN leagues l ON m.league_id = l.id
+      LEFT JOIN auth_users ref ON ref.id = m.referee_id
       WHERE m.id = ${matchId}
     `;
     const events = await sql`

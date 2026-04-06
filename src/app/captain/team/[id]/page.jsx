@@ -1,12 +1,14 @@
 "use client";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Users, ChevronLeft, Shield, X, Calendar, Trophy } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 
 export default function TeamDashboard({ params }) {
   const { id } = React.use(params);
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [playerForm, setPlayerForm] = useState({ name: "", playerNumber: "" });
@@ -44,6 +46,20 @@ export default function TeamDashboard({ params }) {
       return res.json();
     },
     enabled: !!team?.league_id,
+  });
+
+  const liveMatch = matches.find(
+    (m) => (m.home_slot_id === team?.slot_id || m.away_slot_id === team?.slot_id) && m.status === "live"
+  );
+
+  const { data: liveMatchData } = useQuery({
+    queryKey: ["live-match-events", liveMatch?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/matches?matchId=${liveMatch.id}`);
+      return res.json();
+    },
+    enabled: !!liveMatch?.id,
+    refetchInterval: 5000,
   });
 
   const addPlayerMutation = useMutation({
@@ -140,6 +156,7 @@ export default function TeamDashboard({ params }) {
         @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
         @keyframes card-enter { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes pulse-live { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
         * { box-sizing:border-box; }
         .td-page { min-height:100vh; background:#091833; font-family:'Rajdhani',sans-serif; position:relative; overflow-x:hidden; }
@@ -209,6 +226,16 @@ export default function TeamDashboard({ params }) {
         .td-waiting { background:rgba(255,200,0,0.04); border:1px solid rgba(255,200,0,0.15); border-radius:6px; padding:20px; text-align:center; }
         .td-waiting-title { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,200,0,0.7); letter-spacing:3px; margin-bottom:6px; }
         .td-waiting-sub { font-family:'Rajdhani',sans-serif; font-size:13px; color:rgba(255,200,0,0.4); }
+        .td-live-dot { width:8px; height:8px; border-radius:50%; background:#FF00CC; box-shadow:0 0 8px #FF00CC; animation:pulse-live 1s infinite; flex-shrink:0; }
+        .td-live-score-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; padding:14px 16px; background:rgba(255,0,204,0.06); border:1px solid rgba(255,0,204,0.2); border-radius:6px; }
+        .td-live-team { font-family:'Rajdhani',sans-serif; font-size:14px; font-weight:700; color:#F4F4F9; flex:1; }
+        .td-live-team.away { text-align:right; }
+        .td-live-score { font-family:'Orbitron',monospace; font-size:24px; font-weight:900; color:#FF00CC; white-space:nowrap; }
+        .td-live-feed { display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto; }
+        .td-live-event { display:flex; align-items:center; gap:10px; padding:8px 12px; background:rgba(255,0,204,0.05); border-left:3px solid #FF00CC; border-radius:0 4px 4px 0; }
+        .td-live-event-text { font-family:'Rajdhani',sans-serif; font-size:14px; font-weight:700; color:#F4F4F9; flex:1; }
+        .td-live-event-time { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(180,200,220,0.4); letter-spacing:1px; flex-shrink:0; }
+        .td-live-empty { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.3); letter-spacing:3px; text-align:center; padding:16px 0; }
         .td-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px; }
         .td-modal { background:#0D1B2E; border:1px solid rgba(0,255,156,0.3); border-radius:8px; padding:32px; max-width:420px; width:100%; box-shadow:0 0 60px rgba(0,255,156,0.08); }
         .td-modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
@@ -242,9 +269,9 @@ export default function TeamDashboard({ params }) {
         <div className="td-hero">
           <div className="td-hero-inner">
             <div className="td-hero-topbar">
-              <a href="/account/signin" className="td-back">
-                <ChevronLeft size={14} /> BACK TO LOGIN
-              </a>
+              <button className="td-back" onClick={() => router.push("/captain/team")}>
+                <ChevronLeft size={14} /> BACK
+              </button>
               <NotificationBell accentColor="#00FF9C" />
             </div>
             <div className="td-hero-content">
@@ -270,6 +297,43 @@ export default function TeamDashboard({ params }) {
         <div className="td-main">
           {/* Left column */}
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {liveMatch && (
+              <div className="td-card" style={{ borderColor: "rgba(255,0,204,0.5)" }}>
+                <div className="td-card-header">
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div className="td-live-dot" />
+                    <span className="td-card-title">// LIVE MATCH</span>
+                  </div>
+                </div>
+                <div className="td-card-body">
+                  <div className="td-live-score-row">
+                    <span className="td-live-team">{liveMatch.home_team_name}</span>
+                    <span className="td-live-score">{liveMatch.home_score} — {liveMatch.away_score}</span>
+                    <span className="td-live-team away">{liveMatch.away_team_name}</span>
+                  </div>
+                  <div className="td-live-feed">
+                    {(liveMatchData?.events || []).filter((e) => e.type === "goal_home" || e.type === "goal_away").length === 0 ? (
+                      <p className="td-live-empty">NO GOALS YET</p>
+                    ) : (
+                      (liveMatchData?.events || [])
+                        .filter((e) => e.type === "goal_home" || e.type === "goal_away")
+                        .map((event, i) => (
+                          <div key={i} className="td-live-event">
+                            <span>⚽</span>
+                            <span className="td-live-event-text">
+                              {event.type === "goal_home" ? liveMatch.home_team_name : liveMatch.away_team_name}
+                              {event.player_name ? ` — ${event.player_name}` : ""}
+                            </span>
+                            <span className="td-live-event-time">
+                              {new Date(event.event_timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="td-card">
               <div className="td-card-header">
                 <span className="td-card-title">// TEAM ROSTER</span>

@@ -155,6 +155,19 @@ export default function MatchControl({ params }) {
     return () => clearInterval(timerRef.current);
   }, [isActive, halfStatus]);
 
+  useEffect(() => {
+    console.log("match status sync:", data?.match?.status, halfStatus);
+    if (!data?.match) return;
+    const status = data.match.status;
+    if (status === "live" && halfStatus === "pre") {
+      setHalfStatus("running");
+      setIsActive(true);
+    } else if (status === "final") {
+      setHalfStatus("finished");
+      setIsActive(false);
+    }
+  }, [data?.match?.status]);
+
   const startSecondHalf = () => {
     setSeconds(0);
     setHalf(2);
@@ -475,9 +488,11 @@ export default function MatchControl({ params }) {
         {isFulltime && (
           <div className="mc-fulltime-banner">
             <p className="mc-fulltime-title">⏱ FULL TIME</p>
-            <p className="mc-fulltime-sub">
-              90 MINUTES COMPLETE — END THE MATCH BELOW
-            </p>
+            {match.match_duration_minutes && (
+              <p className="mc-fulltime-sub">
+                {match.match_duration_minutes * 2} MINUTES COMPLETE — END THE MATCH BELOW
+              </p>
+            )}
           </div>
         )}
 

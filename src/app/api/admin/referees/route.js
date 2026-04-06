@@ -46,7 +46,7 @@ export async function POST(request) {
     if (!admin)
       return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { venueId, fieldNumber } = await request.json();
+    const { venueId, fieldNumber, name } = await request.json();
 
     if (!venueId || !fieldNumber) {
       return Response.json(
@@ -61,7 +61,7 @@ export async function POST(request) {
 
     const venueSlug = venue.name.toLowerCase().replace(/[^a-z0-9]/g, "");
     const email = `ref-field${fieldNumber}@${venueSlug}.novachrono.com`;
-    const name = `Referee — Field ${fieldNumber}`;
+    const refName = name?.trim() || `Referee — Field ${fieldNumber}`;
 
     const [existing] = await sql`
       SELECT au.*, aa.password as hashed_password
@@ -97,7 +97,7 @@ export async function POST(request) {
 
     const [newUser] = await sql`
       INSERT INTO auth_users (name, email, role, venue_id, field_number)
-      VALUES (${name}, ${email}, 'referee', ${venueId}, ${fieldNumber})
+      VALUES (${refName}, ${email}, 'referee', ${venueId}, ${fieldNumber})
       RETURNING *
     `;
 
@@ -109,7 +109,7 @@ export async function POST(request) {
     return Response.json({
       referee: {
         id: newUser.id,
-        name,
+        name: refName,
         email,
         fieldNumber,
         password,

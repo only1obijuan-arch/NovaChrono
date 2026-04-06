@@ -20,6 +20,7 @@ export default function AdminDashboard() {
 
   const [showRefModal, setShowRefModal] = useState(false);
   const [showCredentials, setShowCredentials] = useState(null);
+  const [nameInput, setNameInput] = useState("");
   const [fieldInput, setFieldInput] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -70,11 +71,11 @@ export default function AdminDashboard() {
   const referees = refsData?.referees || [];
 
   const createRefMutation = useMutation({
-    mutationFn: async ({ venueId: vId, fieldNumber }) => {
+    mutationFn: async ({ venueId: vId, fieldNumber, name }) => {
       const res = await fetch("/api/admin/referees", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ venueId: vId, fieldNumber: parseInt(fieldNumber) }),
+        body: JSON.stringify({ venueId: vId, fieldNumber: parseInt(fieldNumber), name }),
       });
       if (!res.ok) throw new Error("Failed to create referee");
       return res.json();
@@ -102,8 +103,10 @@ export default function AdminDashboard() {
       const result = await createRefMutation.mutateAsync({
         venueId,
         fieldNumber: fieldInput,
+        name: nameInput.trim(),
       });
       setShowRefModal(false);
+      setNameInput("");
       setFieldInput("");
       setShowCredentials(result.referee);
     } catch (err) {
@@ -172,10 +175,13 @@ export default function AdminDashboard() {
 
       {showRefModal && (
         <GenerateRefereeModal
+          nameInput={nameInput}
+          setNameInput={setNameInput}
           fieldInput={fieldInput}
           setFieldInput={setFieldInput}
           onClose={() => {
             setShowRefModal(false);
+            setNameInput("");
             setFieldInput("");
           }}
           onSubmit={handleCreateReferee}
