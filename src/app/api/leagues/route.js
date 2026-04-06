@@ -98,6 +98,13 @@ export async function POST(request) {
       const { leagueId } = data;
       const [league] = await sql`SELECT * FROM leagues WHERE id = ${leagueId}`;
 
+      const [existingMatch] = await sql`
+        SELECT id FROM matches WHERE league_id = ${leagueId} LIMIT 1
+      `;
+      if (existingMatch) {
+        return Response.json({ error: "Fixtures have already been generated for this league" }, { status: 400 });
+      }
+
       const occupiedSlots = await sql`
         SELECT DISTINCT ls.id, ls.slot_number
         FROM league_slots ls
