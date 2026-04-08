@@ -207,7 +207,7 @@ export default function PublicLeagueView({ params }) {
 
         <div className="plv-hero">
           <div className="plv-hero-inner">
-            <a href="/account/signin" className="plv-back">
+            <a href="/captain/team" className="plv-back">
               <ChevronLeft size={14} /> BACK TO CAPTAIN VIEW
             </a>
             <div className="plv-hero-badges">

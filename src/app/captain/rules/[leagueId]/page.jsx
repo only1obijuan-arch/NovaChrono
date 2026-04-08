@@ -262,8 +262,8 @@ export default function LeagueRules({ params }) {
         <div className="lr-glow" />
         <div className="lr-hero">
           <div className="lr-hero-inner">
-            <a href={`/league/${leagueId}`} className="lr-back">
-              <ChevronLeft size={14} /> BACK TO LEAGUE
+            <a href="/captain/team" className="lr-back">
+              <ChevronLeft size={14} /> BACK TO CAPTAIN VIEW
             </a>
             <p className="lr-eyebrow">// CAPTAIN PORTAL</p>
             <h1 className="lr-title">LEAGUE RULES</h1>
