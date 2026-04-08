@@ -1,12 +1,8 @@
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const lat = searchParams.get("lat");
-    const lon = searchParams.get("lon");
-
-    if (!lat || !lon) {
-      return Response.json({ error: "lat and lon required" }, { status: 400 });
-    }
+    const lat = searchParams.get("lat") || "-26.1076";
+    const lon = searchParams.get("lon") || "28.0567";
 
     const apiKey = process.env.OPENWEATHER_API_KEY;
     const url = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&appid=${apiKey}&exclude=minutely,hourly,daily,alerts`;

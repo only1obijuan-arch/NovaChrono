@@ -46,14 +46,14 @@ export async function POST(request) {
     const session = await requireSuperAdmin();
     if (!session) return Response.json({ error: "Unauthorized" }, { status: 403 });
 
-    const { organizationId, name, location } = await request.json();
+    const { organizationId, name, location, lat, lng } = await request.json();
     if (!organizationId || !name) {
       return Response.json({ error: "Organization ID and venue name are required" }, { status: 400 });
     }
 
     const result = await sql`
-      INSERT INTO venues (organization_id, name, location)
-      VALUES (${organizationId}, ${name}, ${location || null})
+      INSERT INTO venues (organization_id, name, location, lat, lng)
+      VALUES (${organizationId}, ${name}, ${location || null}, ${lat || null}, ${lng || null})
       RETURNING *
     `;
 

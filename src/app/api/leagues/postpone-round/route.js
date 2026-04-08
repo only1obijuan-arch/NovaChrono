@@ -29,7 +29,7 @@ export async function POST(request) {
     const updatedMatches = await sql`
       UPDATE matches
       SET match_date = match_date + INTERVAL '7 days'
-      WHERE league_id = ${league_id} AND round_number = ${round_number}
+      WHERE league_id = ${league_id} AND round_number >= ${round_number}
       RETURNING id, match_date, time_slot, field_number
     `;
 
@@ -55,8 +55,8 @@ export async function POST(request) {
       day: "numeric",
     });
 
-    const notifTitle = `📅 Round ${round_number} Postponed — ${league.name}`;
-    const notifMessage = `Round ${round_number} of ${league.name} has been postponed by 7 days. New date: ${newDate}. Please check the fixtures for updated times.`;
+    const notifTitle = `📅 Round ${round_number}+ Postponed — ${league.name}`;
+    const notifMessage = `Round ${round_number} and all following rounds of ${league.name} have been postponed by 7 days. Please check the fixtures for updated times.`;
 
     let sent = 0;
     const errors = [];
@@ -76,7 +76,7 @@ export async function POST(request) {
         if (captain.email) {
           await sendEmail({
             to: captain.email,
-            subject: `📅 Round ${round_number} Postponed — ${league.name}`,
+            subject: `📅 Round ${round_number}+ Postponed — ${league.name}`,
             html: `
               <!DOCTYPE html>
               <html>
@@ -90,10 +90,10 @@ export async function POST(request) {
                       <div style="height:3px;background:#FF00CC;"></div>
                       <div style="padding:32px;">
                         <p style="margin:0 0 8px;font-size:10px;color:#FF00CC;letter-spacing:4px;font-family:monospace;">// 📅 ROUND POSTPONED</p>
-                        <h1 style="margin:0 0 16px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">ROUND ${round_number} POSTPONED</h1>
+                        <h1 style="margin:0 0 16px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">ROUND ${round_number}+ POSTPONED</h1>
                         <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.6;">
                           Hi ${captain.name || "Captain"},<br><br>
-                          Round ${round_number} of <strong style="color:#F4F4F9;">${league.name}</strong> has been postponed by 7 days due to weather conditions.
+                          Round ${round_number} and all following rounds of <strong style="color:#F4F4F9;">${league.name}</strong> have been postponed by 7 days due to weather conditions.
                         </p>
                         <div style="background:rgba(255,255,255,0.04);border-radius:6px;padding:20px;margin-bottom:24px;">
                           <p style="margin:0 0 6px;font-size:11px;color:rgba(180,200,220,0.5);font-family:monospace;">NEW DATE</p>
@@ -110,7 +110,7 @@ export async function POST(request) {
                 </body>
               </html>
             `,
-            text: `Round ${round_number} Postponed — ${league.name}\n\nNew date: ${newDate}. ${updatedMatches.length} match(es) rescheduled. Check fixtures for updated times.`,
+            text: `Round ${round_number}+ Postponed — ${league.name}\n\nRound ${round_number} and all following rounds have been postponed by 7 days. ${updatedMatches.length} match(es) rescheduled. Check fixtures for updated times.`,
           });
         }
 
