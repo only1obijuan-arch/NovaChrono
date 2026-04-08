@@ -374,15 +374,72 @@ export default function PublicLeagueView({ params }) {
           )}
 
           {activeTab === "feed" && (
-            <div className="plv-feed-card">
-              <History size={40} className="plv-feed-icon" />
-              <h3 className="plv-feed-title">// LIVE MATCH FEED</h3>
-              <p className="plv-feed-sub">EVENTS APPEAR HERE DURING LIVE MATCHES</p>
+            <div>
+              {matches.filter(m => m.status === "live").length === 0 ? (
+                <div className="plv-feed-card">
+                  <History size={40} className="plv-feed-icon" />
+                  <h3 className="plv-feed-title">// LIVE MATCH FEED</h3>
+                  <p className="plv-feed-sub">NO LIVE MATCHES RIGHT NOW</p>
+                </div>
+              ) : (
+                matches.filter(m => m.status === "live").map(match => (
+                  <LiveMatchFeed key={match.id} match={match} />
+                ))
+              )}
             </div>
           )}
         </div>
       </div>
     </>
+  );
+}
+
+function LiveMatchFeed({ match }) {
+  const { data } = useQuery({
+    queryKey: ["live-events", match.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/matches?matchId=${match.id}`);
+      return res.json();
+    },
+    refetchInterval: 5000,
+  });
+
+  const goals = (data?.events || []).filter(e =>
+    e.type === "goal_home" || e.type === "goal_away"
+  );
+
+  return (
+    <div className="plv-table-wrap" style={{ maxWidth: 600, marginBottom: 20 }}>
+      <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(0,245,212,0.1)", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#FF00CC", boxShadow: "0 0 8px #FF00CC", animation: "pulse-live 1s infinite" }} />
+        <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 13, color: "#F4F4F9", letterSpacing: 2 }}>
+          {match.home_team_name} vs {match.away_team_name}
+        </span>
+        <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 20, fontWeight: 900, color: "#FF00CC", marginLeft: "auto" }}>
+          {match.home_score} — {match.away_score}
+        </span>
+      </div>
+      <div style={{ padding: "12px 24px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {goals.length === 0 ? (
+          <p style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.2)", letterSpacing: 3, textAlign: "center", padding: "20px 0" }}>
+            NO GOALS YET
+          </p>
+        ) : (
+          goals.map((e, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(255,0,204,0.05)", borderLeft: "3px solid #FF00CC", borderRadius: "0 4px 4px 0" }}>
+              <span>⚽</span>
+              <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 15, fontWeight: 700, color: "#F4F4F9", flex: 1 }}>
+                {e.type === "goal_home" ? match.home_team_name : match.away_team_name}
+                {e.player_name ? ` — ${e.player_name}` : ""}
+              </span>
+              <span style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "rgba(180,200,220,0.4)", letterSpacing: 1 }}>
+                {new Date(e.event_timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
