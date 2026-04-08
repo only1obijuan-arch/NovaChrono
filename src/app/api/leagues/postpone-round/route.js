@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
+import { rateLimit } from "@/app/api/utils/rate-limit";
 
 export async function POST(request) {
   try {
@@ -10,6 +11,11 @@ export async function POST(request) {
     }
     if (session.user.role !== "venue_admin" && session.user.role !== "super_admin") {
       return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { allowed } = await rateLimit(`alert:${session.user.id}`, { max: 10, windowMinutes: 60 });
+    if (!allowed) {
+      return Response.json({ error: "Too many alerts sent. Try again later." }, { status: 429 });
     }
 
     const { league_id, round_number } = await request.json();
