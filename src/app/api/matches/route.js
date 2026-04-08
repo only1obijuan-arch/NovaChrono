@@ -1,5 +1,6 @@
 import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
+import { rateLimit } from "@/app/api/utils/rate-limit";
 
 async function getSession() {
   const session = await auth();
@@ -151,6 +152,12 @@ export async function POST(request) {
 }
 
 export async function GET(request) {
+  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const { allowed } = await rateLimit(`public:${ip}`, { max: 60, windowMinutes: 1 });
+  if (!allowed) {
+    return Response.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   const { searchParams } = new URL(request.url);
   const matchId = searchParams.get("matchId");
   const leagueId = searchParams.get("leagueId");
