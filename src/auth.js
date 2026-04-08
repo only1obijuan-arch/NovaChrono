@@ -167,7 +167,6 @@ function Adapter(client) {
 
 const nextAuth = NextAuth({
   trustHost: true,
-  adapter: Adapter(pool),
   providers: [
     Credentials({
       id: "credentials",
