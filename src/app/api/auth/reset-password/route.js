@@ -1,5 +1,6 @@
 import sql from "@/app/api/utils/sql";
 import { hash } from "argon2";
+import { rateLimit } from "@/app/api/utils/rate-limit";
 
 export async function GET(request) {
   try {
@@ -49,6 +50,12 @@ export async function POST(request) {
         { error: "Password must be at least 8 characters long" },
         { status: 400 },
       );
+    }
+
+    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const { allowed } = await rateLimit(`reset-attempt:${ip}`, { max: 10, windowMinutes: 15 });
+    if (!allowed) {
+      return Response.json({ error: "Too many attempts. Try again later." }, { status: 429 });
     }
 
     const tokens = await sql`
