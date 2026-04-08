@@ -6,7 +6,7 @@ export async function sendEmail({ to, from, subject, html, text }) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: from || "onboarding@resend.dev",
+      from: from || process.env.RESEND_FROM_EMAIL || "noreply@novachrono.app",
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
