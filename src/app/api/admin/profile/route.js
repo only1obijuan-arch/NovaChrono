@@ -41,7 +41,7 @@ export async function GET() {
     const rows = await sql`
       SELECT
         au.id, au.email, au.name, au.role, au.venue_id, au.organization_id,
-        v.name as venue_name
+        v.name as venue_name, v.lat as venue_lat, v.lng as venue_lng
       FROM auth_users au
       LEFT JOIN venues v ON au.venue_id = v.id
       WHERE au.id = ${userId}

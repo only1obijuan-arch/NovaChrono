@@ -76,15 +76,18 @@ export default function AdminDashboard() {
 
   const referees = refsData?.referees || [];
 
+  const venueLat = adminProfile?.user?.venue_lat ?? "-26.1076";
+  const venueLon = adminProfile?.user?.venue_lng ?? "28.0567";
+
   const { data: weather, isLoading: weatherLoading } = useQuery({
-    queryKey: ["weather"],
+    queryKey: ["weather", venueLat, venueLon],
     queryFn: async () => {
-      const res = await fetch("/api/weather?lat=-26.1076&lon=28.0567");
+      const res = await fetch(`/api/weather?lat=${venueLat}&lon=${venueLon}`);
       if (!res.ok) throw new Error("Failed to fetch weather");
       return res.json();
     },
-    refetchInterval: 10 * 60 * 1000, // refresh every 10 minutes
-    enabled: !!session,
+    refetchInterval: 10 * 60 * 1000,
+    enabled: !!adminProfile,
   });
 
   const createRefMutation = useMutation({
