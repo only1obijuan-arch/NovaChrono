@@ -3,7 +3,7 @@ import { hash } from "argon2";
 
 export async function POST(request) {
   try {
-    const { email, password, name, role: roleParam } = await request.json();
+    const { email, password, name } = await request.json();
 
     if (!email || !password || !name) {
       return Response.json(
@@ -12,8 +12,7 @@ export async function POST(request) {
       );
     }
 
-    const validRoles = ["captain", "referee", "venue_admin", "org_admin"];
-    const role = roleParam && validRoles.includes(roleParam) ? roleParam : "captain";
+    const role = "captain"; // public signup always creates captain accounts only
     if (password.length < 8) {
       return Response.json(
         { error: "Password must be at least 8 characters" },

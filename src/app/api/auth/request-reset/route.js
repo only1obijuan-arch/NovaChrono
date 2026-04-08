@@ -1,5 +1,6 @@
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
+import { rateLimit } from "@/app/api/utils/rate-limit";
 import crypto from "crypto";
 
 export async function POST(request) {
@@ -8,6 +9,11 @@ export async function POST(request) {
 
     if (!email) {
       return Response.json({ error: "Email is required" }, { status: 400 });
+    }
+
+    const { allowed } = await rateLimit(`reset:${email}`, { max: 3, windowMinutes: 15 });
+    if (!allowed) {
+      return Response.json({ error: "Too many requests. Try again later." }, { status: 429 });
     }
 
     // Find user by email
