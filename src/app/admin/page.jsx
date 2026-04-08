@@ -247,6 +247,11 @@ export default function AdminDashboard() {
           <div className="wx-section">
             <div className="ad-section-title">
               WEATHER CONDITIONS
+              {adminProfile?.user?.venue_name && (
+                <span style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: 11, color: "rgba(0,245,212,0.5)", letterSpacing: 2, fontWeight: 400, marginLeft: 12 }}>
+                  // {adminProfile.user.venue_name.toUpperCase()}
+                </span>
+              )}
               <div className="ad-section-line" />
             </div>
 
