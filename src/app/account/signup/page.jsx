@@ -1,15 +1,16 @@
 "use client";
 import { useState } from "react";
-import { signIn } from "next-auth/react";
 
 export default function SignUp() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [teamName, setTeamName] = useState("");
 
   const strengthCheck = (p) => {
     if (!p) return null;
@@ -25,8 +26,12 @@ export default function SignUp() {
     e.preventDefault();
     setError(null);
 
-    if (!name.trim() || !email || !password) {
+    if (!joinCode.trim() || !name.trim() || !email || !password || !teamName.trim()) {
       setError("Please fill in all fields");
+      return;
+    }
+    if (joinCode.trim().length !== 6) {
+      setError("League code must be 6 characters");
       return;
     }
     if (password !== confirm) {
@@ -40,33 +45,28 @@ export default function SignUp() {
 
     setLoading(true);
     try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        name,
-        isSignup: "true",
-        redirect: false,
+      const res = await fetch("/api/account/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ joinCode: joinCode.trim(), name, email, password, teamName }),
       });
+      const data = await res.json();
 
-      if (result?.ok && !result?.error) {
-        setDone(true);
+      if (!res.ok) {
+        setError(data.error || "Failed to create account. Please try again.");
+        setLoading(false);
         return;
       }
 
-      if (result?.error === "CredentialsSignin") {
-        setError("An account with this email already exists.");
-      } else {
-        setError("Failed to create account. Please try again.");
-      }
-      setLoading(false);
+      setDone(true);
     } catch (err) {
       setError("Something went wrong. Please try again.");
       setLoading(false);
     }
   };
 
-  const canSubmit = !loading && name.trim() && email && strength &&
-    strength.label !== "TOO SHORT" && passwordsMatch;
+  const canSubmit = !loading && joinCode.trim().length === 6 && name.trim() && email &&
+    strength && strength.label !== "TOO SHORT" && passwordsMatch && teamName.trim();
 
   if (done) {
     return (
@@ -91,10 +91,10 @@ export default function SignUp() {
               fontSize: 36,
             }}>✓</div>
             <h1 style={{ fontFamily: "'Orbitron',monospace", fontSize: 22, fontWeight: 900, color: "#F4F4F9", letterSpacing: 2, marginBottom: 12 }}>
-              ACCOUNT CREATED
+              WELCOME TO THE LEAGUE
             </h1>
             <p style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 11, color: "rgba(0,245,212,0.5)", letterSpacing: 2, marginBottom: 32, lineHeight: 1.8 }}>
-              YOUR ACCOUNT IS READY.<br />SIGN IN TO ACCESS YOUR PORTAL.
+              YOUR TEAM IS REGISTERED.<br />CHECK YOUR EMAIL, THEN SIGN IN.
             </p>
             <a href="/account/signin" style={{
               display: "inline-block",
@@ -141,6 +141,7 @@ export default function SignUp() {
         .su-input { height:48px; padding:0 16px; background:rgba(0,245,212,0.04); border:1px solid rgba(0,245,212,0.15); border-radius:4px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; transition:all 0.2s; }
         .su-input:focus { border-color:#00F5D4; box-shadow:0 0 15px rgba(0,245,212,0.15); background:rgba(0,245,212,0.06); }
         .su-input::placeholder { color:rgba(180,200,220,0.2); }
+        .su-input-code { text-transform:uppercase; letter-spacing:6px; font-family:'Share Tech Mono',monospace; font-size:18px; font-weight:700; text-align:center; }
         .su-strength-track { height:3px; background:rgba(255,255,255,0.05); border-radius:2px; overflow:hidden; margin-top:8px; }
         .su-strength-fill { height:100%; border-radius:2px; transition:all 0.3s; }
         .su-strength-label { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:3px; margin-top:4px; }
@@ -169,15 +170,30 @@ export default function SignUp() {
 
           <div className="su-card">
             <div className="su-card-header">
-              <h2 className="su-card-title">CREATE ACCOUNT</h2>
-              <p className="su-card-sub">REGISTER AS SUPER ADMIN</p>
+              <h2 className="su-card-title">JOIN A LEAGUE</h2>
+              <p className="su-card-sub">// CAPTAIN REGISTRATION</p>
             </div>
 
             <form onSubmit={onSubmit} className="su-form">
               <div className="su-field">
+                <label className="su-label">LEAGUE CODE</label>
+                <input
+                  required
+                  type="text"
+                  className="su-input su-input-code"
+                  placeholder="XXXXXX"
+                  maxLength={6}
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+                  autoComplete="off"
+                  autoFocus
+                />
+              </div>
+
+              <div className="su-field">
                 <label className="su-label">FULL NAME</label>
                 <input required type="text" className="su-input" placeholder="e.g. John Smith"
-                  value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" autoFocus />
+                  value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
               </div>
 
               <div className="su-field">
@@ -211,21 +227,17 @@ export default function SignUp() {
                 )}
               </div>
 
+              <div className="su-field">
+                <label className="su-label">TEAM NAME</label>
+                <input required type="text" className="su-input" placeholder="e.g. Thunder FC"
+                  value={teamName} onChange={(e) => setTeamName(e.target.value)} autoComplete="organization" />
+              </div>
+
               {error && <div className="su-error">// {error.toUpperCase()}</div>}
 
               <button type="submit" className="su-submit" disabled={!canSubmit}>
-                {loading ? <><div className="su-spinner" /> CREATING ACCOUNT...</> : "CREATE ACCOUNT →"}
+                {loading ? <><div className="su-spinner" /> REGISTERING...</> : "JOIN LEAGUE →"}
               </button>
-
-              <div style={{ textAlign: "center" }}>
-                <a href="/account/signin"
-                  style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.5)", letterSpacing: 2, textDecoration: "none" }}
-                  onMouseEnter={(e) => (e.target.style.color = "rgba(0,245,212,0.8)")}
-                  onMouseLeave={(e) => (e.target.style.color = "rgba(0,245,212,0.5)")}
-                >
-                  ALREADY HAVE AN ACCOUNT? SIGN IN →
-                </a>
-              </div>
             </form>
           </div>
           <p className="su-footer">© 2025 NOVACHRONO. ALL RIGHTS RESERVED.</p>

@@ -231,13 +231,9 @@ export default function SignIn() {
                   FORGOT PASSWORD?
                 </a>
                 <div style={{ height: "1px", background: "rgba(0,245,212,0.1)", margin: "4px 0" }} />
-                <a href="/account/signup"
-                  style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.5)", letterSpacing: 2, textDecoration: "none" }}
-                  onMouseEnter={(e) => (e.target.style.color = "rgba(0,245,212,0.8)")}
-                  onMouseLeave={(e) => (e.target.style.color = "rgba(0,245,212,0.5)")}
-                >
-                  CREATE ACCOUNT →
-                </a>
+                <p style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.3)", letterSpacing: 2, lineHeight: 1.6 }}>
+                  // CAPTAIN? GET YOUR LEAGUE CODE FROM YOUR VENUE ADMIN
+                </p>
               </div>
             </form>
           </div>
