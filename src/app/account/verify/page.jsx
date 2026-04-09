@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
 const ERROR_MESSAGES = {
@@ -9,7 +9,7 @@ const ERROR_MESSAGES = {
   server_error: "Something went wrong. Please try again or contact support.",
 };
 
-export default function VerifyPage() {
+function VerifyPageContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
   const error = searchParams.get("error");
@@ -77,5 +77,13 @@ export default function VerifyPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function VerifyPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyPageContent />
+    </Suspense>
   );
 }
