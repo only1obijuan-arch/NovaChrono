@@ -1,6 +1,7 @@
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { hash } from "argon2";
+import { createHash } from "crypto";
 
 export async function POST(request) {
   try {
@@ -20,11 +21,12 @@ export async function POST(request) {
     }
 
     // Validate token
+    const tokenHash = createHash("sha256").update(token).digest("hex");
     const [invite] = await sql`
       SELECT it.*, o.name as organization_name
       FROM invite_tokens it
       LEFT JOIN organizations o ON o.id = it.organization_id
-      WHERE it.token = ${token}
+      WHERE it.token = ${tokenHash}
       AND it.used = FALSE
       AND it.expires_at > NOW()
     `;
@@ -74,7 +76,7 @@ export async function POST(request) {
     `;
 
     // Mark token as used
-    await sql`UPDATE invite_tokens SET used = TRUE WHERE token = ${token}`;
+    await sql`UPDATE invite_tokens SET used = TRUE WHERE token = ${tokenHash}`;
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 

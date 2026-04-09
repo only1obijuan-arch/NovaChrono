@@ -35,11 +35,12 @@ export async function POST(request) {
     const user = users[0];
 
     const token = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     await sql`
       INSERT INTO password_reset_tokens (user_id, token, expires_at)
-      VALUES (${user.id}, ${token}, ${expiresAt})
+      VALUES (${user.id}, ${tokenHash}, ${expiresAt})
     `;
 
     const resetUrl = `${

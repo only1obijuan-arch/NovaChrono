@@ -10,10 +10,27 @@ const roleRoutes = {
   "/captain": ["captain", "super_admin"],
 };
 
+// API routes that do not require a session
+const publicApiPrefixes = [
+  "/api/auth",
+  "/api/stats",
+  "/api/matches",
+];
+
 export default auth((req) => {
   const { pathname } = req.nextUrl;
   const session = req.auth;
 
+  // Protect non-public API routes
+  if (pathname.startsWith("/api/")) {
+    const isPublic = publicApiPrefixes.some((prefix) => pathname.startsWith(prefix));
+    if (!isPublic && !session?.user) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return NextResponse.next();
+  }
+
+  // Protect role-gated page routes
   const matchedPrefix = Object.keys(roleRoutes).find((prefix) =>
     pathname.startsWith(prefix)
   );
@@ -39,5 +56,6 @@ export const config = {
     "/org-admin/:path*",
     "/referee/:path*",
     "/captain/:path*",
+    "/api/:path*",
   ],
 };

@@ -218,6 +218,10 @@ const nextAuth = NextAuth({
         const isValid = await verify(matchingAccount.password, password);
         if (!isValid) return null;
 
+        if (!user.emailVerified) {
+          throw new Error("Please verify your email before signing in.");
+        }
+
         return user;
       },
     }),

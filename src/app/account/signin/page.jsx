@@ -1,16 +1,24 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 
 export default function SignIn() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [error, setError] = useState(null);
+  const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [attemptsLeft, setAttemptsLeft] = useState(null);
   const [lockedUntil, setLockedUntil] = useState(null);
+
+  useEffect(() => {
+    if (searchParams.get("verified") === "true") {
+      setToast("Email verified! You can now sign in.");
+    }
+  }, []);
 
   // Check rate limit when email is entered
   useEffect(() => {
@@ -79,6 +87,13 @@ export default function SignIn() {
         return;
       }
 
+      // Check for unverified email error
+      if (result?.error?.toLowerCase().includes("verify")) {
+        setError("Please verify your email before signing in. Check your inbox for the verification link.");
+        setLoading(false);
+        return;
+      }
+
       // Failed — record attempt
       const failRes = await fetch("/api/auth/rate-limit", {
         method: "POST",
@@ -139,6 +154,7 @@ export default function SignIn() {
         .si-submit:disabled { opacity:0.4; cursor:not-allowed; }
         .si-spinner { width:18px; height:18px; border:2px solid rgba(0,245,212,0.3); border-top-color:#00F5D4; border-radius:50%; animation:spin 0.8s linear infinite; }
         .si-footer { text-align:center; margin-top:24px; font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(180,200,220,0.15); letter-spacing:3px; }
+        .si-toast { background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.35); border-radius:4px; padding:12px 16px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.9); letter-spacing:2px; margin-bottom:16px; }
       `}</style>
 
       <div className="si-page">
@@ -157,6 +173,10 @@ export default function SignIn() {
             </div>
             <p className="si-tagline">// TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
           </div>
+
+          {toast && (
+            <div className="si-toast">✓ {toast.toUpperCase()}</div>
+          )}
 
           <div className="si-card">
             <div className="si-card-header">

@@ -1,6 +1,7 @@
 import sql from "@/app/api/utils/sql";
 import { hash } from "argon2";
 import { rateLimit } from "@/app/api/utils/rate-limit";
+import crypto from "crypto";
 
 export async function GET(request) {
   try {
@@ -11,10 +12,11 @@ export async function GET(request) {
       return Response.json({ valid: false }, { status: 400 });
     }
 
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const tokens = await sql`
       SELECT id, user_id, expires_at, used
       FROM password_reset_tokens
-      WHERE token = ${token}
+      WHERE token = ${tokenHash}
     `;
 
     if (tokens.length === 0) {
@@ -58,10 +60,11 @@ export async function POST(request) {
       return Response.json({ error: "Too many attempts. Try again later." }, { status: 429 });
     }
 
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const tokens = await sql`
       SELECT id, user_id, expires_at, used
       FROM password_reset_tokens
-      WHERE token = ${token}
+      WHERE token = ${tokenHash}
     `;
 
     if (tokens.length === 0) {

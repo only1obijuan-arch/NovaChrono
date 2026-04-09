@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
-import { randomBytes } from "crypto";
+import { randomBytes, createHash } from "crypto";
 
 // Send an invite to become org_admin for an organization.
 // Called by the super-admin portal.
@@ -44,11 +44,12 @@ export async function POST(request) {
     const org = orgs[0];
 
     const token = randomBytes(32).toString("hex");
+    const tokenHash = createHash("sha256").update(token).digest("hex");
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await sql`
       INSERT INTO invite_tokens (token, email, role, organization_id, invited_by, expires_at)
-      VALUES (${token}, ${email.toLowerCase()}, ${role}, ${organizationId}, ${user.id}, ${expiresAt})
+      VALUES (${tokenHash}, ${email.toLowerCase()}, ${role}, ${organizationId}, ${user.id}, ${expiresAt})
     `;
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -126,11 +127,12 @@ export async function GET(request) {
     const token = searchParams.get("token");
     if (!token) return Response.json({ error: "Token required" }, { status: 400 });
 
+    const tokenHash = createHash("sha256").update(token).digest("hex");
     const invites = await sql`
       SELECT it.*, o.name AS organization_name
       FROM invite_tokens it
       LEFT JOIN organizations o ON o.id = it.organization_id
-      WHERE it.token = ${token}
+      WHERE it.token = ${tokenHash}
       AND it.used = FALSE
       AND it.expires_at > NOW()
     `;

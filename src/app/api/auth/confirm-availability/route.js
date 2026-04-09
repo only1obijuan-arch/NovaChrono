@@ -80,7 +80,8 @@ export async function GET(request) {
       UPDATE availability_responses
       SET
         response = ${response},
-        responded_at = NOW()
+        responded_at = NOW(),
+        token = NULL
       WHERE token = ${token}
     `;
 
