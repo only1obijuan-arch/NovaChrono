@@ -26,6 +26,6 @@ export async function POST(request) {
     return Response.json(team);
   } catch (error) {
     console.error(error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

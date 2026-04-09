@@ -11,6 +11,12 @@ export async function GET(request) {
     const lat = searchParams.get("lat") || "-26.1076";
     const lon = searchParams.get("lon") || "28.0567";
 
+    const latNum = parseFloat(lat);
+    const lonNum = parseFloat(lon);
+    if (isNaN(latNum) || isNaN(lonNum) || latNum < -90 || latNum > 90 || lonNum < -180 || lonNum > 180) {
+      return Response.json({ error: "Invalid coordinates" }, { status: 400 });
+    }
+
     const apiKey = process.env.OPENWEATHER_API_KEY;
     const url = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&appid=${apiKey}&exclude=minutely,hourly,daily,alerts`;
 
@@ -38,6 +44,6 @@ export async function GET(request) {
     });
   } catch (error) {
     console.error("Weather API error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

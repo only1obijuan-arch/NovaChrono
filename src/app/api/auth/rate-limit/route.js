@@ -85,8 +85,8 @@ export async function POST(request) {
       return Response.json({ allowed: true, attemptsLeft: MAX_ATTEMPTS - 1 });
     }
   } catch (error) {
-    // Fail open — don't block login if rate limit check fails
-    return Response.json({ allowed: true });
+    console.error("Rate limit POST error:", error);
+    return Response.json({ error: "Service unavailable" }, { status: 503 });
   }
 }
 

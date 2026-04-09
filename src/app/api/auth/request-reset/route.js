@@ -112,10 +112,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("Error requesting password reset:", error);
     return Response.json(
-      {
-        error: "Failed to process password reset request",
-        details: error.message,
-      },
+      { error: "An unexpected error occurred." },
       { status: 500 },
     );
   }

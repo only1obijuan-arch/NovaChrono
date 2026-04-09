@@ -11,7 +11,7 @@ export async function POST(request) {
     const authHeader = request.headers.get("authorization");
     const cronSecret = process.env.CRON_SECRET;
 
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -26,7 +26,7 @@ export async function POST(request) {
     return await handleMorningReminders(appUrl);
   } catch (error) {
     console.error("Cron job error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }
 

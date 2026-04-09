@@ -116,6 +116,6 @@ export async function POST(request) {
     return Response.json({ success: true, sent, total: captains.length, errors });
   } catch (error) {
     console.error("Weather alert error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

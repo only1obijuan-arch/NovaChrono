@@ -37,7 +37,7 @@ export async function GET(request) {
     });
   } catch (error) {
     console.error("GET notifications error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }
 
@@ -77,6 +77,6 @@ export async function PATCH(request) {
     );
   } catch (error) {
     console.error("PATCH notifications error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

@@ -224,15 +224,17 @@ const nextAuth = NextAuth({
       ],
   callbacks: {
     async jwt({ token, user }) {
-      const result = await pool.query(
-        "SELECT role, venue_id, organization_id FROM auth_users WHERE id = $1",
-        [token.sub || user?.id]
-      );
-      if (result.rows[0]) {
-        token.id = token.sub || user?.id;
-        token.role = result.rows[0].role;
-        token.venue_id = result.rows[0].venue_id;
-        token.organization_id = result.rows[0].organization_id;
+      if (user) {
+        const result = await pool.query(
+          "SELECT role, venue_id, organization_id FROM auth_users WHERE id = $1",
+          [user.id]
+        );
+        if (result.rows[0]) {
+          token.id = user.id;
+          token.role = result.rows[0].role;
+          token.venue_id = result.rows[0].venue_id;
+          token.organization_id = result.rows[0].organization_id;
+        }
       }
       return token;
     },

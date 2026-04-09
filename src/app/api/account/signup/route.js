@@ -1,9 +1,15 @@
 import sql from "@/app/api/utils/sql";
 import { hash } from "argon2";
-import { headers } from "next/headers";
+import { rateLimit } from "@/app/api/utils/rate-limit";
 
 export async function POST(request) {
   try {
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+    const { allowed } = await rateLimit(`signup:${ip}`, { max: 5, windowMinutes: 60 });
+    if (!allowed) {
+      return Response.json({ error: "Too many signup attempts. Try again later." }, { status: 429 });
+    }
+
     const { joinCode, name, email, password, teamName } = await request.json();
 
     if (!joinCode || !name || !email || !password || !teamName) {
@@ -63,10 +69,8 @@ export async function POST(request) {
 
     // Send welcome email (fire-and-forget, don't block on failure)
     try {
-      const headersList = await headers();
-      const host = headersList.get("host");
-      const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${protocol}://${host}`;
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+      if (!baseUrl) throw new Error("NEXT_PUBLIC_APP_URL not configured");
 
       await fetch(`${baseUrl}/api/auth/captain-welcome`, {
         method: "POST",
@@ -80,6 +84,7 @@ export async function POST(request) {
     return Response.json({ success: true, leagueId: league.id });
   } catch (err) {
     console.error("Signup error:", err);
-    return Response.json({ error: err.message }, { status: 500 });
+    console.error("Signup error:", err);
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

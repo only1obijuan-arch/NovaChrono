@@ -79,6 +79,6 @@ export async function POST(request) {
     return Response.json({ success: true });
   } catch (error) {
     console.error("Welcome email error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

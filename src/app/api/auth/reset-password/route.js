@@ -109,7 +109,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("Error resetting password:", error);
     return Response.json(
-      { error: "Failed to reset password", details: error.message },
+      { error: "An unexpected error occurred." },
       { status: 500 },
     );
   }

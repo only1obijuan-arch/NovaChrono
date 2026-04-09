@@ -27,9 +27,9 @@ export async function POST(request) {
       );
     }
 
-    const [league] = await sql`SELECT * FROM leagues WHERE id = ${league_id}`;
+    const [league] = await sql`SELECT * FROM leagues WHERE id = ${league_id} AND venue_id = ${session.user.venue_id}`;
     if (!league) {
-      return Response.json({ error: "League not found" }, { status: 404 });
+      return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const updatedMatches = await sql`
@@ -136,6 +136,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("Postpone round error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

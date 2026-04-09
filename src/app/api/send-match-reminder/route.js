@@ -231,7 +231,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("Error sending match reminder:", error);
     return Response.json(
-      { error: "Failed to send match reminder", details: error.message },
+      { error: "An unexpected error occurred." },
       { status: 500 },
     );
   }

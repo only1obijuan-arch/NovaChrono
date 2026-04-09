@@ -51,6 +51,7 @@ export async function POST(request) {
     `;
     return Response.json(player);
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    console.error(error);
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }
