@@ -1,9 +1,11 @@
 import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
+import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 
-export async function GET() {
+export async function GET(request) {
   try {
-    const session = await auth();
+    const mobileUser = await verifyMobileToken(request);
+    const session = mobileUser ? { user: mobileUser } : await auth();
 
     if (!session?.user?.id) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });

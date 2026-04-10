@@ -1,7 +1,10 @@
 import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
+import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 
-async function getSession() {
+async function getSession(request) {
+  const mobileUser = await verifyMobileToken(request);
+  if (mobileUser) return mobileUser;
   const session = await auth();
   return session?.user ?? null;
 }
@@ -18,7 +21,7 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const user = await getSession();
+    const user = await getSession(request);
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const { teamId, name, playerNumber } = await request.json();

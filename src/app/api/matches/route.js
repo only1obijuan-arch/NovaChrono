@@ -1,8 +1,11 @@
 import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
 import { rateLimit } from "@/app/api/utils/rate-limit";
+import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 
-async function getSession() {
+async function getSession(request) {
+  const mobileUser = await verifyMobileToken(request);
+  if (mobileUser) return mobileUser;
   const session = await auth();
   return session?.user ?? null;
 }
@@ -12,7 +15,7 @@ const ADMIN_ROLES = ["venue_admin", "super_admin"];
 
 export async function POST(request) {
   try {
-    const user = await getSession();
+    const user = await getSession(request);
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
     if (!WRITE_ROLES.includes(user.role)) {
       return Response.json(
