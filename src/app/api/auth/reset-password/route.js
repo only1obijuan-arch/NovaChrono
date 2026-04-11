@@ -92,12 +92,15 @@ export async function POST(request) {
 
     const hashedPassword = await hash(password);
 
-  await sql`
-  INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)
-  VALUES (${resetToken.user_id}, 'credentials', 'credentials', ${resetToken.user_id}, ${hashedPassword})
-  ON CONFLICT ("userId", provider) DO UPDATE SET password = ${hashedPassword}
-` ;
-
+    await sql`
+      DELETE FROM auth_accounts
+      WHERE "userId" = ${resetToken.user_id}
+      AND provider = 'credentials'
+    `;
+    await sql`
+      INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)
+      VALUES (${resetToken.user_id}, 'credentials', 'credentials', ${resetToken.user_id}, ${hashedPassword})
+    `;
     await sql`
       UPDATE password_reset_tokens
       SET used = TRUE
