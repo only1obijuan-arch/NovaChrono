@@ -1,11 +1,18 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 
-export default function SignUp() {
+function SignUpContent() {
+  const searchParams = useSearchParams();
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [joinCode, setJoinCode] = useState("");
+
+  useEffect(() => {
+    const code = searchParams.get("code");
+    if (code) setJoinCode(code.toUpperCase());
+  }, []);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -244,5 +251,13 @@ export default function SignUp() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function SignUp() {
+  return (
+    <Suspense fallback={null}>
+      <SignUpContent />
+    </Suspense>
   );
 }
