@@ -60,7 +60,11 @@ function SignUpContent() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Failed to create account. Please try again.");
+        if (data.error?.toLowerCase().includes("email already exists") || data.error?.toLowerCase().includes("already exists")) {
+          setError("__EMAIL_EXISTS__");
+        } else {
+          setError(data.error || "Failed to create account. Please try again.");
+        }
         setLoading(false);
         return;
       }
@@ -154,6 +158,8 @@ function SignUpContent() {
         .su-strength-label { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:3px; margin-top:4px; }
         .su-match { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:2px; margin-top:6px; }
         .su-error { background:rgba(255,50,50,0.08); border:1px solid rgba(255,50,50,0.3); border-radius:4px; padding:12px 16px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,100,100,0.9); letter-spacing:2px; }
+        .su-exists { background:rgba(0,245,212,0.06); border:1px solid rgba(0,245,212,0.3); border-radius:4px; padding:14px 16px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,245,212,0.9); letter-spacing:2px; line-height:1.8; }
+        .su-exists a { color:#00F5D4; text-decoration:underline; }
         .su-submit { height:52px; background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.08)); border:1px solid rgba(0,245,212,0.4); border-radius:4px; color:#00F5D4; font-family:'Orbitron',monospace; font-size:13px; font-weight:700; letter-spacing:3px; cursor:pointer; transition:all 0.2s; display:flex; align-items:center; justify-content:center; gap:10px; width:100%; }
         .su-submit:hover:not(:disabled) { background:linear-gradient(135deg,rgba(0,245,212,0.25),rgba(0,245,212,0.12)); border-color:#00F5D4; box-shadow:0 0 25px rgba(0,245,212,0.2); transform:translateY(-1px); }
         .su-submit:disabled { opacity:0.4; cursor:not-allowed; }
@@ -240,7 +246,16 @@ function SignUpContent() {
                   value={teamName} onChange={(e) => setTeamName(e.target.value)} autoComplete="organization" />
               </div>
 
-              {error && <div className="su-error">// {error.toUpperCase()}</div>}
+              {error === "__EMAIL_EXISTS__" ? (
+                <div className="su-exists">
+                  ALREADY HAVE AN ACCOUNT?{" "}
+                  <a href={`/account/signin${joinCode ? `?code=${joinCode}` : ""}`}>
+                    SIGN IN AND USE YOUR LEAGUE CODE TO JOIN.
+                  </a>
+                </div>
+              ) : error ? (
+                <div className="su-error">// {error.toUpperCase()}</div>
+              ) : null}
 
               <button type="submit" className="su-submit" disabled={!canSubmit}>
                 {loading ? <><div className="su-spinner" /> REGISTERING...</> : "JOIN LEAGUE →"}

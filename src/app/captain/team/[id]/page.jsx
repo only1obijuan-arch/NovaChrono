@@ -12,6 +12,9 @@ export default function TeamDashboard({ params }) {
   const queryClient = useQueryClient();
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [playerForm, setPlayerForm] = useState({ name: "", playerNumber: "" });
+  const [showJoinLeague, setShowJoinLeague] = useState(false);
+  const [joinForm, setJoinForm] = useState({ joinCode: "", teamName: "" });
+  const [joinError, setJoinError] = useState(null);
 
   const { data: team, isLoading: teamLoading } = useQuery({
     queryKey: ["team", id],
@@ -88,6 +91,41 @@ export default function TeamDashboard({ params }) {
       return;
     }
     addPlayerMutation.mutate(playerForm);
+  };
+
+  const joinLeagueMutation = useMutation({
+    mutationFn: async (data) => {
+      const res = await fetch("/api/captain/join-league", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to join league");
+      return json;
+    },
+    onSuccess: (data) => {
+      toast.success(`Joined ${data.leagueName}!`);
+      setShowJoinLeague(false);
+      setJoinForm({ joinCode: "", teamName: "" });
+      setJoinError(null);
+      router.push(`/captain/team/${data.team.id}`);
+    },
+    onError: (err) => setJoinError(err.message),
+  });
+
+  const handleJoinLeague = (e) => {
+    e.preventDefault();
+    setJoinError(null);
+    if (joinForm.joinCode.trim().length !== 6) {
+      setJoinError("League code must be 6 characters");
+      return;
+    }
+    if (!joinForm.teamName.trim()) {
+      setJoinError("Team name is required");
+      return;
+    }
+    joinLeagueMutation.mutate({ joinCode: joinForm.joinCode.trim(), teamName: joinForm.teamName.trim() });
   };
 
   if (teamLoading || !team)
@@ -272,7 +310,15 @@ export default function TeamDashboard({ params }) {
               <button className="td-back" onClick={() => router.push("/captain/team")}>
                 <ChevronLeft size={14} /> BACK
               </button>
-              <NotificationBell accentColor="#00FF9C" />
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <button
+                  onClick={() => router.push("/captain/team")}
+                  style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:10, color:"rgba(0,255,156,0.5)", letterSpacing:2, background:"none", border:"1px solid rgba(0,255,156,0.2)", borderRadius:2, padding:"6px 12px", cursor:"pointer" }}
+                >
+                  ⇄ SWITCH LEAGUE
+                </button>
+                <NotificationBell accentColor="#00FF9C" />
+              </div>
             </div>
             <div className="td-hero-content">
               <div className="td-team-avatar">{team.name?.[0]}</div>
@@ -548,6 +594,26 @@ export default function TeamDashboard({ params }) {
               </div>
             </div>
 
+            <div
+              className="td-card"
+              style={{ animationDelay: "0.28s", cursor: "pointer", transition: "all 0.2s" }}
+              onClick={() => setShowJoinLeague(true)}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(0,245,212,0.4)")}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(0,255,156,0.15)")}
+            >
+              <div className="td-card-header">
+                <span className="td-card-title">// JOIN NEW LEAGUE</span>
+                <span style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.5)", letterSpacing: 2 }}>
+                  + JOIN →
+                </span>
+              </div>
+              <div className="td-card-body">
+                <p style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 14, color: "rgba(180,200,220,0.5)", lineHeight: 1.5 }}>
+                  Have a league code? Join another league without re-registering.
+                </p>
+              </div>
+            </div>
+
             {team?.league_id && (
               <a
                 href={`/captain/rules/${team.league_id}`}
@@ -646,6 +712,55 @@ export default function TeamDashboard({ params }) {
                   disabled={addPlayerMutation.isPending}
                 >
                   {addPlayerMutation.isPending ? "ADDING..." : "ADD PLAYER"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showJoinLeague && (
+        <div className="td-modal-overlay">
+          <div className="td-modal">
+            <div className="td-modal-header">
+              <h3 className="td-modal-title">// JOIN NEW LEAGUE</h3>
+              <button className="td-modal-close" onClick={() => { setShowJoinLeague(false); setJoinError(null); }}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleJoinLeague}>
+              <label className="td-modal-label">LEAGUE CODE *</label>
+              <input
+                required
+                type="text"
+                className="td-modal-input"
+                placeholder="XXXXXX"
+                maxLength={6}
+                value={joinForm.joinCode}
+                onChange={(e) => setJoinForm({ ...joinForm, joinCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })}
+                autoFocus
+                style={{ textTransform: "uppercase", letterSpacing: 6, fontFamily: "'Share Tech Mono',monospace", fontSize: 18, textAlign: "center" }}
+              />
+              <label className="td-modal-label">TEAM NAME *</label>
+              <input
+                required
+                type="text"
+                className="td-modal-input"
+                placeholder="e.g. Thunder FC"
+                value={joinForm.teamName}
+                onChange={(e) => setJoinForm({ ...joinForm, teamName: e.target.value })}
+              />
+              {joinError && (
+                <p style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(255,100,100,0.9)", letterSpacing: 2, marginBottom: 16 }}>
+                  // {joinError.toUpperCase()}
+                </p>
+              )}
+              <div className="td-modal-btns">
+                <button type="button" className="td-modal-cancel" onClick={() => { setShowJoinLeague(false); setJoinError(null); }}>
+                  CANCEL
+                </button>
+                <button type="submit" className="td-modal-submit" disabled={joinLeagueMutation.isPending}>
+                  {joinLeagueMutation.isPending ? "JOINING..." : "JOIN LEAGUE"}
                 </button>
               </div>
             </form>
