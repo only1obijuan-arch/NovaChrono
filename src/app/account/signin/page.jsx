@@ -76,11 +76,13 @@ function SignInContent() {
 
       if (result?.ok && !result?.error) {
         // Record successful login
-        await fetch("/api/auth/rate-limit", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, success: true }),
-        });
+        try {
+          await fetch("/api/auth/rate-limit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, success: true }),
+          });
+        } catch {}
         // Soft navigation keeps the SessionProvider alive so the session
         // is already in-memory when the redirect page mounts.
         router.push("/account/redirect");
