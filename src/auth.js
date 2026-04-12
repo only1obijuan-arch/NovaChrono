@@ -219,7 +219,7 @@ const nextAuth = NextAuth({
         if (!isValid) return null;
 
         if (!user.emailVerified) {
-          throw new Error("Please verify your email before signing in.");
+        return null;
         }
 
         return user;

@@ -34,6 +34,22 @@ export async function POST(request) {
       );
     }
 
+    // Check for an available slot before creating any records
+    const [availableSlot] = await sql`
+      SELECT ls.id
+      FROM league_slots ls
+      LEFT JOIN teams t ON t.slot_id = ls.id AND t.status = 'active'
+      WHERE ls.league_id = ${league.id} AND t.id IS NULL
+      ORDER BY ls.slot_number
+      LIMIT 1
+    `;
+    if (!availableSlot) {
+      return Response.json(
+        { error: "This league is full. No slots are available." },
+        { status: 400 },
+      );
+    }
+
     if (password.length < 8) {
       return Response.json(
         { error: "Password must be at least 8 characters" },
@@ -67,6 +83,11 @@ export async function POST(request) {
       VALUES (
         ${newUser.id}, 'credentials', 'credentials', ${newUser.id}, ${hashedPassword}
       )
+    `;
+
+    await sql`
+      INSERT INTO teams (league_id, slot_id, name, captain_user_id)
+      VALUES (${league.id}, ${availableSlot.id}, ${teamName}, ${newUser.id})
     `;
 
     // Generate email verification token

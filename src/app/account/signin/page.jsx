@@ -89,12 +89,21 @@ function SignInContent() {
         return;
       }
 
-      // Check for unverified email error
-      if (result?.error?.toLowerCase().includes("verify")) {
-        setError("Please verify your email before signing in. Check your inbox for the verification link.");
-        setLoading(false);
-        return;
-      }
+      // Check whether the sign-in failed because the email isn't verified yet.
+      // (NextAuth always returns "CredentialsSignin" so we check the DB directly.)
+      try {
+        const statusRes = await fetch(
+          `/api/auth/email-status?email=${encodeURIComponent(email)}`
+        );
+        const statusData = await statusRes.json();
+        if (statusData.unverified) {
+          setError(
+            "Please verify your email before signing in. Check your inbox for the verification link."
+          );
+          setLoading(false);
+          return;
+        }
+      } catch {}
 
       // Failed — record attempt
       const failRes = await fetch("/api/auth/rate-limit", {
