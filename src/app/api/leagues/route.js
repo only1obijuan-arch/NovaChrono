@@ -27,10 +27,10 @@ export async function POST(request) {
       const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
       const [league] = await sql`
-        INSERT INTO leagues (venue_id, name, day_of_week, season_start_date, season_end_date, match_format, match_duration_minutes, fields_count, time_slots, max_teams, join_code)
+        INSERT INTO leagues (venue_id, name, day_of_week, season_start_date, season_end_date, match_format, match_duration_minutes, fields_count, time_slots, max_teams, join_code, status)
         VALUES (${venueId}, ${name}, ${dayOfWeek}, ${seasonStartDate}, ${seasonEndDate}, ${matchFormat}, ${matchDuration}, ${fieldsCount}, ${JSON.stringify(
           timeSlots,
-        )}, ${maxTeams}, ${joinCode})
+        )}, ${maxTeams}, ${joinCode}, 'registration')
         RETURNING *
       `;
 
