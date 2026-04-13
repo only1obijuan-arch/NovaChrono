@@ -96,8 +96,8 @@ export async function POST(request) {
     const hashedPassword = await hash(password);
 
     const [newUser] = await sql`
-      INSERT INTO auth_users (name, email, role, venue_id, field_number)
-      VALUES (${refName}, ${email}, 'referee', ${venueId}, ${fieldNumber})
+      INSERT INTO auth_users (name, email, role, venue_id, field_number, "emailVerified")
+      VALUES (${refName}, ${email}, 'referee', ${venueId}, ${fieldNumber}, NOW())
       RETURNING *
     `;
 

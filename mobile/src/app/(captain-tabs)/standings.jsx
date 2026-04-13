@@ -20,14 +20,16 @@ export default function Standings() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: team } = useQuery({
-    queryKey: ["captain-team"],
+  const { data: teamData } = useQuery({
+    queryKey: ["captain-teams"],
     queryFn: async () => {
-      const res = await apiFetch("/api/captain/team");
+      const res = await apiFetch("/api/captain/teams");
       const data = await res.json();
-      return data.team ?? null;
+      return data.teams ?? [];
     },
   });
+
+  const team = teamData?.[0] ?? null;
 
   const { data: stats } = useQuery({
     queryKey: ["league-stats", team?.league_id],

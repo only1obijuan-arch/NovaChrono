@@ -28,15 +28,18 @@ export default function TeamDashboard() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: team, isLoading } = useQuery({
-    queryKey: ["captain-team"],
+  const { data: teamData, isLoading } = useQuery({
+    queryKey: ["captain-teams"],
     queryFn: async () => {
-      const res = await apiFetch("/api/captain/team");
-      if (!res.ok) throw new Error("Failed to fetch team");
+      const res = await apiFetch("/api/captain/teams");
+      if (!res.ok) throw new Error("Failed to fetch teams");
       const data = await res.json();
-      return data.team ?? null;
+      return data.teams ?? [];
     },
   });
+
+  // Use first active team or selected team
+  const team = teamData?.[0] ?? null;
 
   const { data: players = [] } = useQuery({
     queryKey: ["team-players", team?.id],
@@ -67,7 +70,7 @@ export default function TeamDashboard() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await queryClient.invalidateQueries(["captain-team"]);
+    await queryClient.invalidateQueries(["captain-teams"]);
     await queryClient.invalidateQueries(["team-players"]);
     await queryClient.invalidateQueries(["team-matches"]);
     await queryClient.invalidateQueries(["league-stats"]);
@@ -113,37 +116,22 @@ export default function TeamDashboard() {
 
   if (!team) {
     return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: "#091833",
-          padding: 24,
-          paddingTop: insets.top,
-          justifyContent: "center",
-        }}
-      >
+      <View style={{ flex: 1, backgroundColor: "#091833", padding: 24, paddingTop: insets.top, justifyContent: "center", alignItems: "center" }}>
         <StatusBar style="light" />
-        <Text
-          style={{
-            fontFamily: F.orbitron,
-            fontSize: 20,
-            color: "#F4F4F9",
-            marginBottom: 16,
-            textAlign: "center",
-          }}
-        >
-          NO TEAM FOUND
+        <Text style={{ fontFamily: F.orbitron, fontSize: 18, color: "#F4F4F9", marginBottom: 12, textAlign: "center", letterSpacing: 2 }}>
+          NO LEAGUE FOUND
         </Text>
-        <Text
-          style={{
-            fontFamily: F.rajdhani,
-            fontSize: 16,
-            color: "rgba(180,200,220,0.6)",
-            textAlign: "center",
-          }}
-        >
-          Please join a team using a valid join code
+        <Text style={{ fontFamily: F.mono, fontSize: 11, color: "rgba(180,200,220,0.5)", textAlign: "center", letterSpacing: 2, lineHeight: 20, marginBottom: 32 }}>
+          NEW CAPTAIN?{"\n"}CONTACT YOUR VENUE ADMIN{"\n"}FOR A LEAGUE CODE
         </Text>
+        <TouchableOpacity
+          onPress={() => router.push("/auth/login")}
+          style={{ backgroundColor: "rgba(0,255,156,0.08)", borderWidth: 1, borderColor: "rgba(0,255,156,0.3)", borderRadius: 6, paddingHorizontal: 24, paddingVertical: 12 }}
+        >
+          <Text style={{ fontFamily: F.mono, fontSize: 11, color: "#00FF9C", letterSpacing: 3 }}>
+            SIGN OUT
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   }
