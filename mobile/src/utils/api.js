@@ -22,6 +22,8 @@ export async function setStoredAuth(auth) {
 // path must start with "/"
 export async function apiFetch(path, options = {}) {
   const stored = await getStoredAuth();
+  console.log("apiFetch token:", stored?.token?.slice(0, 20), "path:", path);
+  console.log("[token full]", stored?.token);
   const headers = {
     "Content-Type": "application/json",
     ...(stored?.token ? { Authorization: `Bearer ${stored.token}` } : {}),
@@ -59,4 +61,28 @@ export async function signInWithCredentials(email, password) {
 
 export async function signOut() {
   await setStoredAuth(null);
+}
+
+// Request a password reset email.
+export async function requestPasswordReset(email) {
+  const res = await fetch(`${BASE_URL}/api/auth/request-reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+// Captain sign-up — creates account + team and joins a league.
+export async function captainSignUp({ joinCode, name, email, password, teamName }) {
+  const res = await fetch(`${BASE_URL}/api/account/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ joinCode, name, email, password, teamName }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Sign up failed");
+  return data;
 }

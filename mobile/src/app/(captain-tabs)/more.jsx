@@ -16,6 +16,7 @@ import {
   LogOut,
   ExternalLink,
 } from "lucide-react-native";
+import { apiFetch } from "@/utils/api";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -33,9 +34,9 @@ export default function More() {
   const { data: team } = useQuery({
     queryKey: ["captain-team"],
     queryFn: async () => {
-      const res = await fetch("/api/captain/team");
+      const res = await apiFetch("/api/captain/team");
       const data = await res.json();
-      return data.team;
+      return data.team ?? null;
     },
   });
 
@@ -265,7 +266,11 @@ export default function More() {
 
         {/* Sign out */}
         <TouchableOpacity
-          onPress={() => router.replace("/auth/role-select")}
+          onPress={async () => {
+            const { signOut } = await import("@/utils/api");
+            await signOut();
+            router.replace("/auth/login");
+          }}
           activeOpacity={0.7}
           style={{
             flexDirection: "row",

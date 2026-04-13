@@ -25,7 +25,7 @@ export default function Schedule() {
     queryFn: async () => {
       const res = await apiFetch("/api/captain/team");
       const data = await res.json();
-      return data.team;
+      return data.team ?? null;
     },
   });
 

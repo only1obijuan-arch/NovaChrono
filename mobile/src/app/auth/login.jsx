@@ -50,7 +50,7 @@ export default function Login() {
     setError(null);
     try {
       const data = await signInWithCredentials(email, password);
-      setAuth({ token: data.token, user: data.user });
+      await setAuth({ token: data.token, user: data.user });
     } catch (err) {
       setError(err.message || "Sign in failed. Please try again.");
     } finally {
@@ -261,7 +261,7 @@ export default function Login() {
             </View>
 
             {/* Password */}
-            <View style={{ marginBottom: 20 }}>
+            <View style={{ marginBottom: 8 }}>
               <Text
                 style={{
                   fontFamily: F.mono,
@@ -293,6 +293,23 @@ export default function Login() {
                 }}
               />
             </View>
+
+            {/* Forgot password */}
+            <TouchableOpacity
+              onPress={() => router.push("/auth/forgot-password")}
+              style={{ alignSelf: "flex-end", marginBottom: 20 }}
+            >
+              <Text
+                style={{
+                  fontFamily: F.mono,
+                  fontSize: 9,
+                  color: "rgba(0,245,212,0.45)",
+                  letterSpacing: 2,
+                }}
+              >
+                FORGOT PASSWORD?
+              </Text>
+            </TouchableOpacity>
 
             {/* Error */}
             {error && (
@@ -352,6 +369,39 @@ export default function Login() {
                 </Text>
               )}
             </TouchableOpacity>
+
+            {/* Create account */}
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "center",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 20,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: F.rajdhani,
+                  fontSize: 13,
+                  color: "rgba(180,200,220,0.35)",
+                }}
+              >
+                New captain?
+              </Text>
+              <TouchableOpacity onPress={() => router.push("/auth/signup")}>
+                <Text
+                  style={{
+                    fontFamily: F.mono,
+                    fontSize: 10,
+                    color: "#00F5D4",
+                    letterSpacing: 1,
+                  }}
+                >
+                  CREATE ACCOUNT →
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             <Text
               style={{

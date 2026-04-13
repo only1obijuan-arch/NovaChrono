@@ -40,6 +40,8 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }} initialRouteName="index">
           <Stack.Screen name="index" />
           <Stack.Screen name="auth/login" />
+          <Stack.Screen name="auth/forgot-password" />
+          <Stack.Screen name="auth/signup" />
           <Stack.Screen name="(captain-tabs)" />
           <Stack.Screen name="(referee-tabs)" />
           <Stack.Screen name="referee/match/[id]" />

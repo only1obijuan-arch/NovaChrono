@@ -34,7 +34,7 @@ export default function TeamDashboard() {
       const res = await apiFetch("/api/captain/team");
       if (!res.ok) throw new Error("Failed to fetch team");
       const data = await res.json();
-      return data.team;
+      return data.team ?? null;
     },
   });
 
