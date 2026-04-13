@@ -1,5 +1,6 @@
 export const runtime = "nodejs";
 import { auth } from "@/auth";
+import { jwtVerify } from "jose";
 import { NextResponse } from "next/server";
 
 const roleRoutes = {
@@ -17,9 +18,23 @@ const publicApiPrefixes = [
   "/api/matches",
 ];
 
-export default auth((req) => {
+async function verifyBearer(req) {
+  const authHeader = req.headers.get("authorization") ?? "";
+  if (!authHeader.startsWith("Bearer ")) return null;
+  const token = authHeader.slice(7);
+  if (!token) return null;
+  try {
+    const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
+    const { payload } = await jwtVerify(token, secret);
+    return { user: payload };
+  } catch {
+    return null;
+  }
+}
+
+export default auth(async (req) => {
   const { pathname } = req.nextUrl;
-  const session = req.auth;
+  const session = req.auth ?? (await verifyBearer(req));
 
   // Protect non-public API routes
   if (pathname.startsWith("/api/")) {
