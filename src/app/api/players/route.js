@@ -58,3 +58,32 @@ export async function POST(request) {
     return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }
+
+export async function DELETE(request) {
+  try {
+    const user = await getSession(request);
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+    const { searchParams } = new URL(request.url);
+    const playerId = searchParams.get("playerId");
+    if (!playerId)
+      return Response.json({ error: "playerId is required" }, { status: 400 });
+
+    const [player] = await sql`SELECT * FROM players WHERE id = ${playerId}`;
+    if (!player)
+      return Response.json({ error: "Player not found" }, { status: 404 });
+
+    const [team] = await sql`SELECT * FROM teams WHERE id = ${player.team_id}`;
+    const isOwnTeam = team?.captain_user_id?.toString() === user.id?.toString();
+    const isAdmin = ["venue_admin", "super_admin"].includes(user.role);
+
+    if (!isOwnTeam && !isAdmin)
+      return Response.json({ error: "You can only remove players from your own team" }, { status: 403 });
+
+    await sql`DELETE FROM players WHERE id = ${playerId}`;
+    return Response.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
+  }
+}

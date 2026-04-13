@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Users, ChevronLeft, Shield, X, Calendar, Trophy } from "lucide-react";
+import { Users, ChevronLeft, Shield, X, Calendar, Trophy, Trash2 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 
 export default function TeamDashboard({ params }) {
@@ -63,6 +63,19 @@ export default function TeamDashboard({ params }) {
     },
     enabled: !!liveMatch?.id,
     refetchInterval: 5000,
+  });
+
+  const deletePlayerMutation = useMutation({
+    mutationFn: async (playerId) => {
+      const res = await fetch(`/api/players?playerId=${playerId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to remove player");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success("Player removed");
+      queryClient.invalidateQueries({ queryKey: ["team-players", id] });
+    },
+    onError: (err) => toast.error(err.message),
   });
 
   const addPlayerMutation = useMutation({
@@ -225,6 +238,8 @@ export default function TeamDashboard({ params }) {
         .td-player-list { display:flex; flex-direction:column; gap:8px; }
         .td-player { display:flex; align-items:center; gap:12px; padding:10px 14px; background:rgba(0,255,156,0.03); border:1px solid rgba(0,255,156,0.08); border-radius:4px; transition:all 0.2s; }
         .td-player:hover { border-color:rgba(0,255,156,0.2); background:rgba(0,255,156,0.06); }
+        .td-player-delete { margin-left:auto; background:rgba(255,50,50,0.06); border:1px solid rgba(255,50,50,0.2); border-radius:4px; padding:6px 8px; cursor:pointer; color:rgba(255,80,80,0.7); display:flex; align-items:center; transition:all 0.2s; }
+        .td-player-delete:hover { background:rgba(255,50,50,0.12); border-color:rgba(255,80,80,0.4); color:rgba(255,80,80,1); }
         .td-player-num { width:36px; height:36px; background:rgba(0,255,156,0.1); border:1px solid rgba(0,255,156,0.25); border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:'Orbitron',monospace; font-size:11px; color:#00FF9C; flex-shrink:0; }
         .td-player-name { font-family:'Rajdhani',sans-serif; font-size:16px; font-weight:700; color:#F4F4F9; }
         .td-player-empty { padding:32px; text-align:center; border:2px dashed rgba(0,255,156,0.1); border-radius:6px; }
@@ -405,6 +420,14 @@ export default function TeamDashboard({ params }) {
                           #{player.player_number || "--"}
                         </div>
                         <span className="td-player-name">{player.name}</span>
+                        <button
+                          className="td-player-delete"
+                          onClick={() => deletePlayerMutation.mutate(player.id)}
+                          disabled={deletePlayerMutation.isPending}
+                          title="Remove player"
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       </div>
                     ))}
                   </div>

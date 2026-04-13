@@ -460,7 +460,7 @@ export default function TeamDashboard() {
               // TEAM ROSTER
             </Text>
             <TouchableOpacity
-              onPress={() => router.push("/players/add")}
+              onPress={() => router.push("/players/manage")}
               style={{
                 flexDirection: "row",
                 alignItems: "center",

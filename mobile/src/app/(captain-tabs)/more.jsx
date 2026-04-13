@@ -3,7 +3,6 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  Linking,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -14,7 +13,6 @@ import {
   Users,
   FileText,
   LogOut,
-  ExternalLink,
 } from "lucide-react-native";
 import { apiFetch } from "@/utils/api";
 
@@ -56,20 +54,6 @@ export default function More() {
         if (team?.league_id) router.push(`/rules/${team.league_id}`);
       },
       color: "#00F5D4",
-      disabled: !team?.league_id,
-    },
-    {
-      icon: ExternalLink,
-      label: "View Full League",
-      sub: "Public standings & all fixtures",
-      onPress: () => {
-        if (team?.league_id) {
-          Linking.openURL(
-            `${process.env.EXPO_PUBLIC_BASE_URL}/league/${team.league_id}`,
-          );
-        }
-      },
-      color: "#FF00CC",
       disabled: !team?.league_id,
     },
   ];
