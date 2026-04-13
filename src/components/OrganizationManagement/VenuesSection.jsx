@@ -7,6 +7,7 @@ export function VenuesSection({
   onAddVenue,
   onAssignVenue,
   onDeleteVenue,
+  onInviteAdmin,
   currentUserVenueId,
   assignVenuePending,
 }) {
@@ -42,6 +43,7 @@ export function VenuesSection({
               isAssigned={currentUserVenueId === venue.id}
               onAssign={() => onAssignVenue(venue.id)}
               onDelete={() => onDeleteVenue(venue.id, venue.name)}
+              onInvite={() => onInviteAdmin(venue.id, venue.name)}
               assignPending={assignVenuePending}
             />
           ))}

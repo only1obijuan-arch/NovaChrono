@@ -1,7 +1,7 @@
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { auth } from "@/auth";
-import { randomBytes } from "crypto";
+import { randomBytes, createHash } from "crypto";
 
 export async function POST(request) {
   try {
@@ -56,18 +56,19 @@ export async function POST(request) {
         { status: 400 },
       );
 
-    const token = randomBytes(32).toString("hex");
+    const rawToken = randomBytes(32).toString("hex");
+    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await sql`
       INSERT INTO invite_tokens (token, email, role, organization_id, venue_id, invited_by, expires_at)
-      VALUES (${token}, ${email.toLowerCase()}, 'venue_admin', ${
+      VALUES (${tokenHash}, ${email.toLowerCase()}, 'venue_admin', ${
         inviter.organization_id
       }, ${venueId}, ${inviter.id}, ${expiresAt})
     `;
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const inviteUrl = `${appUrl}/account/accept-invite?token=${token}`;
+    const inviteUrl = `${appUrl}/account/accept-invite?token=${rawToken}`;
 
     await sendEmail({
       to: email,

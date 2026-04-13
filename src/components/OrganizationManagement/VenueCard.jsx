@@ -1,6 +1,6 @@
-import { UserCheck, Trash2 } from "lucide-react";
+import { UserCheck, Trash2, Mail } from "lucide-react";
 
-export function VenueCard({ venue, isAssigned, onAssign, onDelete, assignPending }) {
+export function VenueCard({ venue, isAssigned, onAssign, onDelete, onInvite, assignPending }) {
   return (
     <div className="om-venue-card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -18,6 +18,13 @@ export function VenueCard({ venue, isAssigned, onAssign, onDelete, assignPending
           )}
         </div>
         <div className="om-venue-actions">
+          <button
+            className="om-icon-btn assign"
+            title="Invite venue admin"
+            onClick={onInvite}
+          >
+            <Mail size={15} />
+          </button>
           <button
             className="om-icon-btn assign"
             title="Assign to this venue"

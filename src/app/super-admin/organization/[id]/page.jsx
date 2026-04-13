@@ -12,6 +12,7 @@ import { AdminsSection } from "@/components/OrganizationManagement/AdminsSection
 import { AddVenueModal } from "@/components/OrganizationManagement/AddVenueModal";
 import { AddAdminModal } from "@/components/OrganizationManagement/AddAdminModal";
 import { AdminCredentialsModal } from "@/components/OrganizationManagement/AdminCredentialsModal";
+import { InviteVenueAdminModal } from "@/components/OrganizationManagement/InviteVenueAdminModal";
 
 export default function OrganizationManagementPage({ params }) {
   const { data: session } = useSession();
@@ -22,6 +23,7 @@ export default function OrganizationManagementPage({ params }) {
   const [showAddVenue, setShowAddVenue] = useState(false);
   const [showAddAdmin, setShowAddAdmin] = useState(false);
   const [showAdminCredentials, setShowAdminCredentials] = useState(null);
+  const [inviteVenueAdmin, setInviteVenueAdmin] = useState(null); // { venueId, venueName }
 
   const { data: orgsData } = useQuery({
     queryKey: ["super-admin-organizations"],
@@ -117,6 +119,24 @@ export default function OrganizationManagementPage({ params }) {
     },
   });
 
+  const inviteVenueAdminMutation = useMutation({
+    mutationFn: async ({ email, venueId }) => {
+      const res = await fetch("/api/super-admin/invite-venue-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, venueId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to send invite");
+      return data;
+    },
+    onSuccess: (_, { email }) => {
+      setInviteVenueAdmin(null);
+      alert(`Invite sent to ${email}`);
+    },
+    onError: (error) => alert(error.message),
+  });
+
   const assignVenueMutation = useMutation({
     mutationFn: async (venueId) => {
       const res = await fetch("/api/super-admin/assign-venue", {
@@ -199,6 +219,7 @@ export default function OrganizationManagementPage({ params }) {
             onAddVenue={() => setShowAddVenue(true)}
             onAssignVenue={(venueId) => assignVenueMutation.mutate(venueId)}
             onDeleteVenue={handleDeleteVenue}
+            onInviteAdmin={(venueId, venueName) => setInviteVenueAdmin({ venueId, venueName })}
             currentUserVenueId={session?.user?.venue_id}
             assignVenuePending={assignVenueMutation.isPending}
           />
@@ -233,6 +254,15 @@ export default function OrganizationManagementPage({ params }) {
         <AdminCredentialsModal
           credentials={showAdminCredentials}
           onClose={() => setShowAdminCredentials(null)}
+        />
+      )}
+
+      {inviteVenueAdmin && (
+        <InviteVenueAdminModal
+          venueName={inviteVenueAdmin.venueName}
+          onClose={() => setInviteVenueAdmin(null)}
+          onSubmit={(email) => inviteVenueAdminMutation.mutate({ email, venueId: inviteVenueAdmin.venueId })}
+          isPending={inviteVenueAdminMutation.isPending}
         />
       )}
     </>

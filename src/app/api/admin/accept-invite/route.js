@@ -55,13 +55,14 @@ export async function POST(request) {
 
     // Create user — include venue_id if present in invite token
     const [newUser] = await sql`
-      INSERT INTO auth_users (name, email, role, organization_id, venue_id)
+      INSERT INTO auth_users (name, email, role, organization_id, venue_id, "emailVerified")
       VALUES (
         ${name},
         ${invite.email},
         ${invite.role},
         ${invite.organization_id},
-        ${invite.venue_id || null}
+        ${invite.venue_id || null},
+        NOW()
       )
       RETURNING id, name, email, role
     `;
