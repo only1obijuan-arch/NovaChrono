@@ -9,6 +9,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { apiFetch } from "@/utils/api";
+import { useAuth } from "@/utils/auth/useAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trophy, Calendar, Users } from "lucide-react-native";
 import { useRouter } from "expo-router";
@@ -26,6 +27,7 @@ export default function TeamDashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { signOut } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
 
   const { data: team, isLoading } = useQuery({
@@ -138,7 +140,10 @@ export default function TeamDashboard() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={() => router.push("/auth/login")}
+          onPress={async () => {
+            await signOut();
+            router.replace("/");
+          }}
           style={{ marginTop: 12, backgroundColor: "rgba(0,255,156,0.08)", borderWidth: 1, borderColor: "rgba(0,255,156,0.3)", borderRadius: 6, paddingHorizontal: 24, paddingVertical: 12 }}
         >
           <Text style={{ fontFamily: F.mono, fontSize: 11, color: "#00FF9C", letterSpacing: 3 }}>

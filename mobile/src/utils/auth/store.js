@@ -5,8 +5,8 @@ export const useAuthStore = create((set) => ({
   isReady: false,
   auth: null,
   setAuth: async (auth) => {
-    await setStoredAuth(auth);
     set({ auth });
+    await setStoredAuth(auth);
   },
   initiate: async () => {
     const stored = await getStoredAuth();
