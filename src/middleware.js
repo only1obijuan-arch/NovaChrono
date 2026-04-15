@@ -16,6 +16,7 @@ const publicApiPrefixes = [
   "/api/auth",
   "/api/stats",
   "/api/matches",
+  "/api/cron",
 ];
 
 async function verifyBearer(req) {
