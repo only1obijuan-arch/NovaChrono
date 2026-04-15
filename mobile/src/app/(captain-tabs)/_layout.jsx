@@ -1,25 +1,27 @@
 import { Tabs } from "expo-router";
 import { Home, Calendar, Trophy, User } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function CaptainTabLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: "#0A1220",
-          borderTopWidth: 1,
-          borderTopColor: "rgba(0,255,156,0.15)",
-          paddingTop: 8,
-          paddingBottom: 8,
-          height: 64,
-        },
+  backgroundColor: "#0A1220",
+  borderTopWidth: 1,
+  borderTopColor: "rgba(0,255,156,0.15)",
+  paddingTop: 8,
+  paddingBottom: insets.bottom + 12,
+  height: 70 + insets.bottom,
+},
         tabBarActiveTintColor: "#00FF9C",
         tabBarInactiveTintColor: "rgba(0,255,156,0.3)",
         tabBarLabelStyle: {
-          fontFamily: "ShareTechMono_400Regular",
-          fontSize: 9,
-          letterSpacing: 1.5,
+          fontSize: 10,
+          letterSpacing: 1,
           marginTop: 2,
         },
       }}

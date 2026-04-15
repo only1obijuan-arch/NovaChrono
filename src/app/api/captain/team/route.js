@@ -17,13 +17,14 @@ export async function GET(request) {
     }
 
     const [team] = await sql`
-      SELECT t.*, l.name as league_name, l.join_code
+      SELECT t.*, l.name as league_name, l.join_code, l.status as league_status
       FROM teams t
       LEFT JOIN leagues l ON l.id = t.league_id
       WHERE t.captain_user_id = ${session.user.id}
       AND t.status = 'active'
+      ORDER BY l.created_at DESC
       LIMIT 1
-    `;
+      `;
 
     if (!team) {
       return Response.json({ team: null });

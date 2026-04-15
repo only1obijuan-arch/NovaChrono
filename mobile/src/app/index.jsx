@@ -30,8 +30,7 @@ export default function Index() {
         <Text
           style={{
             color: "#00F5D4",
-            fontFamily: "ShareTechMono_400Regular",
-            letterSpacing: 4,
+letterSpacing: 4,
             fontSize: 12,
           }}
         >
@@ -46,12 +45,9 @@ export default function Index() {
 
   // Route based on user role
   const role = auth.user?.role;
-  if (role === "captain") return <Redirect href="/(captain-tabs)" />;
   if (role === "referee") return <Redirect href="/(referee-tabs)" />;
-  if (role === "venue_admin" || role === "org_admin")
-    return <Redirect href="/(admin-tabs)" />;
-  if (role === "super_admin") return <Redirect href="/auth/role-select" />;
-
-  // Default fallback
+  if (role === "captain") return <Redirect href="/(captain-tabs)" />;
+  if (role === "venue_admin" || role === "org_admin" || role === "super_admin")
+    return <Redirect href="/(captain-tabs)" />;
   return <Redirect href="/auth/login" />;
 }

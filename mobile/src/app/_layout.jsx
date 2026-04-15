@@ -30,10 +30,6 @@ export default function RootLayout() {
     }
   }, [isReady]);
 
-  if (!isReady) {
-    return null;
-  }
-
   return (
     <QueryClientProvider client={queryClient}>
       <GestureHandlerRootView style={{ flex: 1 }}>
@@ -42,9 +38,12 @@ export default function RootLayout() {
           <Stack.Screen name="auth/login" />
           <Stack.Screen name="auth/forgot-password" />
           <Stack.Screen name="auth/signup" />
+          <Stack.Screen name="auth/role-select" />
           <Stack.Screen name="(captain-tabs)" />
           <Stack.Screen name="(referee-tabs)" />
           <Stack.Screen name="referee/match/[id]" />
+          <Stack.Screen name="players/manage" />
+          <Stack.Screen name="rules/[leagueId]" />
         </Stack>
       </GestureHandlerRootView>
     </QueryClientProvider>

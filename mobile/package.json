@@ -3,9 +3,9 @@
   "main": "index.jsx",
   "version": "1.0.0",
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios"
+    "start": "NODE_OPTIONS=--max-old-space-size=8192 expo start",
+    "android": "NODE_OPTIONS=--max-old-space-size=8192 expo run:android",
+    "ios": "NODE_OPTIONS=--max-old-space-size=8192 expo run:ios"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

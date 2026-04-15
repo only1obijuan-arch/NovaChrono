@@ -198,7 +198,7 @@ export default function RoleSelect() {
         {!isSuperAdmin && (
           <>
             <RoleCard
-              onPress={() => router.replace("/(admin-tabs)")}
+              onPress={() => router.replace("/(captain-tabs)")}
               color="#FF00CC"
               icon={<Shield size={28} color="#FF00CC" />}
               badge="ADMIN"

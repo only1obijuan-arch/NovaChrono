@@ -28,18 +28,15 @@ export default function TeamDashboard() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: teamData, isLoading } = useQuery({
-    queryKey: ["captain-teams"],
+  const { data: team, isLoading } = useQuery({
+    queryKey: ["captain-team"],
     queryFn: async () => {
-      const res = await apiFetch("/api/captain/teams");
-      if (!res.ok) throw new Error("Failed to fetch teams");
+      const res = await apiFetch("/api/captain/team");
+      if (!res.ok) throw new Error("Failed to fetch team");
       const data = await res.json();
-      return data.teams ?? [];
+      return data.team ?? null;
     },
   });
-
-  // Use first active team or selected team
-  const team = teamData?.[0] ?? null;
 
   const { data: players = [] } = useQuery({
     queryKey: ["team-players", team?.id],
@@ -70,7 +67,7 @@ export default function TeamDashboard() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await queryClient.invalidateQueries(["captain-teams"]);
+    await queryClient.invalidateQueries(["captain-team"]);
     await queryClient.invalidateQueries(["team-players"]);
     await queryClient.invalidateQueries(["team-matches"]);
     await queryClient.invalidateQueries(["league-stats"]);
@@ -125,8 +122,24 @@ export default function TeamDashboard() {
           NEW CAPTAIN?{"\n"}CONTACT YOUR VENUE ADMIN{"\n"}FOR A LEAGUE CODE
         </Text>
         <TouchableOpacity
+          onPress={() => router.push("/captain/join-league")}
+          style={{
+            marginTop: 24,
+            paddingHorizontal: 24,
+            paddingVertical: 14,
+            borderWidth: 1,
+            borderColor: "rgba(0,255,156,0.4)",
+            borderRadius: 10,
+            backgroundColor: "rgba(0,255,156,0.08)",
+          }}
+        >
+          <Text style={{ color: C, fontSize: 13, letterSpacing: 2, fontWeight: "600" }}>
+            JOIN A LEAGUE →
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => router.push("/auth/login")}
-          style={{ backgroundColor: "rgba(0,255,156,0.08)", borderWidth: 1, borderColor: "rgba(0,255,156,0.3)", borderRadius: 6, paddingHorizontal: 24, paddingVertical: 12 }}
+          style={{ marginTop: 12, backgroundColor: "rgba(0,255,156,0.08)", borderWidth: 1, borderColor: "rgba(0,255,156,0.3)", borderRadius: 6, paddingHorizontal: 24, paddingVertical: 12 }}
         >
           <Text style={{ fontFamily: F.mono, fontSize: 11, color: "#00FF9C", letterSpacing: 3 }}>
             SIGN OUT

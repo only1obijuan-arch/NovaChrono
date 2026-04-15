@@ -20,16 +20,14 @@ export default function Schedule() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: teamData } = useQuery({
-    queryKey: ["captain-teams"],
+  const { data: team } = useQuery({
+    queryKey: ["captain-team"],
     queryFn: async () => {
-      const res = await apiFetch("/api/captain/teams");
+      const res = await apiFetch("/api/captain/team");
       const data = await res.json();
-      return data.teams ?? [];
+      return data.team ?? null;
     },
   });
-
-  const team = teamData?.[0] ?? null;
 
   const { data: matches = [] } = useQuery({
     queryKey: ["team-matches", team?.league_id],

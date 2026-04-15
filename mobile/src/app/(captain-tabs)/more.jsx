@@ -13,8 +13,10 @@ import {
   Users,
   FileText,
   LogOut,
+  Trophy,
 } from "lucide-react-native";
 import { apiFetch } from "@/utils/api";
+import { useAuth } from "@/utils/auth/useAuth";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -28,6 +30,7 @@ const C = "#00FF9C";
 export default function More() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { signOut } = useAuth();
 
   const { data: team } = useQuery({
     queryKey: ["captain-team"],
@@ -248,10 +251,32 @@ export default function More() {
           ))}
         </View>
 
+        {/* Join New League */}
+        <TouchableOpacity
+          onPress={() => router.push("/captain/join-league")}
+          activeOpacity={0.7}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "rgba(0,255,156,0.06)",
+            borderWidth: 1,
+            borderColor: "rgba(0,255,156,0.2)",
+            borderRadius: 10,
+            padding: 16,
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          <Trophy size={18} color={C} />
+          <Text style={{ fontSize: 13, color: C, letterSpacing: 2, fontWeight: "600" }}>
+            JOIN NEW LEAGUE
+          </Text>
+        </TouchableOpacity>
+
         {/* Sign out */}
         <TouchableOpacity
           onPress={async () => {
-            const { signOut } = await import("@/utils/api");
             await signOut();
             router.replace("/auth/login");
           }}
