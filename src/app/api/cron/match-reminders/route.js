@@ -1,5 +1,6 @@
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
+import { sendPush } from "@/app/api/utils/send-push";
 import crypto from "crypto";
 
 // Called by a scheduled cron job
@@ -53,9 +54,11 @@ async function handleMorningReminders(appUrl) {
       home_captain.id as home_captain_id,
       home_captain.email as home_captain_email,
       home_captain.name as home_captain_name,
+      home_captain.push_token as home_captain_push_token,
       away_captain.id as away_captain_id,
       away_captain.email as away_captain_email,
       away_captain.name as away_captain_name,
+      away_captain.push_token as away_captain_push_token,
       v.name as venue_name
     FROM matches m
     JOIN leagues l ON m.league_id = l.id
@@ -91,6 +94,7 @@ async function handleMorningReminders(appUrl) {
       const opponentName =
         match[side === "home" ? "away_team_name" : "home_team_name"];
       const captainId = match[`${side}_captain_id`];
+      const captainPushToken = match[`${side}_captain_push_token`];
 
       if (!teamId || !captainEmail) continue;
 
@@ -185,6 +189,15 @@ async function handleMorningReminders(appUrl) {
           `,
           text: `Match reminder: ${teamName} vs ${opponentName} on ${matchDate} at ${match.time_slot}. Confirm: ${confirmUrl} | Decline: ${declineUrl}`,
         });
+
+        if (captainPushToken) {
+          await sendPush(
+            captainPushToken,
+            `${urgencyLabel} — Are you in?`,
+            `${teamName} vs ${opponentName} — ${matchDate} at ${match.time_slot}. Open the app to confirm.`,
+            { type: "match_reminder", matchId: match.match_id }
+          );
+        }
 
         if (captainId) {
           await sql`

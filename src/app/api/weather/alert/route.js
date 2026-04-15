@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
+import { sendPush } from "@/app/api/utils/send-push";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 
 export async function POST(request) {
@@ -40,7 +41,7 @@ export async function POST(request) {
     }
 
     const captains = await sql`
-      SELECT DISTINCT au.id, au.email, au.name
+      SELECT DISTINCT au.id, au.email, au.name, au.push_token
       FROM teams t
       JOIN league_slots ls ON t.slot_id = ls.id
       JOIN auth_users au ON t.captain_user_id = au.id
@@ -69,6 +70,15 @@ export async function POST(request) {
             ${message}
           )
         `;
+
+        if (captain.push_token) {
+          await sendPush(
+            captain.push_token,
+            alertLabel + " — " + league.name,
+            message,
+            { type: notifType }
+          );
+        }
 
         if (captain.email) {
           await sendEmail({
