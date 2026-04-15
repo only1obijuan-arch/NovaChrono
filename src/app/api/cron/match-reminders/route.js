@@ -7,9 +7,13 @@ import crypto from "crypto";
 // ?type=midday             — 12PM alert for same-day unconfirmed matches
 
 export async function POST(request) {
+  const authHeader = request.headers.get("authorization");
+  const cronSecret = process.env.CRON_SECRET;
+  console.log("AUTH HEADER:", authHeader);
+  console.log("CRON SECRET:", cronSecret);
+  console.log("MATCH:", authHeader === `Bearer ${cronSecret}`);
+
   try {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
 
     if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
