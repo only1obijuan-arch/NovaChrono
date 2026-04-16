@@ -1,7 +1,10 @@
 import { Tabs } from "expo-router";
 import { Calendar, History, User } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function RefereeTabLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
@@ -11,8 +14,8 @@ export default function RefereeTabLayout() {
           borderTopWidth: 1,
           borderTopColor: "rgba(164,45,180,0.2)",
           paddingTop: 8,
-          paddingBottom: 8,
-          height: 64,
+          paddingBottom: insets.bottom + 12,
+          height: 70 + insets.bottom,
         },
         tabBarActiveTintColor: "#A42DB4",
         tabBarInactiveTintColor: "rgba(164,45,180,0.3)",

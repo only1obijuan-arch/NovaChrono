@@ -278,7 +278,7 @@ export default function More() {
         <TouchableOpacity
           onPress={async () => {
             await signOut();
-            router.replace("/");
+            router.replace("/auth/login");
           }}
           activeOpacity={0.7}
           style={{

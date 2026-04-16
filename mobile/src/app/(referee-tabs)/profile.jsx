@@ -2,6 +2,7 @@ import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useUser } from "@/utils/auth/useUser";
+import { useAuth } from "@/utils/auth/useAuth";
 import { useRouter } from "expo-router";
 import { MapPin, LogOut, User as UserIcon } from "lucide-react-native";
 
@@ -18,6 +19,7 @@ export default function Profile() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useUser();
+  const { signOut } = useAuth();
 
   return (
     <View style={{ flex: 1, backgroundColor: "#091833" }}>
@@ -264,7 +266,10 @@ export default function Profile() {
 
         {/* Sign out */}
         <TouchableOpacity
-          onPress={() => router.replace("/auth/role-select")}
+          onPress={async () => {
+            await signOut();
+            router.replace("/auth/login");
+          }}
           activeOpacity={0.7}
           style={{
             flexDirection: "row",
