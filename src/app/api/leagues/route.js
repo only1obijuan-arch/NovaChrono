@@ -54,12 +54,19 @@ export async function POST(request) {
     }
 
     if (action === "CREATE_NEW_SEASON") {
-      const { parentLeagueId, seasonName } = data;
+      const { parentLeagueId, seasonName, seasonStartDate } = data;
 
       const [parentLeague] =
         await sql`SELECT * FROM leagues WHERE id = ${parentLeagueId}`;
       if (!parentLeague) {
         throw new Error("Parent league not found");
+      }
+
+      let seasonEndDate = null;
+      if (seasonStartDate) {
+        const start = new Date(seasonStartDate);
+        start.setMonth(start.getMonth() + 3);
+        seasonEndDate = start.toISOString().split("T")[0];
       }
 
       const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -74,7 +81,7 @@ export async function POST(request) {
           ${parentLeague.venue_id}, ${parentLeague.name}, ${
             parentLeague.day_of_week
           },
-          NULL, NULL, ${parentLeague.match_format}, ${
+          ${seasonStartDate || null}, ${seasonEndDate}, ${parentLeague.match_format}, ${
             parentLeague.match_duration_minutes
           },
           ${parentLeague.fields_count}, ${JSON.stringify(

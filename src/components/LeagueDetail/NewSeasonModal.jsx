@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 
-export function NewSeasonModal({ show, onClose, onCreate, seasonName, setSeasonName, isPending }) {
+export function NewSeasonModal({ show, onClose, onCreate, seasonName, setSeasonName, seasonStartDate, setSeasonStartDate, isPending }) {
   if (!show) return null;
 
   return (
@@ -19,9 +19,17 @@ export function NewSeasonModal({ show, onClose, onCreate, seasonName, setSeasonN
           onChange={(e) => setSeasonName(e.target.value)}
           autoFocus
         />
+        <label className="ld-modal-label" style={{ marginTop: 16 }}>START DATE</label>
+        <input
+          required
+          type="date"
+          className="ld-modal-input"
+          value={seasonStartDate}
+          onChange={(e) => setSeasonStartDate(e.target.value)}
+        />
         <div className="ld-modal-btns">
           <button type="button" className="ld-modal-cancel" onClick={onClose}>CANCEL</button>
-          <button className="ld-modal-submit" onClick={onCreate} disabled={isPending}>
+          <button className="ld-modal-submit" onClick={onCreate} disabled={isPending || !seasonStartDate}>
             {isPending ? "CREATING..." : "CREATE"}
           </button>
         </div>

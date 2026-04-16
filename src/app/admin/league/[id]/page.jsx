@@ -27,6 +27,7 @@ export default function LeagueDetail({ params }) {
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [teamForm, setTeamForm] = useState({ name: "" });
   const [newSeasonName, setNewSeasonName] = useState("");
+  const [newSeasonStartDate, setNewSeasonStartDate] = useState("");
 
   // Postpone round state
   const [showPostponeModal, setShowPostponeModal] = useState(false);
@@ -117,13 +118,14 @@ export default function LeagueDetail({ params }) {
   });
 
   const createNewSeasonMutation = useMutation({
-    mutationFn: async (seasonName) => {
+    mutationFn: async ({ seasonName, seasonStartDate }) => {
       const res = await fetch("/api/leagues", {
         method: "POST",
         body: JSON.stringify({
           action: "CREATE_NEW_SEASON",
           parentLeagueId: id,
           seasonName,
+          seasonStartDate,
         }),
       });
       if (!res.ok) throw new Error("Failed to create new season");
@@ -244,8 +246,11 @@ export default function LeagueDetail({ params }) {
   };
 
   const handleCreateNewSeason = () => {
-    createNewSeasonMutation.mutate(newSeasonName, {
-      onSuccess: () => setShowNewSeasonModal(false),
+    createNewSeasonMutation.mutate({ seasonName: newSeasonName, seasonStartDate: newSeasonStartDate }, {
+      onSuccess: () => {
+        setShowNewSeasonModal(false);
+        setNewSeasonStartDate("");
+      },
     });
   };
 
@@ -378,6 +383,8 @@ export default function LeagueDetail({ params }) {
         onCreate={handleCreateNewSeason}
         seasonName={newSeasonName}
         setSeasonName={setNewSeasonName}
+        seasonStartDate={newSeasonStartDate}
+        setSeasonStartDate={setNewSeasonStartDate}
         isPending={createNewSeasonMutation.isPending}
       />
 
