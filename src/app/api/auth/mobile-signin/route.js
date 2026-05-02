@@ -1,6 +1,13 @@
 import { pool } from "@/app/api/utils/db";
 import { verify } from "argon2";
 import { SignJWT } from "jose";
+import { randomUUID } from "crypto";
+import { z } from "zod";
+
+const signinSchema = z.object({
+  email: z.string().email().max(254),
+  password: z.string().min(1).max(128),
+});
 
 // Returns a signed JWT for mobile app sessions.
 // Protected by MOBILE_SECRET header so only the app can call it.
@@ -11,12 +18,11 @@ export async function POST(request) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const body = await request.json();
-    const { email, password } = body;
-
-    if (!email || !password || typeof email !== "string" || typeof password !== "string") {
-      return Response.json({ error: "Email and password are required" }, { status: 400 });
+    const parsed = signinSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
+    const { email, password } = parsed.data;
 
     // Fetch user + credentials account
     const userResult = await pool.query(
@@ -45,7 +51,9 @@ export async function POST(request) {
       return Response.json({ error: "Please verify your email before signing in." }, { status: 403 });
     }
 
-    // Build JWT — same fields as the NextAuth JWT callback
+    // Build JWT — 7-day expiry; jti ties it to a revocable mobile_sessions row.
+    const jti = randomUUID();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
     const token = await new SignJWT({
       id: user.id,
@@ -56,9 +64,15 @@ export async function POST(request) {
       organization_id: user.organization_id,
     })
       .setProtectedHeader({ alg: "HS256" })
+      .setJti(jti)
       .setIssuedAt()
-      .setExpirationTime("30d")
+      .setExpirationTime("7d")
       .sign(secret);
+
+    await pool.query(
+      "INSERT INTO mobile_sessions (jti, user_id, expires_at) VALUES ($1, $2, $3)",
+      [jti, user.id, expiresAt]
+    );
 
     return Response.json({
       token,

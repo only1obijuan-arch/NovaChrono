@@ -3,14 +3,8 @@ import { auth } from "@/auth";
 import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 export async function GET(request) {
   try {
-    const authHeader = request.headers.get("authorization");
-    console.log("[team] auth header:", authHeader?.slice(0, 30) ?? "MISSING");
-
     const mobileUser = await verifyMobileToken(request);
-    console.log("[team] mobileUser:", mobileUser ? mobileUser.id : "NULL");
-
     const session = mobileUser ? { user: mobileUser } : await auth();
-    console.log("[team] session user:", session?.user?.id ?? "NULL");
 
     if (!session?.user?.id) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });

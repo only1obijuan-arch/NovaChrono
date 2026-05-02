@@ -108,6 +108,25 @@ export default function MatchControl({ params }) {
     },
   });
 
+  const startSecondHalfMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "START_SECOND_HALF", matchId: id }),
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      setSeconds(0);
+      setHalf(2);
+      setHalfStatus("second");
+      setIsActive(true);
+      toast.success("2nd half started!");
+      queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
+    },
+  });
+
   const endMatchMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/matches", {
@@ -156,25 +175,46 @@ export default function MatchControl({ params }) {
   }, [isActive, halfStatus]);
 
   useEffect(() => {
-    console.log("match status sync:", data?.match?.status, halfStatus);
     if (!data?.match) return;
-    const status = data.match.status;
-    if (status === "live" && halfStatus === "pre") {
-      setHalfStatus("running");
-      setIsActive(true);
-    } else if (status === "final") {
-      setHalfStatus("finished");
-      setIsActive(false);
-    }
-  }, [data?.match?.status]);
+    const { status, start_time, half2_start_time } = data.match;
 
-  const startSecondHalf = () => {
-    setSeconds(0);
-    setHalf(2);
-    setHalfStatus("second");
-    setIsActive(true);
-    toast.success("2nd half started!");
-  };
+    if (status === "final") {
+      setIsActive(false);
+      setHalfStatus("finished");
+      return;
+    }
+
+    if (status === "live" && halfStatus === "pre") {
+      const now = Date.now();
+      if (half2_start_time) {
+        const elapsed = Math.floor((now - new Date(half2_start_time).getTime()) / 1000);
+        setHalf(2);
+        if (elapsed >= HALF_DURATION) {
+          setSeconds(HALF_DURATION);
+          setHalfStatus("finished_halves");
+        } else {
+          setSeconds(elapsed);
+          setHalfStatus("second");
+          setIsActive(true);
+        }
+      } else if (start_time) {
+        const elapsed = Math.floor((now - new Date(start_time).getTime()) / 1000);
+        if (elapsed >= HALF_DURATION) {
+          setSeconds(HALF_DURATION);
+          setHalfStatus("halftime");
+        } else {
+          setSeconds(elapsed);
+          setHalfStatus("running");
+          setIsActive(true);
+        }
+      } else {
+        setHalfStatus("running");
+        setIsActive(true);
+      }
+    }
+  }, [data?.match?.status, data?.match?.start_time, data?.match?.half2_start_time]);
+
+  const startSecondHalf = () => startSecondHalfMutation.mutate();
 
   const formatTime = (s) => {
     const mins = Math.floor(s / 60);

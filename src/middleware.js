@@ -11,6 +11,13 @@ const roleRoutes = {
   "/captain": ["captain", "super_admin"],
 };
 
+const apiRoleRoutes = {
+  "/api/super-admin": ["super_admin"],
+  "/api/admin": ["venue_admin", "super_admin"],
+  "/api/org-admin": ["org_admin", "super_admin"],
+  "/api/captain": ["captain", "super_admin"],
+};
+
 // API routes that do not require a session
 const publicApiPrefixes = [
   "/api/auth",
@@ -40,9 +47,22 @@ export default auth(async (req) => {
   // Protect non-public API routes
   if (pathname.startsWith("/api/")) {
     const isPublic = publicApiPrefixes.some((prefix) => pathname.startsWith(prefix));
-    if (!isPublic && !session?.user) {
+    if (isPublic) return NextResponse.next();
+
+    if (!session?.user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const apiMatchedPrefix = Object.keys(apiRoleRoutes).find((prefix) =>
+      pathname.startsWith(prefix)
+    );
+    if (apiMatchedPrefix) {
+      const allowedRoles = apiRoleRoutes[apiMatchedPrefix];
+      if (!allowedRoles.includes(session.user.role)) {
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+
     return NextResponse.next();
   }
 

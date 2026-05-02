@@ -1,4 +1,4 @@
-import { sql, pool } from "@/app/api/utils/db";
+import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
 
 export async function GET(request) {

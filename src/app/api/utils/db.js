@@ -31,3 +31,37 @@ export async function sql(strings, ...values) {
   const { rows } = await pool.query(text, params);
   return rows;
 }
+
+// Runs `fn(txSql)` inside a single database transaction.
+// `txSql` is a tagged-template helper bound to the checked-out client so
+// every query in the callback shares the same connection and therefore the
+// same BEGIN/COMMIT scope.  On any throw the transaction is rolled back and
+// the error is re-thrown to the caller.
+export async function withTransaction(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    function txSql(strings, ...values) {
+      let text = "";
+      const params = [];
+      strings.forEach((string, i) => {
+        text += string;
+        if (i < values.length) {
+          params.push(values[i]);
+          text += `$${params.length}`;
+        }
+      });
+      return client.query(text, params).then((r) => r.rows);
+    }
+
+    const result = await fn(txSql);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}

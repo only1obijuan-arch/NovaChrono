@@ -2,6 +2,39 @@ import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
+import { z } from "zod";
+
+const MATCH_STATUSES = ["scheduled", "live", "final", "postponed", "cancelled"];
+
+const matchActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("START_MATCH"), matchId: z.string().min(1) }),
+  z.object({
+    action: z.literal("RECORD_GOAL"),
+    matchId: z.string().min(1),
+    type: z.enum(["goal_home", "goal_away"]),
+    playerId: z.string().min(1).nullable().optional(),
+  }),
+  z.object({
+    action: z.literal("DELETE_EVENT"),
+    matchId: z.string().min(1),
+    eventId: z.string().min(1),
+  }),
+  z.object({ action: z.literal("END_MATCH"), matchId: z.string().min(1) }),
+  z.object({ action: z.literal("START_SECOND_HALF"), matchId: z.string().min(1) }),
+  z.object({
+    action: z.literal("ADMIN_OVERRIDE"),
+    matchId: z.string().min(1),
+    homeScore: z.number().int().min(0).max(99),
+    awayScore: z.number().int().min(0).max(99),
+    status: z.enum(MATCH_STATUSES),
+    reason: z.string().max(500).optional(),
+  }),
+  z.object({
+    action: z.literal("ASSIGN_REFEREE"),
+    matchId: z.string().min(1),
+    refereeId: z.string().min(1).nullable(),
+  }),
+]);
 
 async function getSession(request) {
   const mobileUser = await verifyMobileToken(request);
@@ -24,7 +57,21 @@ export async function POST(request) {
       );
     }
 
-    const { action, matchId, ...data } = await request.json();
+    const parsed = matchActionSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return Response.json({ error: parsed.error.format() }, { status: 400 });
+    }
+    const { action, matchId, ...data } = parsed.data;
+
+    if (
+      user.role === "referee" &&
+      ["START_MATCH", "RECORD_GOAL", "END_MATCH", "START_SECOND_HALF"].includes(action)
+    ) {
+      const [match] = await sql`SELECT referee_id FROM matches WHERE id = ${matchId}`;
+      if (!match || match.referee_id !== user.id) {
+        return Response.json({ error: "Not assigned to this match" }, { status: 403 });
+      }
+    }
 
     if (action === "START_MATCH") {
       await sql`UPDATE matches SET status = 'live', start_time = CURRENT_TIMESTAMP WHERE id = ${matchId}`;
@@ -50,6 +97,12 @@ export async function POST(request) {
       const { eventId } = data;
       const [event] =
         await sql`SELECT * FROM match_events WHERE id = ${eventId}`;
+      if (user.role === "referee") {
+        const [match] = await sql`SELECT referee_id FROM matches WHERE id = ${event?.match_id}`;
+        if (!match || match.referee_id !== user.id) {
+          return Response.json({ error: "Not assigned to this match" }, { status: 403 });
+        }
+      }
       if (event && (event.type === "goal_home" || event.type === "goal_away")) {
         if (event.type === "goal_home") {
           await sql`UPDATE matches SET home_score = GREATEST(0, home_score - 1) WHERE id = ${event.match_id}`;
@@ -75,11 +128,6 @@ export async function POST(request) {
       const awayWon = a > h ? 1 : 0;
       const drawn = h === a ? 1 : 0;
 
-      console.log("[END_MATCH] matchRow:", { league_id: matchRow.league_id, home_slot_id: matchRow.home_slot_id, away_slot_id: matchRow.away_slot_id, home_score: h, away_score: a });
-      console.log("[END_MATCH] homeTeam:", homeTeam ?? "NOT FOUND");
-      console.log("[END_MATCH] awayTeam:", awayTeam ?? "NOT FOUND");
-      console.log("[END_MATCH] calc:", { homeWon, awayWon, drawn, homePoints: homeWon * 3 + drawn, awayPoints: awayWon * 3 + drawn });
-
       if (homeTeam) {
         await sql`
           UPDATE standings SET
@@ -93,9 +141,6 @@ export async function POST(request) {
             points = points + ${homeWon * 3 + drawn}
           WHERE league_id = ${matchRow.league_id} AND team_id = ${homeTeam.id}
         `;
-        console.log("[END_MATCH] home standings updated for team_id:", homeTeam.id);
-      } else {
-        console.log("[END_MATCH] SKIPPED home standings — no active team found for slot:", matchRow.home_slot_id);
       }
 
       if (awayTeam) {
@@ -111,11 +156,14 @@ export async function POST(request) {
             points = points + ${awayWon * 3 + drawn}
           WHERE league_id = ${matchRow.league_id} AND team_id = ${awayTeam.id}
         `;
-        console.log("[END_MATCH] away standings updated for team_id:", awayTeam.id);
-      } else {
-        console.log("[END_MATCH] SKIPPED away standings — no active team found for slot:", matchRow.away_slot_id);
       }
 
+      return Response.json({ success: true });
+    }
+
+    if (action === "START_SECOND_HALF") {
+      await sql`UPDATE matches SET half2_start_time = CURRENT_TIMESTAMP WHERE id = ${matchId}`;
+      await sql`INSERT INTO match_events (match_id, type) VALUES (${matchId}, 'start_second_half')`;
       return Response.json({ success: true });
     }
 

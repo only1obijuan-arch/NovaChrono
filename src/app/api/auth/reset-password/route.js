@@ -1,7 +1,24 @@
-import sql from "@/app/api/utils/sql";
+import sql, { withTransaction } from "@/app/api/utils/sql";
 import { hash } from "argon2";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 import crypto from "crypto";
+import { z } from "zod";
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1).max(512),
+  password: z.string().min(8).max(128),
+});
+
+async function fetchResetToken(token) {
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const [row] = await sql`
+    SELECT id, user_id, expires_at, used
+    FROM password_reset_tokens
+    WHERE token = ${tokenHash}
+    LIMIT 1
+  `;
+  return row ?? null;
+}
 
 export async function GET(request) {
   try {
@@ -12,20 +29,9 @@ export async function GET(request) {
       return Response.json({ valid: false }, { status: 400 });
     }
 
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    const tokens = await sql`
-      SELECT id, user_id, expires_at, used
-      FROM password_reset_tokens
-      WHERE token = ${tokenHash}
-    `;
+    const resetToken = await fetchResetToken(token);
 
-    if (tokens.length === 0) {
-      return Response.json({ valid: false });
-    }
-
-    const resetToken = tokens[0];
-
-    if (resetToken.used || new Date(resetToken.expires_at) < new Date()) {
+    if (!resetToken || resetToken.used || new Date(resetToken.expires_at) < new Date()) {
       return Response.json({ valid: false });
     }
 
@@ -38,21 +44,11 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const { token, password } = await request.json();
-
-    if (!token || !password) {
-      return Response.json(
-        { error: "Token and password are required" },
-        { status: 400 },
-      );
+    const parsed = resetPasswordSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
-
-    if (password.length < 8) {
-      return Response.json(
-        { error: "Password must be at least 8 characters long" },
-        { status: 400 },
-      );
-    }
+    const { token, password } = parsed.data;
 
     const ip = request.headers.get("x-forwarded-for") ?? "unknown";
     const { allowed } = await rateLimit(`reset-attempt:${ip}`, { max: 10, windowMinutes: 15 });
@@ -60,21 +56,14 @@ export async function POST(request) {
       return Response.json({ error: "Too many attempts. Try again later." }, { status: 429 });
     }
 
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    const tokens = await sql`
-      SELECT id, user_id, expires_at, used
-      FROM password_reset_tokens
-      WHERE token = ${tokenHash}
-    `;
+    const resetToken = await fetchResetToken(token);
 
-    if (tokens.length === 0) {
+    if (!resetToken) {
       return Response.json(
         { error: "Invalid or expired reset token" },
         { status: 400 },
       );
     }
-
-    const resetToken = tokens[0];
 
     if (resetToken.used) {
       return Response.json(
@@ -92,20 +81,18 @@ export async function POST(request) {
 
     const hashedPassword = await hash(password);
 
-    await sql`
-      DELETE FROM auth_accounts
-      WHERE "userId" = ${resetToken.user_id}
-      AND provider = 'credentials'
-    `;
-    await sql`
-      INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)
-      VALUES (${resetToken.user_id}, 'credentials', 'credentials', ${resetToken.user_id}, ${hashedPassword})
-    `;
-    await sql`
-      UPDATE password_reset_tokens
-      SET used = TRUE
-      WHERE id = ${resetToken.id}
-    `;
+    await withTransaction(async (txSql) => {
+      await txSql`
+        INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)
+        VALUES (${resetToken.user_id}, 'credentials', 'credentials', ${resetToken.user_id}, ${hashedPassword})
+        ON CONFLICT ("userId", provider) DO UPDATE SET password = ${hashedPassword}
+      `;
+      await txSql`
+        UPDATE password_reset_tokens
+        SET used = TRUE
+        WHERE id = ${resetToken.id}
+      `;
+    });
 
     return Response.json({
       success: true,

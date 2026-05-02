@@ -1,19 +1,17 @@
 import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { requireRole } from "@/app/api/utils/auth";
 import { hash } from "argon2";
+import { z } from "zod";
 
-async function requireAdmin() {
-  const session = await auth();
-  if (!session?.user?.id) return null;
-  const [user] =
-    await sql`SELECT * FROM auth_users WHERE id = ${session.user.id}`;
-  if (!user || !["venue_admin", "super_admin"].includes(user.role)) return null;
-  return user;
-}
+const createRefereeSchema = z.object({
+  venueId: z.string().min(1),
+  fieldNumber: z.coerce.number().int().min(1).max(999),
+  name: z.string().min(1).max(100).optional(),
+});
 
 export async function GET(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireRole(request, "venue_admin", "super_admin");
     if (!admin)
       return Response.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -22,6 +20,9 @@ export async function GET(request) {
 
     if (!venueId)
       return Response.json({ error: "venueId required" }, { status: 400 });
+
+    if (admin.role !== "super_admin" && venueId !== admin.venue_id)
+      return Response.json({ error: "Forbidden" }, { status: 403 });
 
     const referees = await sql`
       SELECT
@@ -42,18 +43,18 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireRole(request, "venue_admin", "super_admin");
     if (!admin)
       return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { venueId, fieldNumber, name } = await request.json();
-
-    if (!venueId || !fieldNumber) {
-      return Response.json(
-        { error: "venueId and fieldNumber required" },
-        { status: 400 },
-      );
+    const parsed = createRefereeSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
+    const { venueId, fieldNumber, name } = parsed.data;
+
+    if (admin.role !== "super_admin" && venueId !== admin.venue_id)
+      return Response.json({ error: "Forbidden" }, { status: 403 });
 
     const [venue] = await sql`SELECT * FROM venues WHERE id = ${venueId}`;
     if (!venue)
@@ -125,7 +126,7 @@ export async function POST(request) {
 
 export async function DELETE(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireRole(request, "venue_admin", "super_admin");
     if (!admin)
       return Response.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -134,6 +135,16 @@ export async function DELETE(request) {
 
     if (!refereeId)
       return Response.json({ error: "id required" }, { status: 400 });
+
+    if (admin.role !== "super_admin") {
+      const [referee] = await sql`
+        SELECT venue_id FROM auth_users WHERE id = ${refereeId} AND role = 'referee'
+      `;
+      if (!referee)
+        return Response.json({ error: "Referee not found" }, { status: 404 });
+      if (referee.venue_id !== admin.venue_id)
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     await sql`DELETE FROM auth_accounts WHERE "userId" = ${refereeId}`;
     await sql`DELETE FROM auth_users WHERE id = ${refereeId} AND role = 'referee'`;
