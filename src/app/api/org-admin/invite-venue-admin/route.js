@@ -3,6 +3,12 @@ import { sendEmail } from "@/app/api/utils/send-email";
 import { inviteVenueAdminEmail } from "@/emails/inviteVenueAdminEmail";
 import { auth } from "@/auth";
 import { randomBytes, createHash } from "crypto";
+import { z } from "zod";
+
+const inviteVenueAdminSchema = z.object({
+  email: z.string().email().max(254),
+  venueId: z.string().min(1),
+});
 
 export async function POST(request) {
   try {
@@ -23,13 +29,11 @@ export async function POST(request) {
       );
     }
 
-    const { email, venueId } = await request.json();
-    if (!email || !venueId) {
-      return Response.json(
-        { error: "Email and venue are required" },
-        { status: 400 },
-      );
+    const parsed = inviteVenueAdminSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
+    const { email, venueId } = parsed.data;
 
     const [venue] = await sql`
       SELECT * FROM venues WHERE id = ${venueId} AND organization_id = ${inviter.organization_id}

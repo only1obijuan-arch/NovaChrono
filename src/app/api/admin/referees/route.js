@@ -1,6 +1,7 @@
 import sql from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
 import { hash } from "argon2";
+import { randomBytes } from "crypto";
 import { z } from "zod";
 
 const createRefereeSchema = z.object({
@@ -159,6 +160,6 @@ export async function DELETE(request) {
 function generatePassword(fieldNumber, venueSlug) {
   const base = venueSlug.substring(0, 4).toUpperCase();
   const suffix = String(fieldNumber).padStart(2, "0");
-  const salt = Math.random().toString(36).substring(2, 6).toUpperCase();
+  const salt = randomBytes(4).toString("hex").toUpperCase();
   return `${base}-F${suffix}-${salt}`;
 }

@@ -1,7 +1,13 @@
--- NovaChrono Database Schema
--- Reconstructed from application code. Last updated: 2026-05-01.
--- There are no migrations in this repo; treat this file as the source of truth
--- for the current production shape until a migration tool is adopted.
+-- NovaChrono Database Schema — READ-ONLY REFERENCE SNAPSHOT
+-- Last updated: 2026-05-02.
+--
+-- DO NOT apply this file directly to any database.
+-- The authoritative source of truth is the migrations/ directory.
+-- To bring a database up to date run:  npm run migrate
+-- To check migration status run:       npm run migrate:status
+--
+-- This file exists only as a human-readable overview of the current schema.
+-- Keep it in sync manually when you add a new migration.
 --
 -- TABLE OF CONTENTS
 --   1. Extensions
@@ -149,7 +155,8 @@ CREATE TABLE leagues (
 CREATE TABLE league_slots (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   league_id    UUID NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
-  slot_number  INT  NOT NULL                               -- 1-based ordinal within the league
+  slot_number  INT  NOT NULL,                              -- 1-based ordinal within the league
+  UNIQUE (league_id, slot_number)
 );
 
 -- ---------------------------------------------------------------------------

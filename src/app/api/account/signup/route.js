@@ -41,33 +41,6 @@ export async function POST(request) {
       );
     }
 
-    // Check for an available slot before creating any records
-    const [availableSlot] = await sql`
-      SELECT ls.id
-      FROM league_slots ls
-      LEFT JOIN teams t ON t.slot_id = ls.id AND t.status = 'active'
-      WHERE ls.league_id = ${league.id} AND t.id IS NULL
-      ORDER BY ls.slot_number
-      LIMIT 1
-    `;
-    if (!availableSlot) {
-      return Response.json(
-        { error: "This league is full. No slots are available." },
-        { status: 400 },
-      );
-    }
-
-    // Check email not already taken
-    const [existing] = await sql`
-      SELECT id FROM auth_users WHERE LOWER(email) = LOWER(${email})
-    `;
-    if (existing) {
-      return Response.json(
-        { error: "An account with this email already exists" },
-        { status: 400 },
-      );
-    }
-
     const hashedPassword = await hash(password);
 
     // Generate email verification token before the transaction so it's ready
@@ -76,11 +49,39 @@ export async function POST(request) {
     const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await withTransaction(async (txSql) => {
-      const [newUser] = await txSql`
-        INSERT INTO auth_users (name, email, role)
-        VALUES (${name}, ${email}, 'captain')
-        RETURNING id, name, email, role
+      // Lock the slot inside the transaction to prevent concurrent signups
+      // claiming the same slot. FOR UPDATE SKIP LOCKED lets a second concurrent
+      // request skip this row and claim the next free slot rather than blocking.
+      const [claimedSlot] = await txSql`
+        SELECT ls.id
+        FROM league_slots ls
+        LEFT JOIN teams t ON t.slot_id = ls.id AND t.status = 'active'
+        WHERE ls.league_id = ${league.id} AND t.id IS NULL
+        ORDER BY ls.slot_number
+        LIMIT 1
+        FOR UPDATE OF ls SKIP LOCKED
       `;
+      if (!claimedSlot) {
+        const err = new Error("This league is full. No slots are available.");
+        err.code = "LEAGUE_FULL";
+        throw err;
+      }
+
+      let newUser;
+      try {
+        [newUser] = await txSql`
+          INSERT INTO auth_users (name, email, role)
+          VALUES (${name}, ${email}, 'captain')
+          RETURNING id, name, email, role
+        `;
+      } catch (insertErr) {
+        if (insertErr.code === "23505") {
+          const err = new Error("An account with this email already exists");
+          err.code = "DUPLICATE_EMAIL";
+          throw err;
+        }
+        throw insertErr;
+      }
 
       await txSql`
         INSERT INTO auth_accounts (
@@ -93,7 +94,7 @@ export async function POST(request) {
 
       await txSql`
         INSERT INTO teams (league_id, slot_id, name, captain_user_id)
-        VALUES (${league.id}, ${availableSlot.id}, ${teamName}, ${newUser.id})
+        VALUES (${league.id}, ${claimedSlot.id}, ${teamName}, ${newUser.id})
       `;
 
       await txSql`
@@ -115,6 +116,9 @@ export async function POST(request) {
 
     return Response.json({ success: true, requiresVerification: true });
   } catch (err) {
+    if (err.code === "LEAGUE_FULL" || err.code === "DUPLICATE_EMAIL") {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     console.error("Signup error:", err);
     return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }

@@ -3,6 +3,13 @@ import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { inviteOrgAdminEmail } from "@/emails/inviteOrgAdminEmail";
 import { randomBytes, createHash } from "crypto";
+import { z } from "zod";
+
+const inviteSchema = z.object({
+  email: z.string().email().max(254),
+  organizationId: z.string().min(1),
+  role: z.enum(["org_admin"]).default("org_admin"),
+});
 
 // Send an invite to become org_admin for an organization.
 // Called by the super-admin portal.
@@ -14,10 +21,11 @@ export async function POST(request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { email, organizationId, role = "org_admin" } = await request.json();
-    if (!email || !organizationId) {
-      return Response.json({ error: "Email and organization are required" }, { status: 400 });
+    const parsed = inviteSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
+    const { email, organizationId, role } = parsed.data;
 
     // Reject if account already exists
     const [existingUser] = await sql`

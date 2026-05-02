@@ -1,4 +1,5 @@
 import { pool } from "@/app/api/utils/db";
+import { rateLimit } from "@/app/api/utils/rate-limit";
 import { verify } from "argon2";
 import { SignJWT } from "jose";
 import { randomUUID } from "crypto";
@@ -23,6 +24,15 @@ export async function POST(request) {
       return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
     const { email, password } = parsed.data;
+
+    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const [{ allowed: ipAllowed }, { allowed: emailAllowed }] = await Promise.all([
+      rateLimit(`mobile-signin:ip:${ip}`, { max: 20, windowMinutes: 15 }),
+      rateLimit(`mobile-signin:email:${email.toLowerCase().trim()}`, { max: 5, windowMinutes: 15 }),
+    ]);
+    if (!ipAllowed || !emailAllowed) {
+      return Response.json({ error: "Too many requests" }, { status: 429 });
+    }
 
     // Fetch user + credentials account
     const userResult = await pool.query(
