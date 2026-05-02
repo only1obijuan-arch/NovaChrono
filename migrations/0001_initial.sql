@@ -1,8 +1,83 @@
 -- Migration 0001: initial schema baseline
--- Safe to run against an existing production database — all statements use
--- IF NOT EXISTS so re-running is a no-op.
+-- Safe to run against both fresh databases and legacy databases created before
+-- the migration system was added.  All CREATE TABLE statements use IF NOT EXISTS.
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ---------------------------------------------------------------------------
+-- Pre-flight: convert legacy TEXT-based auth_users.id to UUID
+-- ---------------------------------------------------------------------------
+-- Before this migration system existed, the database may have been set up with
+-- auth_users.id as TEXT (e.g. from a default NextAuth schema).  If that is the
+-- case, the FK constraints below (user_id UUID REFERENCES auth_users(id)) cannot
+-- be created because PostgreSQL requires the types to match exactly.
+--
+-- This block is a complete no-op on fresh databases or databases that already
+-- have auth_users.id as UUID.  On legacy TEXT-id databases it:
+--   1. Drops every FK that points at auth_users(id) so ALTER TYPE can proceed.
+--   2. Converts auth_users.id to UUID using USING id::uuid.
+--   3. Converts the FK columns in auth_accounts and password_reset_tokens (the
+--      two tables most likely to exist before mobile_sessions was added).
+DO $$
+DECLARE
+  v_type text;
+  v_rec  record;
+BEGIN
+  SELECT data_type INTO v_type
+  FROM   information_schema.columns
+  WHERE  table_schema = 'public'
+    AND  table_name   = 'auth_users'
+    AND  column_name  = 'id';
+
+  IF v_type = 'text' THEN
+    RAISE NOTICE 'auth_users.id is TEXT — converting to UUID for FK compatibility';
+
+    -- Drop all FK constraints that reference auth_users(id)
+    FOR v_rec IN
+      SELECT c.conrelid AS tbl_oid, c.conname AS cname
+      FROM   pg_constraint c
+      JOIN   pg_class      r ON r.oid = c.confrelid
+      WHERE  c.contype  = 'f'
+        AND  r.relname  = 'auth_users'
+        AND  r.relnamespace = 'public'::regnamespace
+    LOOP
+      EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I',
+                     v_rec.tbl_oid::regclass, v_rec.cname);
+    END LOOP;
+
+    -- Convert auth_users.id TEXT → UUID.
+    -- Must drop the DEFAULT first: ALTER TYPE cannot automatically cast the
+    -- stored DEFAULT expression (e.g. gen_random_uuid()::text) to the new
+    -- type; we restore the correct UUID default afterwards.
+    ALTER TABLE auth_users ALTER COLUMN id DROP DEFAULT;
+    ALTER TABLE auth_users ALTER COLUMN id TYPE UUID USING id::uuid;
+    ALTER TABLE auth_users ALTER COLUMN id SET DEFAULT gen_random_uuid();
+
+    -- Convert auth_accounts."userId" if that table exists with a TEXT FK column
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE  table_schema = 'public'
+        AND  table_name   = 'auth_accounts'
+        AND  column_name  = 'userId'
+        AND  data_type    = 'text'
+    ) THEN
+      ALTER TABLE auth_accounts
+        ALTER COLUMN "userId" TYPE UUID USING "userId"::uuid;
+    END IF;
+
+    -- Convert password_reset_tokens.user_id if that table exists with a TEXT FK column
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE  table_schema = 'public'
+        AND  table_name   = 'password_reset_tokens'
+        AND  column_name  = 'user_id'
+        AND  data_type    = 'text'
+    ) THEN
+      ALTER TABLE password_reset_tokens
+        ALTER COLUMN user_id TYPE UUID USING user_id::uuid;
+    END IF;
+  END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- Organizations & Venues

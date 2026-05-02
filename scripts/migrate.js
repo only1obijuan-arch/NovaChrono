@@ -46,6 +46,71 @@ loadEnvFile(join(root, ".env.local"));
 loadEnvFile(join(root, ".env"));
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a SQL script into individual statements, handling dollar-quoted blocks
+ * (e.g. DO $$ ... $$) so that the closing $$ is never mistaken for a statement
+ * terminator, and stripping single-line comments so that semicolons inside
+ * comments never trigger a false split.
+ */
+function splitStatements(sql) {
+  const out = [];
+  let buf = "";
+  let i = 0;
+  let dollarTag = null;
+
+  while (i < sql.length) {
+    // Inside a dollar-quoted block — only watch for the matching closing tag
+    if (dollarTag !== null) {
+      if (sql.startsWith(dollarTag, i)) {
+        buf += dollarTag;
+        i += dollarTag.length;
+        dollarTag = null;
+      } else {
+        buf += sql[i++];
+      }
+      continue;
+    }
+
+    // Strip single-line comments (advance past them without adding to buf)
+    if (sql[i] === "-" && sql[i + 1] === "-") {
+      while (i < sql.length && sql[i] !== "\n") i++;
+      continue;
+    }
+
+    // Dollar-quote open: $$ or $tag$
+    const dm = sql.slice(i).match(/^\$[A-Za-z_0-9]*\$/);
+    if (dm) {
+      dollarTag = dm[0];
+      buf += dollarTag;
+      i += dollarTag.length;
+      continue;
+    }
+
+    // Statement terminator
+    if (sql[i] === ";") {
+      buf += ";";
+      const stmt = buf.trim();
+      if (stmt !== ";") out.push(stmt);
+      buf = "";
+      i++;
+      continue;
+    }
+
+    buf += sql[i++];
+  }
+
+  // Trailing content without a terminating semicolon (shouldn't normally occur)
+  const tail = buf.trim();
+  if (tail) out.push(tail);
+
+  // Drop any entries that are only whitespace
+  return out.filter((s) => /\S/.test(s));
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 const showStatus = process.argv.includes("--status");
@@ -110,13 +175,16 @@ async function run() {
       console.log(`Applying ${file} …`);
       await client.query("BEGIN");
       try {
-        await client.query(sql);
+        const stmts = splitStatements(sql);
+        for (const stmt of stmts) {
+          await client.query(stmt);
+        }
         await client.query(
           "INSERT INTO schema_migrations (name) VALUES ($1)",
           [file]
         );
         await client.query("COMMIT");
-        console.log(`  ✓ done`);
+        console.log(`  ✓ done (${stmts.length} statements)`);
       } catch (err) {
         await client.query("ROLLBACK");
         console.error(`  ✗ failed: ${err.message}`);
