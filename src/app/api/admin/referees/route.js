@@ -1,8 +1,10 @@
-import sql from "@/app/api/utils/sql";
+import sql, { withTransaction } from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
 import { hash } from "argon2";
 import { randomBytes } from "crypto";
 import { z } from "zod";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const createRefereeSchema = z.object({
   venueId: z.string().min(1),
@@ -137,6 +139,9 @@ export async function DELETE(request) {
     if (!refereeId)
       return Response.json({ error: "id required" }, { status: 400 });
 
+    if (!UUID_RE.test(refereeId))
+      return Response.json({ error: "Invalid id" }, { status: 400 });
+
     if (admin.role !== "super_admin") {
       const [referee] = await sql`
         SELECT venue_id FROM auth_users WHERE id = ${refereeId} AND role = 'referee'
@@ -147,8 +152,10 @@ export async function DELETE(request) {
         return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    await sql`DELETE FROM auth_accounts WHERE "userId" = ${refereeId}`;
-    await sql`DELETE FROM auth_users WHERE id = ${refereeId} AND role = 'referee'`;
+    await withTransaction(async (txSql) => {
+      await txSql`DELETE FROM auth_accounts WHERE "userId" = ${refereeId}`;
+      await txSql`DELETE FROM auth_users WHERE id = ${refereeId} AND role = 'referee'`;
+    });
 
     return Response.json({ success: true });
   } catch (error) {

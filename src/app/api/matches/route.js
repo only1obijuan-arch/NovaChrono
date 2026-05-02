@@ -47,7 +47,7 @@ const WRITE_ROLES = ["referee", "venue_admin", "super_admin"];
 const ADMIN_ROLES = ["venue_admin", "super_admin"];
 
 function canAccessVenue(user, venueId) {
-  return user.role === "super_admin" || String(user.venue_id) === String(venueId);
+  return user.role === "super_admin" || (user.venue_id != null && user.venue_id === venueId);
 }
 
 export async function POST(request) {

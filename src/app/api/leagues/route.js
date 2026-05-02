@@ -1,7 +1,9 @@
-import { randomBytes } from "crypto";
+import { randomBytes, randomInt } from "crypto";
 import sql, { withTransaction } from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
 import { z } from "zod";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const leagueActionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -9,7 +11,15 @@ const leagueActionSchema = z.discriminatedUnion("action", [
     venueId: z.string().min(1),
     name: z.string().min(1).max(100),
     dayOfWeek: z.number().int().min(0).max(6),
-    seasonStartDate: z.string().min(1),
+    seasonStartDate: z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format")
+      .refine(
+        (s) => {
+          const d = new Date(s);
+          return !isNaN(d.getTime()) && s >= new Date().toISOString().split("T")[0];
+        },
+        { message: "seasonStartDate must be a valid present or future date" },
+      ),
     seasonEndDate: z.string().optional(),
     matchFormat: z.string().min(1).max(50),
     matchDuration: z.number().int().min(1).max(240),
@@ -38,7 +48,7 @@ const leagueActionSchema = z.discriminatedUnion("action", [
 ]);
 
 function canAccessVenue(user, venueId) {
-  return user.role === "super_admin" || String(user.venue_id) === String(venueId);
+  return user.role === "super_admin" || (user.venue_id != null && user.venue_id === venueId);
 }
 
 export async function POST(request) {
@@ -179,6 +189,13 @@ export async function POST(request) {
         return Response.json({ error: "Forbidden" }, { status: 403 });
       }
 
+      if (league.status !== "registration") {
+        return Response.json(
+          { error: "Fixtures can only be generated for leagues in registration status" },
+          { status: 400 },
+        );
+      }
+
       const [existingMatch] = await sql`
         SELECT id FROM matches WHERE league_id = ${leagueId} LIMIT 1
       `;
@@ -256,7 +273,7 @@ export async function POST(request) {
 
           const shuffledFixtures = [...roundFixtures];
           for (let i = shuffledFixtures.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            const j = randomInt(i + 1);
             [shuffledFixtures[i], shuffledFixtures[j]] = [
               shuffledFixtures[j],
               shuffledFixtures[i],
@@ -328,6 +345,8 @@ export async function GET(request) {
   const leagueId = searchParams.get("leagueId");
 
   if (leagueId) {
+    if (!UUID_RE.test(leagueId))
+      return Response.json({ error: "Invalid leagueId" }, { status: 400 });
     const [league] = await sql`SELECT * FROM leagues WHERE id = ${leagueId}`;
     if (!league || !canAccessVenue(user, league.venue_id)) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -336,6 +355,8 @@ export async function GET(request) {
   }
 
   if (venueId) {
+    if (!UUID_RE.test(venueId))
+      return Response.json({ error: "Invalid venueId" }, { status: 400 });
     if (!canAccessVenue(user, venueId)) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }

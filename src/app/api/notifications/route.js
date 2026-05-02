@@ -1,6 +1,8 @@
 import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function GET(request) {
   try {
     const session = await auth();
@@ -63,6 +65,8 @@ export async function PATCH(request) {
     }
 
     if (notificationId) {
+      if (!UUID_RE.test(notificationId))
+        return Response.json({ error: "Invalid notificationId" }, { status: 400 });
       await sql`
         UPDATE notifications
         SET read = TRUE
