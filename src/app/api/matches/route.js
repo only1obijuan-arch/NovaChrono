@@ -78,8 +78,14 @@ export async function POST(request) {
     }
 
     if (action === "START_MATCH") {
-      const [match] = await sql`SELECT status FROM matches WHERE id = ${matchId}`;
+      const [match] = await sql`
+        SELECT m.status, l.venue_id
+        FROM matches m
+        JOIN leagues l ON m.league_id = l.id
+        WHERE m.id = ${matchId}
+      `;
       if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+      if (!canAccessVenue(user, match.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
       if (match.status !== "scheduled") {
         return Response.json({ error: `Cannot start a match with status '${match.status}'` }, { status: 409 });
       }
@@ -90,8 +96,14 @@ export async function POST(request) {
 
     if (action === "RECORD_GOAL") {
       const { type, playerId } = data;
-      const [matchRow] = await sql`SELECT status, home_slot_id, away_slot_id FROM matches WHERE id = ${matchId}`;
+      const [matchRow] = await sql`
+        SELECT m.status, m.home_slot_id, m.away_slot_id, l.venue_id
+        FROM matches m
+        JOIN leagues l ON m.league_id = l.id
+        WHERE m.id = ${matchId}
+      `;
       if (!matchRow) return Response.json({ error: "Match not found" }, { status: 404 });
+      if (!canAccessVenue(user, matchRow.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
       if (matchRow.status !== "live") {
         return Response.json({ error: `Cannot record goals for a match with status '${matchRow.status}'` }, { status: 409 });
       }
@@ -108,14 +120,22 @@ export async function POST(request) {
 
     if (action === "DELETE_EVENT") {
       const { eventId } = data;
-      const [event] = await sql`SELECT * FROM match_events WHERE id = ${eventId}`;
+      const [matchVenueRow] = await sql`
+        SELECT l.venue_id
+        FROM matches m
+        JOIN leagues l ON m.league_id = l.id
+        WHERE m.id = ${matchId}
+      `;
+      if (!matchVenueRow) return Response.json({ error: "Match not found" }, { status: 404 });
+      if (!canAccessVenue(user, matchVenueRow.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
       if (user.role === "referee") {
-        const [match] = await sql`SELECT referee_id FROM matches WHERE id = ${event?.match_id}`;
+        const [match] = await sql`SELECT referee_id FROM matches WHERE id = ${matchId}`;
         if (!match || match.referee_id !== user.id) {
           return Response.json({ error: "Not assigned to this match" }, { status: 403 });
         }
       }
       await withTransaction(async (txSql) => {
+        const [event] = await txSql`SELECT * FROM match_events WHERE id = ${eventId} FOR UPDATE`;
         if (event && (event.type === "goal_home" || event.type === "goal_away")) {
           if (event.type === "goal_home") {
             await txSql`UPDATE matches SET home_score = GREATEST(0, home_score - 1) WHERE id = ${event.match_id}`;
@@ -130,16 +150,19 @@ export async function POST(request) {
 
     if (action === "END_MATCH") {
       let invalidEndState = null;
+      let matchNotFound = false;
+      let accessDenied = false;
       await withTransaction(async (txSql) => {
-        // Lock the row so concurrent END_MATCH calls queue rather than race.
         const [matchRow] = await txSql`
-          SELECT status, league_id, home_slot_id, away_slot_id, home_score, away_score
-          FROM matches
-          WHERE id = ${matchId}
-          FOR UPDATE
+          SELECT m.status, m.league_id, m.home_slot_id, m.away_slot_id, m.home_score, m.away_score, l.venue_id
+          FROM matches m
+          JOIN leagues l ON m.league_id = l.id
+          WHERE m.id = ${matchId}
+          FOR UPDATE OF m
         `;
 
-        if (!matchRow) return;
+        if (!matchRow) { matchNotFound = true; return; }
+        if (!canAccessVenue(user, matchRow.venue_id)) { accessDenied = true; return; }
         // Idempotency guard: if a previous call already finalised the match, do nothing.
         if (matchRow.status === "final") return;
         if (matchRow.status !== "live") { invalidEndState = matchRow.status; return; }
@@ -187,6 +210,8 @@ export async function POST(request) {
         }
       });
 
+      if (matchNotFound) return Response.json({ error: "Match not found" }, { status: 404 });
+      if (accessDenied) return Response.json({ error: "Access denied" }, { status: 403 });
       if (invalidEndState !== null) {
         return Response.json({ error: `Cannot end a match with status '${invalidEndState}'` }, { status: 409 });
       }
@@ -194,8 +219,14 @@ export async function POST(request) {
     }
 
     if (action === "START_SECOND_HALF") {
-      const [match] = await sql`SELECT status FROM matches WHERE id = ${matchId}`;
+      const [match] = await sql`
+        SELECT m.status, l.venue_id
+        FROM matches m
+        JOIN leagues l ON m.league_id = l.id
+        WHERE m.id = ${matchId}
+      `;
       if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+      if (!canAccessVenue(user, match.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
       if (match.status !== "live") {
         return Response.json({ error: `Cannot start second half for a match with status '${match.status}'` }, { status: 409 });
       }
