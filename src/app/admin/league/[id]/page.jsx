@@ -67,6 +67,17 @@ export default function LeagueDetail({ params }) {
     },
   });
 
+  const { data: refereesData } = useQuery({
+    queryKey: ["referees", league?.venue_id],
+    queryFn: async () => {
+      if (!league?.venue_id) return { referees: [] };
+      const res = await fetch(`/api/admin/referees?venueId=${league.venue_id}`);
+      return res.json();
+    },
+    enabled: !!league?.venue_id,
+  });
+
+  const referees = refereesData?.referees || [];
   // League mutations
   const generateFixturesMutation = useMutation({
     mutationFn: async () => {
@@ -187,6 +198,16 @@ export default function LeagueDetail({ params }) {
       toast.success("Team removed!");
       queryClient.invalidateQueries({ queryKey: ["league-teams", id] });
     },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const assignRefereeMutation = useMutation({
+    mutationFn: async ({ matchId, refereeId }) => {
+      const res = await fetch('/api/matches', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'ASSIGN_REFEREE', matchId, refereeId }) });
+      if (!res.ok) throw new Error('Failed to assign referee');
+      return res.json();
+    },
+    onSuccess: () => { toast.success('Referee updated'); queryClient.invalidateQueries({ queryKey:["league-matches", id] }); },
     onError: (err) => toast.error(err.message),
   });
 
@@ -348,7 +369,7 @@ export default function LeagueDetail({ params }) {
                   </button>
                 </div>
               )}
-              <FixturesTab matches={matches} />
+              <FixturesTab matches={matches} referees={referees} onAssignReferee={(matchId, refereeId) => assignRefereeMutation.mutate({ matchId, refereeId })} />
             </>
           )}
 
