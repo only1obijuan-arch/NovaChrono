@@ -24,6 +24,9 @@ export default function MatchControl({ params }) {
   const [half, setHalf] = useState(1); // 1 or 2
   const [halfStatus, setHalfStatus] = useState("pre"); // pre | running | halftime | second | finished
   const [showPlayerSelect, setShowPlayerSelect] = useState(null);
+  const [pendingGoalType, setPendingGoalType] = useState(null);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [serverNow, setServerNow] = useState(Date.now());
   const timerRef = useRef(null);
 
   const { data, isLoading } = useQuery({
@@ -144,77 +147,25 @@ export default function MatchControl({ params }) {
     },
   });
 
-  // Timer tick — auto-stop at 20 mins
-  useEffect(() => {
-    if (isActive) {
-      timerRef.current = setInterval(() => {
-        setSeconds((prev) => {
-          if (prev + 1 >= HALF_DURATION) {
-            clearInterval(timerRef.current);
-            setIsActive(false);
-            if (halfStatus === "running") {
-              setHalfStatus("halftime");
-              toast("⏸ Half time!", {
-                description: "Start the 2nd half when ready.",
-              });
-            } else if (halfStatus === "second") {
-              setHalfStatus("finished_halves");
-              toast("⏱ Full time!", {
-                description: "End the match when ready.",
-              });
-            }
-            return HALF_DURATION;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    } else {
-      clearInterval(timerRef.current);
-    }
-    return () => clearInterval(timerRef.current);
-  }, [isActive, halfStatus]);
-
   useEffect(() => {
     if (!data?.match) return;
-    const { status, start_time, half2_start_time } = data.match;
-
-    if (status === "final") {
-      setIsActive(false);
-      setHalfStatus("finished");
-      return;
-    }
-
-    if (status === "live" && halfStatus === "pre") {
-      const now = Date.now();
-      if (half2_start_time) {
-        const elapsed = Math.floor((now - new Date(half2_start_time).getTime()) / 1000);
-        setHalf(2);
-        if (elapsed >= HALF_DURATION) {
-          setSeconds(HALF_DURATION);
-          setHalfStatus("finished_halves");
-        } else {
-          setSeconds(elapsed);
-          setHalfStatus("second");
-          setIsActive(true);
-        }
-      } else if (start_time) {
-        const elapsed = Math.floor((now - new Date(start_time).getTime()) / 1000);
-        if (elapsed >= HALF_DURATION) {
-          setSeconds(HALF_DURATION);
-          setHalfStatus("halftime");
-        } else {
-          setSeconds(elapsed);
-          setHalfStatus("running");
-          setIsActive(true);
-        }
-      } else {
-        setHalfStatus("running");
-        setIsActive(true);
-      }
-    }
-  }, [data?.match?.status, data?.match?.start_time, data?.match?.half2_start_time]);
+    const { status, half2_start_time } = data.match;
+    if (status === 'final') { setIsActive(false); setHalfStatus('finished'); return; }
+    if (status === 'live') { setHalf(half2_start_time ? 2 : 1); setHalfStatus(half2_start_time ? 'second' : 'running'); setIsActive(true); }
+  }, [data?.match?.status, data?.match?.half2_start_time]);
 
   const startSecondHalf = () => startSecondHalfMutation.mutate();
+
+  const getElapsedSeconds = () => {
+    if (!data?.match || data.match.status !== "live") return seconds;
+    const startPoint = half === 2 ? data.match.half2_start_time : data.match.start_time;
+    if (!startPoint) return seconds;
+    const elapsed = Math.max(0, Math.floor((serverNow - new Date(startPoint).getTime()) / 1000));
+    return Math.min(elapsed, HALF_DURATION);
+  };
+  const displaySeconds = getElapsedSeconds();
+  const halftimeDetected = half === 1 && displaySeconds >= HALF_DURATION;
+  const fulltimeDetected = half === 2 && displaySeconds >= HALF_DURATION;
 
   const formatTime = (s) => {
     const mins = Math.floor(s / 60);
@@ -226,12 +177,8 @@ export default function MatchControl({ params }) {
 
   const handleGoalClick = (type) => {
     const team = type === "goal_home" ? "home" : "away";
-    const players = team === "home" ? homePlayers : awayPlayers;
-    if (players.length === 0) {
-      recordGoalMutation.mutate({ type, playerId: null });
-    } else {
-      setShowPlayerSelect(team);
-    }
+    setPendingGoalType(type);
+    setShowPlayerSelect(team);
   };
 
   if (isLoading || !data)
@@ -278,8 +225,8 @@ export default function MatchControl({ params }) {
   const isFinished = match?.status === "final";
   const canScoreGoals =
     isLive && (halfStatus === "running" || halfStatus === "second");
-  const isHalftime = halfStatus === "halftime";
-  const isFulltime = halfStatus === "finished_halves";
+  const isHalftime = halfStatus === "halftime" || halftimeDetected;
+  const isFulltime = halfStatus === "finished_halves" || fulltimeDetected;
 
   // Timer color based on state
   const timerColor = isHalftime
@@ -410,7 +357,7 @@ export default function MatchControl({ params }) {
                       : "none",
               }}
             >
-              {formatTime(seconds)}
+              {formatTime(displaySeconds)}
             </p>
             {halfStatus !== "pre" && (
               <p
@@ -456,7 +403,7 @@ export default function MatchControl({ params }) {
               <div
                 className="mc-progress-fill"
                 style={{
-                  width: `${Math.min((seconds / HALF_DURATION) * 100, 100)}%`,
+                   width: `${Math.min((displaySeconds / HALF_DURATION) * 100, 100)}%`,
                   background: isHalftime
                     ? "#FFD700"
                     : isFulltime
@@ -558,7 +505,7 @@ export default function MatchControl({ params }) {
               <button
                 className="mc-ctrl-btn mc-end-btn"
                 onClick={() => {
-                  if (confirm("End the match?")) endMatchMutation.mutate();
+                   setShowEndConfirm(true);
                 }}
               >
                 <CheckCircle2 size={20} /> END MATCH
@@ -632,6 +579,29 @@ export default function MatchControl({ params }) {
         </div>
       </div>
 
+{showEndConfirm && (
+        <div className="mc-modal-overlay">
+          <div className="mc-modal">
+            <div className="mc-modal-header">
+              <h3 className="mc-modal-title">CONFIRM END MATCH</h3>
+              <button className="mc-modal-close" onClick={() => setShowEndConfirm(false)}><X size={18} /></button>
+            </div>
+            <p className="mc-match-time" style={{ marginBottom: 12 }}>{match.home_team_name} {match.home_score} - {match.away_score} {match.away_team_name}</p>
+            <div className="mc-modal-list" style={{ marginBottom: 16 }}>
+              {events.filter((e) => e.type === "goal_home" || e.type === "goal_away").slice(0, 8).map((e) => (
+                <div key={e.id} className="mc-event" style={{ "--event-color": e.type === "goal_home" ? "#00F5D4" : "#FF00CC" }}>
+                  <span className="mc-event-text">{e.type === "goal_home" ? match.home_team_name : match.away_team_name}: {e.player_name || "Unknown"}</span>
+                </div>
+              ))}
+            </div>
+            <div className="pr-modal-btns">
+              <button className="pr-modal-cancel" onClick={() => setShowEndConfirm(false)}>GO BACK / EDIT</button>
+              <button className="pr-modal-submit" onClick={() => endMatchMutation.mutate()}>CONFIRM END MATCH</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Player modal */}
       {showPlayerSelect && (
         <div className="mc-modal-overlay">
@@ -650,14 +620,13 @@ export default function MatchControl({ params }) {
                 className="mc-player-btn"
                 onClick={() =>
                   recordGoalMutation.mutate({
-                    type:
-                      showPlayerSelect === "home" ? "goal_home" : "goal_away",
+                    type: pendingGoalType || (showPlayerSelect === "home" ? "goal_home" : "goal_away"),
                     playerId: null,
                   })
                 }
               >
                 <div className="mc-player-num">?</div>
-                <span className="mc-player-name">Unknown Player</span>
+                 <span className="mc-player-name">Unknown / no roster</span>
               </button>
               {(showPlayerSelect === "home" ? homePlayers : awayPlayers).map(
                 (player) => (
@@ -666,10 +635,7 @@ export default function MatchControl({ params }) {
                     className="mc-player-btn"
                     onClick={() =>
                       recordGoalMutation.mutate({
-                        type:
-                          showPlayerSelect === "home"
-                            ? "goal_home"
-                            : "goal_away",
+                         type: pendingGoalType || (showPlayerSelect === "home" ? "goal_home" : "goal_away"),
                         playerId: player.id,
                       })
                     }
