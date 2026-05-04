@@ -1,5 +1,6 @@
 import { QrCode, CheckCircle, Copy } from "lucide-react";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 export function OverviewTab({ league, teams, matches }) {
   const [copiedLink, setCopiedLink] = useState(false);
@@ -12,6 +13,27 @@ export function OverviewTab({ league, teams, matches }) {
   };
 
   const rounds = [...new Set(matches.map((m) => m.round_number))];
+
+  const { data: refereesData } = useQuery({
+    queryKey: ["league-overview-referees", league?.venue_id],
+    queryFn: async () => {
+      if (!league?.venue_id) return { referees: [] };
+      const res = await fetch(`/api/admin/referees?venueId=${league.venue_id}`);
+      if (!res.ok) return { referees: [] };
+      return res.json();
+    },
+    enabled: !!league?.venue_id,
+  });
+  const referees = refereesData?.referees || [];
+  const firstRoundMatches = matches.filter((m) => m.round_number === 1);
+  const checklist = [
+    { key: 'league', label: 'League created', done: !!league?.id, cta: null },
+    { key: 'slots', label: 'Time slots configured', done: !!league?.time_slots?.length, cta: 'Configure in League Rules' },
+    { key: 'teams', label: 'Minimum teams registered', done: teams.length >= 2, cta: 'Invite captains with join link' },
+    { key: 'refs', label: 'Referees available', done: referees.length > 0, cta: 'Add referees in Admin Dashboard' },
+    { key: 'fixtures', label: 'Fixtures generated', done: matches.length > 0, cta: 'Use Generate Fixtures' },
+    { key: 'round1', label: 'First round scheduled', done: firstRoundMatches.length > 0, cta: 'Generate fixtures to schedule round 1' },
+  ];
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20 }}>
@@ -34,6 +56,18 @@ export function OverviewTab({ league, teams, matches }) {
               <p className="ld-stat-label">COMPLETED</p>
               <span className="ld-stat-value">{matches.filter((m) => m.status === "final").length}</span>
             </div>
+          </div>
+        </div>
+
+        <div className="ld-card">
+          <p className="ld-card-title">// SETUP CHECKLIST</p>
+          <div className="ld-rules">
+            {checklist.map((item) => (
+              <div key={item.key} className="ld-rule">
+                <span className="ld-rule-label">{item.done ? "✓" : "○"} {item.label}</span>
+                <span className="ld-rule-value" style={{ fontSize: 11, color: item.done ? "#00FF9C" : "rgba(255,200,0,0.8)" }}>{item.done ? "READY" : item.cta}</span>
+              </div>
+            ))}
           </div>
         </div>
 
