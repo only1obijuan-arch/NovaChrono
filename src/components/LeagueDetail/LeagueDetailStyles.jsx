@@ -100,7 +100,9 @@ export function LeagueDetailStyles() {
       .ld-score { font-family:'Orbitron',monospace; font-size:22px; font-weight:900; color:#F4F4F9; }
       .ld-score-sep { font-family:'Orbitron',monospace; font-size:14px; color:rgba(255,0,204,0.3); }
       .ld-match-date { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(180,200,220,0.3); letter-spacing:2px; text-align:center; margin-top:10px; }
-
+      .ld-ref-select { width:100%; background:rgba(255,0,204,0.05); border:1px solid rgba(255,0,204,0.2); border-radius:4px; color:#F4F4F9; padding:8px; font-family:'Share Tech Mono',monospace; font-size:10px; }
+      .ld-ref-badge { font-family:'Share Tech Mono',monospace; font-size:8px; letter-spacing:2px; color:#FFD700; border:1px solid rgba(255,215,0,0.4); background:rgba(255,215,0,0.08); padding:2px 6px; border-radius:2px; }
+      
       .ld-standings-wrap { background:rgba(11,20,40,0.8); border:1px solid rgba(255,0,204,0.15); border-radius:8px; overflow:hidden; }
       .ld-standings-table { width:100%; border-collapse:collapse; }
       .ld-standings-table th { background:rgba(255,0,204,0.1); padding:14px 16px; font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(255,0,204,0.6); letter-spacing:3px; text-align:center; border-bottom:1px solid rgba(255,0,204,0.15); }
