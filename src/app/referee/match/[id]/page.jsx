@@ -239,6 +239,14 @@ export default function MatchControl({ params }) {
 
   const halfLabel = half === 1 ? "1ST HALF" : "2ND HALF";
 
+  const handleUndoLastGoal = () => {
+    const lastGoal = (events || []).find((e) => e.type === "goal_home" || e.type === "goal_away");
+    if (!lastGoal) return toast.error("No goal to undo");
+    if (confirm("Undo the most recent goal?")) {
+      deleteEventMutation.mutate(lastGoal.id);
+    }
+  };
+
   return (
     <>
       <style>{`
@@ -510,8 +518,8 @@ export default function MatchControl({ params }) {
               >
                 <CheckCircle2 size={20} /> END MATCH
               </button>
-              <button className="mc-ctrl-btn mc-abandon-btn">
-                <AlertTriangle size={20} /> ABANDON
+               <button className="mc-ctrl-btn mc-abandon-btn" onClick={handleUndoLastGoal}>
+                <AlertTriangle size={20} /> UNDO LAST GOAL
               </button>
             </div>
           )}
