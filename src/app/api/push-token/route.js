@@ -1,5 +1,6 @@
 import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
+import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 
 // Ensure the column exists (idempotent — safe to call on every boot)
 async function ensurePushTokenColumn() {
@@ -11,7 +12,8 @@ async function ensurePushTokenColumn() {
 
 export async function POST(request) {
   try {
-    const session = await auth();
+    const mobileUser = await verifyMobileToken(request);
+    const session = mobileUser ? { user: mobileUser } : await auth();
     if (!session?.user?.id) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -39,7 +41,8 @@ export async function POST(request) {
 
 export async function DELETE(request) {
   try {
-    const session = await auth();
+    const mobileUser = await verifyMobileToken(request);
+    const session = mobileUser ? { user: mobileUser } : await auth();
     if (!session?.user?.id) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
