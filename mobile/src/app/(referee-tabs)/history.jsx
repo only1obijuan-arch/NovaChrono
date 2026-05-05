@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUser } from "@/utils/auth/useUser";
+import { apiFetch } from "@/utils/api";
 import { History } from "lucide-react-native";
 
 const F = {
@@ -28,7 +29,7 @@ export default function RefereeHistory() {
       const params = new URLSearchParams({ date: today });
       if (user?.venue_id) params.append("venueId", user.venue_id);
       if (user?.field_number) params.append("fieldNumber", user.field_number);
-      const res = await fetch(`/api/matches?${params}`);
+      const res = await apiFetch(`/api/matches?${params}`);
       return res.json();
     },
     enabled: !!user,

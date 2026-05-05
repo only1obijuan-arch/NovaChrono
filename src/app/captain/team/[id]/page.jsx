@@ -420,6 +420,7 @@ export default function TeamDashboard({ params }) {
                           #{player.player_number || "--"}
                         </div>
                         <span className="td-player-name">{player.name}</span>
+                        <span className="td-next-meta-item" style={{ marginLeft: "auto" }}>⚽ {player.season_goals ?? 0}</span>
                         <button
                           className="td-player-delete"
                           onClick={() => deletePlayerMutation.mutate(player.id)}
@@ -568,6 +569,7 @@ export default function TeamDashboard({ params }) {
                           : "AWAY"}
                       </span>
                     </div>
+                    <button className="td-add-btn" style={{ marginTop: 12, width: "100%", justifyContent: "center" }} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/match/${nextMatch.id}`); toast.success("Next match link copied"); }}>COPY/SHARE MATCH LINK</button>
                   </div>
                 ) : matches.length > 0 ? (
                   <p
@@ -607,7 +609,7 @@ export default function TeamDashboard({ params }) {
                   </div>
                   <div className="td-stat">
                     <p className="td-stat-label">WINS</p>
-                    <p className="td-stat-value">{teamStanding?.wins ?? 0}</p>
+                    <p className="td-stat-value">{teamStanding?.won ?? 0}</p>
                   </div>
                   <div className="td-stat">
                     <p className="td-stat-label">UPCOMING</p>

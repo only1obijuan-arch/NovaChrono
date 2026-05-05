@@ -101,7 +101,7 @@ export default function MatchControl({ params }) {
       const res = await fetch("/api/matches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "DELETE_EVENT", eventId }),
+        body: JSON.stringify({ action: "DELETE_EVENT", matchId: id, eventId }),
       });
       return res.json();
     },
@@ -153,6 +153,12 @@ export default function MatchControl({ params }) {
     if (status === 'final') { setIsActive(false); setHalfStatus('finished'); return; }
     if (status === 'live') { setHalf(half2_start_time ? 2 : 1); setHalfStatus(half2_start_time ? 'second' : 'running'); setIsActive(true); }
   }, [data?.match?.status, data?.match?.half2_start_time]);
+
+  useEffect(() => {
+    if (!isActive) { clearInterval(timerRef.current); return; }
+    timerRef.current = setInterval(() => setServerNow(Date.now()), 1000);
+    return () => clearInterval(timerRef.current);
+  }, [isActive]);
 
   const startSecondHalf = () => startSecondHalfMutation.mutate();
 
@@ -340,6 +346,12 @@ export default function MatchControl({ params }) {
         .mc-player-btn:hover { background:rgba(0,245,212,0.08); border-color:rgba(0,245,212,0.4); }
         .mc-player-num { width:36px; height:36px; background:rgba(0,245,212,0.1); border:1px solid rgba(0,245,212,0.3); border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:'Orbitron',monospace; font-size:11px; color:#00F5D4; flex-shrink:0; }
         .mc-player-name { font-family:'Rajdhani',sans-serif; font-size:16px; font-weight:700; color:#F4F4F9; }
+
+        .mc-modal-btns { display:flex; gap:12px; margin-top:8px; }
+        .mc-modal-cancel { flex:1; padding:14px; background:rgba(255,200,0,0.08); border:1px solid rgba(255,200,0,0.3); color:#FFD700; border-radius:4px; font-family:'Orbitron',monospace; font-size:12px; font-weight:700; letter-spacing:2px; cursor:pointer; transition:all 0.2s; }
+        .mc-modal-cancel:hover { background:rgba(255,200,0,0.15); border-color:#FFD700; }
+        .mc-modal-submit { flex:1; padding:14px; background:rgba(255,0,204,0.15); border:1px solid rgba(255,0,204,0.5); color:#FF00CC; border-radius:4px; font-family:'Orbitron',monospace; font-size:12px; font-weight:700; letter-spacing:2px; cursor:pointer; transition:all 0.2s; box-shadow:0 0 15px rgba(255,0,204,0.2); }
+        .mc-modal-submit:hover { background:rgba(255,0,204,0.25); border-color:#FF00CC; box-shadow:0 0 25px rgba(255,0,204,0.4); }
       `}</style>
 
       <div className="mc-page">
@@ -602,9 +614,9 @@ export default function MatchControl({ params }) {
                 </div>
               ))}
             </div>
-            <div className="pr-modal-btns">
-              <button className="pr-modal-cancel" onClick={() => setShowEndConfirm(false)}>GO BACK / EDIT</button>
-              <button className="pr-modal-submit" onClick={() => endMatchMutation.mutate()}>CONFIRM END MATCH</button>
+            <div className="mc-modal-btns">
+              <button className="mc-modal-cancel" onClick={() => setShowEndConfirm(false)}>GO BACK / EDIT</button>
+              <button className="mc-modal-submit" onClick={() => endMatchMutation.mutate()}>CONFIRM END MATCH</button>
             </div>
           </div>
         </div>

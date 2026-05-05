@@ -15,7 +15,7 @@ export function StandingsTab({ stats }) {
         <thead>
           <tr>
             <th>POS</th><th>TEAM</th><th>P</th><th>W</th><th>D</th><th>L</th>
-            <th>GF</th><th>GA</th><th>GD</th><th>PTS</th>
+             <th>GF</th><th>GA</th><th>GD</th><th>FORM</th><th>MOV</th><th>PTS</th>
           </tr>
         </thead>
         <tbody>
@@ -36,7 +36,7 @@ export function StandingsTab({ stats }) {
               <td style={{ fontWeight: 700, color: team.goal_difference > 0 ? "#00FF9C" : team.goal_difference < 0 ? "rgba(255,0,204,0.7)" : "rgba(180,200,220,0.6)" }}>
                 {team.goal_difference > 0 ? `+${team.goal_difference}` : team.goal_difference}
               </td>
-              <td><span className="ld-pts">{team.points}</span></td>
+              <td style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:10 }}>{(team.form_last5 || []).join(" ") || "-"}</td><td style={{ color:"rgba(180,200,220,0.5)" }}>{team.movement == null ? "—" : team.movement}</td><td><span className="ld-pts">{team.points}</span></td>
             </tr>
           ))}
         </tbody>

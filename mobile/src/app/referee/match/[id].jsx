@@ -117,7 +117,7 @@ export default function MatchControl() {
     mutationFn: async (eventId) => {
       const res = await apiFetch("/api/matches", {
         method: "POST",
-        body: JSON.stringify({ action: "DELETE_EVENT", eventId }),
+        body: JSON.stringify({ action: "DELETE_EVENT", matchId: id, eventId }),
       });
       return res.json();
     },
@@ -165,12 +165,24 @@ export default function MatchControl() {
     return () => clearInterval(timerRef.current);
   }, [isActive, halfStatus]);
 
-  const startSecondHalf = () => {
-    setSeconds(0);
-    setHalf(2);
-    setHalfStatus("second");
-    setIsActive(true);
-  };
+  const startSecondHalfMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch("/api/matches", {
+        method: "POST",
+        body: JSON.stringify({ action: "START_SECOND_HALF", matchId: id }),
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      setSeconds(0);
+      setHalf(2);
+      setHalfStatus("second");
+      setIsActive(true);
+      queryClient.invalidateQueries(["match-detail", id]);
+    },
+  });
+
+  const startSecondHalf = () => startSecondHalfMutation.mutate();
 
   const formatTime = (s) => {
     const mins = Math.floor(s / 60);

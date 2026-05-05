@@ -242,23 +242,107 @@ export async function POST(request) {
           { status: 403 },
         );
       }
-      const { homeScore, awayScore, status, reason } = data;
-      const [oldMatch] = await sql`
-        SELECT m.*, l.venue_id AS league_venue_id
-        FROM matches m
-        JOIN leagues l ON m.league_id = l.id
-        WHERE m.id = ${matchId}
-      `;
-      if (!oldMatch || !canAccessVenue(user, oldMatch.league_venue_id)) {
-        return Response.json({ error: "Access denied" }, { status: 403 });
-      }
-      await sql`UPDATE matches SET home_score = ${homeScore}, away_score = ${awayScore}, status = ${status} WHERE id = ${matchId}`;
-      await sql`
-        INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value, reason)
-        VALUES (${user.id}, ${matchId}, 'ADMIN_OVERRIDE', ${JSON.stringify(
-          oldMatch,
-        )}, ${JSON.stringify({ homeScore, awayScore, status })}, ${reason})
-      `;
+      const { homeScore, awayScore, status: newStatus, reason } = data;
+
+      let notFound = false;
+      let accessDenied = false;
+
+      await withTransaction(async (txSql) => {
+        const [oldMatch] = await txSql`
+          SELECT m.*, l.venue_id AS league_venue_id
+          FROM matches m
+          JOIN leagues l ON m.league_id = l.id
+          WHERE m.id = ${matchId}
+          FOR UPDATE OF m
+        `;
+        if (!oldMatch) { notFound = true; return; }
+        if (!canAccessVenue(user, oldMatch.league_venue_id)) { accessDenied = true; return; }
+
+        await txSql`UPDATE matches SET home_score = ${homeScore}, away_score = ${awayScore}, status = ${newStatus} WHERE id = ${matchId}`;
+
+        const [homeTeam] = await txSql`SELECT id FROM teams WHERE slot_id = ${oldMatch.home_slot_id} AND status = 'active' LIMIT 1`;
+        const [awayTeam] = await txSql`SELECT id FROM teams WHERE slot_id = ${oldMatch.away_slot_id} AND status = 'active' LIMIT 1`;
+
+        if (oldMatch.status === "final") {
+          const h = oldMatch.home_score;
+          const a = oldMatch.away_score;
+          const homeWon = h > a ? 1 : 0;
+          const awayWon = a > h ? 1 : 0;
+          const drawn = h === a ? 1 : 0;
+          if (homeTeam) {
+            await txSql`
+              UPDATE standings SET
+                played = played - 1,
+                won = won - ${homeWon},
+                drawn = drawn - ${drawn},
+                lost = lost - ${awayWon},
+                goals_for = goals_for - ${h},
+                goals_against = goals_against - ${a},
+                goal_difference = goal_difference - ${h - a},
+                points = points - ${homeWon * 3 + drawn}
+              WHERE league_id = ${oldMatch.league_id} AND team_id = ${homeTeam.id}
+            `;
+          }
+          if (awayTeam) {
+            await txSql`
+              UPDATE standings SET
+                played = played - 1,
+                won = won - ${awayWon},
+                drawn = drawn - ${drawn},
+                lost = lost - ${homeWon},
+                goals_for = goals_for - ${a},
+                goals_against = goals_against - ${h},
+                goal_difference = goal_difference - ${a - h},
+                points = points - ${awayWon * 3 + drawn}
+              WHERE league_id = ${oldMatch.league_id} AND team_id = ${awayTeam.id}
+            `;
+          }
+        }
+
+        if (newStatus === "final") {
+          const h = homeScore;
+          const a = awayScore;
+          const homeWon = h > a ? 1 : 0;
+          const awayWon = a > h ? 1 : 0;
+          const drawn = h === a ? 1 : 0;
+          if (homeTeam) {
+            await txSql`
+              UPDATE standings SET
+                played = played + 1,
+                won = won + ${homeWon},
+                drawn = drawn + ${drawn},
+                lost = lost + ${awayWon},
+                goals_for = goals_for + ${h},
+                goals_against = goals_against + ${a},
+                goal_difference = goal_difference + ${h - a},
+                points = points + ${homeWon * 3 + drawn}
+              WHERE league_id = ${oldMatch.league_id} AND team_id = ${homeTeam.id}
+            `;
+          }
+          if (awayTeam) {
+            await txSql`
+              UPDATE standings SET
+                played = played + 1,
+                won = won + ${awayWon},
+                drawn = drawn + ${drawn},
+                lost = lost + ${homeWon},
+                goals_for = goals_for + ${a},
+                goals_against = goals_against + ${h},
+                goal_difference = goal_difference + ${a - h},
+                points = points + ${awayWon * 3 + drawn}
+              WHERE league_id = ${oldMatch.league_id} AND team_id = ${awayTeam.id}
+            `;
+          }
+        }
+
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value, reason)
+          VALUES (${user.id}, ${matchId}, 'ADMIN_OVERRIDE', ${JSON.stringify(oldMatch)}, ${JSON.stringify({ homeScore, awayScore, status: newStatus })}, ${reason})
+        `;
+      });
+
+      if (notFound) return Response.json({ error: "Match not found" }, { status: 404 });
+      if (accessDenied) return Response.json({ error: "Access denied" }, { status: 403 });
       return Response.json({ success: true });
     }
 
@@ -322,8 +406,8 @@ export async function GET(request) {
       LEFT JOIN teams th ON th.slot_id = lsh.id AND th.status = 'active'
       LEFT JOIN league_slots lsa ON m.away_slot_id = lsa.id
       LEFT JOIN teams ta ON ta.slot_id = lsa.id AND ta.status = 'active'
-      JOIN leagues l ON m.league_id = l.id
       LEFT JOIN auth_users ref ON ref.id = m.referee_id
+      JOIN leagues l ON m.league_id = l.id
       WHERE m.id = ${matchId}
     `;
     const events = await sql`
@@ -346,6 +430,7 @@ export async function GET(request) {
       LEFT JOIN teams th ON th.slot_id = lsh.id AND th.status = 'active'
       LEFT JOIN league_slots lsa ON m.away_slot_id = lsa.id
       LEFT JOIN teams ta ON ta.slot_id = lsa.id AND ta.status = 'active'
+      LEFT JOIN auth_users ref ON ref.id = m.referee_id
       WHERE m.league_id = ${leagueId}
       ORDER BY m.round_number, m.match_date, m.time_slot
     `;
@@ -358,13 +443,15 @@ export async function GET(request) {
     const matches = await sql`
       SELECT m.*, l.name as league_name,
              th.name as home_team_name,
-             ta.name as away_team_name
+             ta.name as away_team_name,
+             ref.name as referee_name
       FROM matches m
       JOIN leagues l ON m.league_id = l.id
       LEFT JOIN league_slots lsh ON m.home_slot_id = lsh.id
       LEFT JOIN teams th ON th.slot_id = lsh.id AND th.status = 'active'
       LEFT JOIN league_slots lsa ON m.away_slot_id = lsa.id
       LEFT JOIN teams ta ON ta.slot_id = lsa.id AND ta.status = 'active'
+      LEFT JOIN auth_users ref ON ref.id = m.referee_id
       WHERE m.match_date = ${date}
       AND (${venueId}::uuid IS NULL OR l.venue_id = ${venueId}::uuid)
       AND (${fieldNumber}::int IS NULL OR m.field_number = ${fieldNumber}::int)

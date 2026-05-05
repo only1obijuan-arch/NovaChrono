@@ -14,8 +14,18 @@ export async function GET(request) {
   const teamId = searchParams.get("teamId");
   if (!teamId)
     return Response.json({ error: "teamId is required" }, { status: 400 });
-  const players =
-    await sql`SELECT * FROM players WHERE team_id = ${teamId} ORDER BY name ASC`;
+   const players = await sql`
+    SELECT p.*, COALESCE(g.goals, 0)::int AS season_goals
+    FROM players p
+    LEFT JOIN (
+      SELECT me.player_id, COUNT(*) AS goals
+      FROM match_events me
+      WHERE me.type IN ('goal_home','goal_away') AND me.player_id IS NOT NULL
+      GROUP BY me.player_id
+    ) g ON g.player_id = p.id
+    WHERE p.team_id = ${teamId}
+    ORDER BY p.name ASC
+  `;
   return Response.json(players);
 }
 

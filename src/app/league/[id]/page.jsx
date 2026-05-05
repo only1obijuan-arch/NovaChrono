@@ -223,6 +223,7 @@ export default function PublicLeagueView({ params }) {
               )}
             </div>
             <h1 className="plv-title">{league.name}</h1>
+            <p className="plv-day-badge" style={{ marginBottom: 10 }}>VENUE: {league.venue_name || "TBD"}</p>
             <div className="plv-hero-meta">
               <span className="plv-hero-meta-item">
                 <Calendar size={12} />{" "}
@@ -264,6 +265,8 @@ export default function PublicLeagueView({ params }) {
                     <th>GF</th>
                     <th>GA</th>
                     <th>GD</th>
+                    <th>FORM</th>
+                    <th>MOV</th>
                     <th>PTS</th>
                   </tr>
                 </thead>
@@ -305,7 +308,7 @@ export default function PublicLeagueView({ params }) {
                             : team.goal_difference}
                         </span>
                       </td>
-                      <td><span className="plv-pts">{team.points}</span></td>
+                      <td style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:10 }}>{(team.form_last5 || []).join(" ") || "-"}</td><td style={{ color:"rgba(180,200,220,0.5)" }}>{team.movement == null ? "—" : team.movement}</td><td><span className="plv-pts">{team.points}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -445,6 +448,12 @@ function LiveMatchFeed({ match }) {
 
 function MatchCard({ match }) {
   const isLive = match.status === "live";
+  const shareResult = async () => {
+    const text = `${match.home_team_name || 'TBD'} ${match.home_score} - ${match.away_score} ${match.away_team_name || 'TBD'}\nRound ${match.round_number} • ${new Date(match.match_date).toLocaleDateString()}\n${window.location.origin}/match/${match.id}\nPowered by NovaChrono`;
+    if (navigator.share) { try { await navigator.share({ title: 'Match Result', text }); return; } catch {} }
+    await navigator.clipboard.writeText(text);
+  };
+
   return (
     <div className={`plv-match${isLive ? " is-live" : ""}`}>
       {isLive && <div className="plv-match-live-bar" />}
@@ -482,9 +491,7 @@ function MatchCard({ match }) {
         <span className="plv-match-date">
           {new Date(match.match_date).toDateString().toUpperCase()}
         </span>
-        <a href={`/match/${match.id}`} className="plv-details-link">
-          DETAILS <ChevronRight size={12} />
-        </a>
+         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>{match.status === "final" && <button onClick={shareResult} className="plv-details-link" style={{ background: "none", border: "1px solid rgba(0,245,212,0.2)", padding: "4px 8px", borderRadius: 4 }}>SHARE RESULT</button>}<a href={`/match/${match.id}`} className="plv-details-link">DETAILS <ChevronRight size={12} /></a></div>
       </div>
     </div>
   );

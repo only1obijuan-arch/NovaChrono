@@ -1,6 +1,6 @@
 import { Calendar } from "lucide-react";
 
-export function FixturesTab({ matches }) {
+export function FixturesTab({ matches, referees = [], onAssignReferee }) {
   const rounds = [...new Set(matches.map((m) => m.round_number))];
 
   if (matches.length === 0) {
@@ -31,7 +31,7 @@ export function FixturesTab({ matches }) {
                       <span className="ld-match-field">FIELD {match.field_number}</span>
                       <span className="ld-match-time">{match.time_slot}</span>
                     </div>
-                    <span className={`ld-match-status ${match.status}`}>{match.status?.toUpperCase()}</span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span className={`ld-match-status ${match.status}`}>{match.status?.toUpperCase()}</span>{!match.referee_id && <span className="ld-ref-badge">UNASSIGNED</span>}</div>
                   </div>
                   <div className="ld-match-teams">
                     <p className="ld-match-team home">{match.home_team_name || "TBD"}</p>
@@ -43,6 +43,19 @@ export function FixturesTab({ matches }) {
                     <p className="ld-match-team">{match.away_team_name || "TBD"}</p>
                   </div>
                   <p className="ld-match-date">{new Date(match.match_date).toLocaleDateString()}</p>
+                  <div style={{ marginTop: 10 }}>
+                    <select
+                      className="ld-ref-select"
+                      value={match.referee_id || ""}
+                      onChange={(e) => onAssignReferee?.(match.id, e.target.value || null)}
+                    >
+                      <option value="">Assign referee...</option>
+                      {referees.map((r) => (
+                        <option key={r.id} value={r.id}>{r.name} (Field {r.field_number ?? "-"})</option>
+                      ))}
+                    </select>
+                  </div>
+
                 </div>
               ))}
           </div>
