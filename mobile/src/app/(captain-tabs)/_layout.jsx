@@ -1,11 +1,13 @@
 import { Tabs } from "expo-router";
 import { Home, Calendar, Trophy, User } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CaptainTeamProvider } from "@/utils/CaptainTeamContext";
 
 export default function CaptainTabLayout() {
   const insets = useSafeAreaInsets();
 
   return (
+    <CaptainTeamProvider>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -55,5 +57,6 @@ export default function CaptainTabLayout() {
         }}
       />
     </Tabs>
+    </CaptainTeamProvider>
   );
 }

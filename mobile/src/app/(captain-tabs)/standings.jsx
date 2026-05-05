@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { apiFetch } from "@/utils/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCaptainTeam } from "@/utils/CaptainTeamContext";
 import { Trophy, Target } from "lucide-react-native";
 
 const F = {
@@ -20,16 +21,7 @@ export default function Standings() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: teamData } = useQuery({
-    queryKey: ["captain-teams"],
-    queryFn: async () => {
-      const res = await apiFetch("/api/captain/teams");
-      const data = await res.json();
-      return data.teams ?? [];
-    },
-  });
-
-  const team = teamData?.[0] ?? null;
+  const { selectedTeam: team } = useCaptainTeam();
 
   const { data: stats } = useQuery({
     queryKey: ["league-stats", team?.league_id],

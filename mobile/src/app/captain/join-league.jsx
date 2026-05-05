@@ -53,8 +53,8 @@ export default function JoinLeague() {
         throw new Error(data.error || "Failed to join league");
       }
       setSuccess(`Successfully joined ${data.leagueName}!`);
-      // Invalidate team query so dashboard refreshes
       await queryClient.invalidateQueries({ queryKey: ["captain-team"] });
+      await queryClient.invalidateQueries({ queryKey: ["captain-teams"] });
       setTimeout(() => {
         router.replace("/(captain-tabs)");
       }, 1500);

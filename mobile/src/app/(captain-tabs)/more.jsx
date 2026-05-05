@@ -6,7 +6,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { useQuery } from "@tanstack/react-query";
+import { useCaptainTeam } from "@/utils/CaptainTeamContext";
 import { useRouter } from "expo-router";
 import {
   ChevronRight,
@@ -15,7 +15,6 @@ import {
   LogOut,
   Trophy,
 } from "lucide-react-native";
-import { apiFetch } from "@/utils/api";
 import { useAuth } from "@/utils/auth/useAuth";
 
 const F = {
@@ -32,14 +31,7 @@ export default function More() {
   const router = useRouter();
   const { signOut } = useAuth();
 
-  const { data: team } = useQuery({
-    queryKey: ["captain-team"],
-    queryFn: async () => {
-      const res = await apiFetch("/api/captain/team");
-      const data = await res.json();
-      return data.team ?? null;
-    },
-  });
+  const { selectedTeam: team } = useCaptainTeam();
 
   const menuItems = [
     {

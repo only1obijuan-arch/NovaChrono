@@ -13,6 +13,7 @@ import { useAuth } from "@/utils/auth/useAuth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trophy, Calendar, Users } from "lucide-react-native";
 import { useRouter } from "expo-router";
+import { useCaptainTeam } from "@/utils/CaptainTeamContext";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -30,15 +31,7 @@ export default function TeamDashboard() {
   const { signOut } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: team, isLoading } = useQuery({
-    queryKey: ["captain-team"],
-    queryFn: async () => {
-      const res = await apiFetch("/api/captain/team");
-      if (!res.ok) throw new Error("Failed to fetch team");
-      const data = await res.json();
-      return data.team ?? null;
-    },
-  });
+  const { teams, selectedTeam: team, setSelectedTeamId, isLoading } = useCaptainTeam();
 
   const { data: players = [] } = useQuery({
     queryKey: ["team-players", team?.id],
@@ -69,7 +62,7 @@ export default function TeamDashboard() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await queryClient.invalidateQueries(["captain-team"]);
+    await queryClient.invalidateQueries(["captain-teams"]);
     await queryClient.invalidateQueries(["team-players"]);
     await queryClient.invalidateQueries(["team-matches"]);
     await queryClient.invalidateQueries(["league-stats"]);
@@ -234,6 +227,47 @@ export default function TeamDashboard() {
             {team.league_name}
           </Text>
         </View>
+
+        {/* League switcher — only shown when captain is in multiple leagues */}
+        {teams.length > 1 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ marginBottom: 20 }}
+            contentContainerStyle={{ paddingHorizontal: 24, gap: 8 }}
+          >
+            {teams.map((t) => {
+              const active = t.id === team?.id;
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  onPress={() => setSelectedTeamId(t.id)}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 6,
+                    borderWidth: 1,
+                    borderColor: active ? C : "rgba(0,255,156,0.2)",
+                    backgroundColor: active
+                      ? "rgba(0,255,156,0.12)"
+                      : "rgba(0,255,156,0.04)",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontFamily: F.mono,
+                      fontSize: 10,
+                      color: active ? C : "rgba(0,255,156,0.4)",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    {t.league_name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
 
         {/* Stats Grid */}
         <View style={{ paddingHorizontal: 24, marginBottom: 28 }}>

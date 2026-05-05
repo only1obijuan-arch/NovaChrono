@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { apiFetch } from "@/utils/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCaptainTeam } from "@/utils/CaptainTeamContext";
 import { Calendar, MapPin } from "lucide-react-native";
 
 const F = {
@@ -20,14 +21,7 @@ export default function Schedule() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: team } = useQuery({
-    queryKey: ["captain-team"],
-    queryFn: async () => {
-      const res = await apiFetch("/api/captain/team");
-      const data = await res.json();
-      return data.team ?? null;
-    },
-  });
+  const { selectedTeam: team } = useCaptainTeam();
 
   const { data: matches = [] } = useQuery({
     queryKey: ["team-matches", team?.league_id],
