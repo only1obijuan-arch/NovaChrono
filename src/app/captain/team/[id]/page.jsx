@@ -1,4 +1,5 @@
 "use client";
+import { isValidJoinCode } from "@/utils/join-code";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -6,14 +7,16 @@ import { toast } from "sonner";
 import { Users, ChevronLeft, Shield, X, Calendar, Trophy, Trash2 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 
-export default function TeamDashboard({ params }) {
+export default function TeamDashboard({ params, searchParams }) {
+  const { code } = React.use(searchParams);
+  const pendingCode = isValidJoinCode(code) ? code.trim().toUpperCase() : "";
   const { id } = React.use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [playerForm, setPlayerForm] = useState({ name: "", playerNumber: "" });
-  const [showJoinLeague, setShowJoinLeague] = useState(false);
-  const [joinForm, setJoinForm] = useState({ joinCode: "", teamName: "" });
+  const [showJoinLeague, setShowJoinLeague] = useState(!!pendingCode);
+  const [joinForm, setJoinForm] = useState({ joinCode: pendingCode, teamName: "" });
   const [joinError, setJoinError] = useState(null);
 
   const { data: team, isLoading: teamLoading } = useQuery({
@@ -130,8 +133,8 @@ export default function TeamDashboard({ params }) {
   const handleJoinLeague = (e) => {
     e.preventDefault();
     setJoinError(null);
-    if (joinForm.joinCode.trim().length !== 6) {
-      setJoinError("League code must be 6 characters");
+    if (!isValidJoinCode(joinForm.joinCode)) {
+      setJoinError("League code must be 6 or 8 letters or digits");
       return;
     }
     if (!joinForm.teamName.trim()) {
@@ -760,7 +763,7 @@ export default function TeamDashboard({ params }) {
                 type="text"
                 className="td-modal-input"
                 placeholder="XXXXXX"
-                maxLength={6}
+                maxLength={8}
                 value={joinForm.joinCode}
                 onChange={(e) => setJoinForm({ ...joinForm, joinCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })}
                 autoFocus

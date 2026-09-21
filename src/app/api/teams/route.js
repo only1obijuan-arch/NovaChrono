@@ -1,14 +1,10 @@
 import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
-
-async function getSession() {
-  const session = await auth();
-  return session?.user ?? null;
-}
+import { requireRole } from "@/app/api/utils/auth";
+import { canAdministerVenue, canManageTeam, UUID_RE } from "@/app/api/utils/ownership";
 
 export async function POST(request) {
   try {
-    const user = await getSession();
+    const user = await requireRole(request, "captain", "venue_admin", "super_admin");
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const { action, ...data } = await request.json();
@@ -39,16 +35,17 @@ export async function POST(request) {
     }
 
     if (action === "ADD_TEAM") {
-      const [dbUser] = await sql`
-        SELECT role FROM auth_users WHERE id = ${user.id}
-      `;
-      if (!dbUser || !["venue_admin", "super_admin"].includes(dbUser.role)) {
+      if (!["venue_admin", "super_admin"].includes(user.role)) {
         return Response.json(
           { error: "Admin access required" },
           { status: 403 },
         );
       }
       const { leagueId, teamName, captainUserId } = data;
+      if (!UUID_RE.test(leagueId)) return Response.json({ error: "Invalid league ID" }, { status: 400 });
+      const [league] = await sql`SELECT venue_id FROM leagues WHERE id = ${leagueId}`;
+      if (!league) return Response.json({ error: "League not found" }, { status: 404 });
+      if (!canAdministerVenue(user, league.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
       const [availableSlot] = await sql`
         SELECT ls.id
         FROM league_slots ls
@@ -71,23 +68,12 @@ export async function POST(request) {
 
     if (action === "UPDATE_TEAM") {
       const { teamId, teamName } = data;
-      const [existingTeam] =
-        await sql`SELECT * FROM teams WHERE id = ${teamId}`;
-
-      const [dbUser] =
-        await sql`SELECT role FROM auth_users WHERE id = ${user.id}`;
-
-      const isOwnTeam =
-        existingTeam?.captain_user_id?.toString() === user.id?.toString();
-      const isAdmin =
-        dbUser && ["venue_admin", "super_admin"].includes(dbUser.role);
-
-      if (!isOwnTeam && !isAdmin) {
-        return Response.json(
-          { error: "Insufficient permissions" },
-          { status: 403 },
-        );
-      }
+      if (!UUID_RE.test(teamId)) return Response.json({ error: "Invalid team ID" }, { status: 400 });
+      const [existingTeam] = await sql`
+        SELECT t.*, l.venue_id FROM teams t JOIN leagues l ON t.league_id = l.id WHERE t.id = ${teamId}
+      `;
+      if (!existingTeam) return Response.json({ error: "Team not found" }, { status: 404 });
+      if (!canManageTeam(user, existingTeam)) return Response.json({ error: "Forbidden" }, { status: 403 });
       const [team] = await sql`
         UPDATE teams SET name = ${teamName} WHERE id = ${teamId} RETURNING *
       `;
@@ -95,16 +81,13 @@ export async function POST(request) {
     }
 
     if (action === "DELETE_TEAM") {
-      const [dbUser] =
-        await sql`SELECT role FROM auth_users WHERE id = ${user.id}`;
-
-      if (!dbUser || !["venue_admin", "super_admin"].includes(dbUser.role)) {
-        return Response.json(
-          { error: "Admin access required" },
-          { status: 403 },
-        );
-      }
       const { teamId } = data;
+      if (!UUID_RE.test(teamId)) return Response.json({ error: "Invalid team ID" }, { status: 400 });
+      const [team] = await sql`
+        SELECT t.id, l.venue_id FROM teams t JOIN leagues l ON t.league_id = l.id WHERE t.id = ${teamId}
+      `;
+      if (!team) return Response.json({ error: "Team not found" }, { status: 404 });
+      if (!canAdministerVenue(user, team.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
       await sql`UPDATE teams SET status = 'inactive' WHERE id = ${teamId}`;
       return Response.json({ success: true });
     }

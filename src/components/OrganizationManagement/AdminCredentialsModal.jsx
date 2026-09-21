@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 import { useState } from "react";
 import { X } from "lucide-react";
 
@@ -34,10 +35,10 @@ export function AdminCredentialsModal({ credentials, onClose }) {
         <div class="logo">NOVACHRONO</div>
         <div class="tagline">// TIME PAUSES. YOUR LEAGUE NEVER DOES.</div>
         <div class="title">VENUE ADMIN CREDENTIALS</div>
-        <div class="row"><span class="label">NAME</span><span class="value">${credentials.name}</span></div>
-        <div class="row"><span class="label">VENUE</span><span class="value">${credentials.venueName}</span></div>
-        <div class="row"><span class="label">EMAIL</span><span class="value">${credentials.email}</span></div>
-        <div class="row"><span class="label">PASSWORD</span><span class="password">${credentials.password}</span></div>
+        <div class="row"><span class="label">NAME</span><span class="value">${escapeHtml(credentials.name)}</span></div>
+        <div class="row"><span class="label">VENUE</span><span class="value">${escapeHtml(credentials.venueName)}</span></div>
+        <div class="row"><span class="label">EMAIL</span><span class="value">${escapeHtml(credentials.email)}</span></div>
+        <div class="row"><span class="label">PASSWORD</span><span class="password">${escapeHtml(credentials.password)}</span></div>
         <div class="footer">KEEP THESE CREDENTIALS SECURE — DO NOT SHARE</div>
       </div></body></html>
     `);

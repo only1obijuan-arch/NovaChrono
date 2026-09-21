@@ -1,3 +1,4 @@
+import { isValidJoinCode } from "../../utils/join-code";
 import { useState } from "react";
 import {
   View,
@@ -51,7 +52,7 @@ export default function SignUp() {
 
   const canSubmit =
     !loading &&
-    joinCode.trim().length === 6 &&
+    isValidJoinCode(joinCode) &&
     name.trim().length > 0 &&
     email.trim().length > 0 &&
     strength &&
@@ -65,8 +66,8 @@ export default function SignUp() {
       setError("Please fill in all fields.");
       return;
     }
-    if (joinCode.trim().length !== 6) {
-      setError("League code must be 6 characters.");
+    if (!isValidJoinCode(joinCode)) {
+      setError("League code must be 6 or 8 letters or digits.");
       return;
     }
     if (password !== confirm) {
@@ -313,7 +314,7 @@ export default function SignUp() {
                   placeholderTextColor="rgba(0,245,212,0.2)"
                   autoCapitalize="characters"
                   autoComplete="off"
-                  maxLength={6}
+                  maxLength={8}
                   style={[inputStyle, {
                     letterSpacing: 8,
                     fontFamily: F.mono,

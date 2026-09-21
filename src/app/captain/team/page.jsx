@@ -1,9 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { weekdayLabel } from "@/utils/weekday";
+import { withJoinCode } from "@/utils/join-navigation";
+import { useEffect, useState, Suspense } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function CaptainTeamRedirect() {
+function CaptainTeamContent() {
+  const searchParams = useSearchParams();
+  const code = searchParams.get("code");
   const { data: session, status } = useSession();
   const router = useRouter();
   const [teams, setTeams] = useState([]);
@@ -16,16 +20,16 @@ export default function CaptainTeamRedirect() {
       .then(data => {
         const allTeams = data?.teams || [];
         if (allTeams.length === 0) {
-          router.push("/captain/join");
+          router.push(withJoinCode("/captain/join", code));
         } else if (allTeams.length === 1) {
-          router.push(`/captain/team/${allTeams[0].id}`);
+          router.push(withJoinCode(`/captain/team/${allTeams[0].id}`, code));
         } else {
           setTeams(allTeams);
           setLoading(false);
         }
       })
-      .catch(() => router.push("/captain/join"));
-  }, [session, status]);
+      .catch(() => router.push(withJoinCode("/captain/join", code)));
+  }, [session, status, router, code]);
 
   if (loading && teams.length === 0) return (
     <div style={{ minHeight:"100vh", background:"#091833", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16 }}>
@@ -67,10 +71,10 @@ export default function CaptainTeamRedirect() {
           <p className="lp-eyebrow">// CAPTAIN PORTAL</p>
           <h1 className="lp-title">SELECT YOUR LEAGUE</h1>
           {teams.map(team => (
-            <a key={team.id} href={`/captain/team/${team.id}`} className="lp-card">
+            <a key={team.id} href={withJoinCode(`/captain/team/${team.id}`, code)} className="lp-card">
               <div>
                 <p className="lp-league-name">{team.league_name}</p>
-                <p className="lp-league-meta">{team.venue_name}{team.day_of_week ? ` · ${team.day_of_week.toUpperCase()}` : ""} · {team.match_format}</p>
+                <p className="lp-league-meta">{team.venue_name}{weekdayLabel(team.day_of_week) ? ` · ${weekdayLabel(team.day_of_week).toUpperCase()}` : ""} · {team.match_format}</p>
                 <p className="lp-team-name">{team.team_name}</p>
               </div>
               <span className={`lp-status ${team.league_status}`}>{team.league_status?.toUpperCase()}</span>
@@ -83,4 +87,8 @@ export default function CaptainTeamRedirect() {
       </div>
     </>
   );
+}
+
+export default function CaptainTeamRedirect() {
+  return <Suspense fallback={null}><CaptainTeamContent /></Suspense>;
 }

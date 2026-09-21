@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 export function inviteOrgAdminEmail({ orgName, inviteUrl }) {
   return `<!DOCTYPE html>
 <html>
@@ -16,12 +17,12 @@ export function inviteOrgAdminEmail({ orgName, inviteUrl }) {
           <p style="margin:0 0 8px;font-size:10px;color:rgba(255,0,204,0.5);letter-spacing:4px;font-family:monospace;">// YOU'VE BEEN INVITED</p>
           <h1 style="margin:0 0 20px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">JOIN NOVACHRONO</h1>
           <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.7;">
-            You've been invited to manage <strong style="color:#F4F4F9;">${orgName}</strong> on NovaChrono as an organisation admin.
+            You've been invited to manage <strong style="color:#F4F4F9;">${escapeHtml(orgName)}</strong> on NovaChrono as an organisation admin.
           </p>
           <div style="background:rgba(255,0,204,0.04);border:1px solid rgba(255,0,204,0.15);border-radius:6px;padding:20px;margin-bottom:28px;">
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,0,204,0.08);">
               <span style="font-size:10px;color:rgba(255,0,204,0.5);font-family:monospace;letter-spacing:3px;">ORGANISATION</span>
-              <span style="font-size:14px;color:#F4F4F9;font-weight:700;">${orgName}</span>
+              <span style="font-size:14px;color:#F4F4F9;font-weight:700;">${escapeHtml(orgName)}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,0,204,0.08);">
               <span style="font-size:10px;color:rgba(255,0,204,0.5);font-family:monospace;letter-spacing:3px;">ROLE</span>
@@ -33,7 +34,7 @@ export function inviteOrgAdminEmail({ orgName, inviteUrl }) {
             </div>
           </div>
           <div style="text-align:center;margin-bottom:20px;">
-            <a href="${inviteUrl}" style="display:inline-block;background:linear-gradient(135deg,#FF00CC,#AA0088);color:#F4F4F9;font-family:monospace;font-size:13px;font-weight:700;letter-spacing:3px;padding:16px 40px;border-radius:4px;text-decoration:none;">
+            <a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:linear-gradient(135deg,#FF00CC,#AA0088);color:#F4F4F9;font-family:monospace;font-size:13px;font-weight:700;letter-spacing:3px;padding:16px 40px;border-radius:4px;text-decoration:none;">
               ACCEPT INVITE →
             </a>
           </div>

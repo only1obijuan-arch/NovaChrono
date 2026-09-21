@@ -1,4 +1,6 @@
 "use client";
+import { withJoinCode } from "@/utils/join-navigation";
+import { isValidJoinCode } from "@/utils/join-code";
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -37,8 +39,8 @@ function SignUpContent() {
       setError("Please fill in all fields");
       return;
     }
-    if (joinCode.trim().length !== 6) {
-      setError("League code must be 6 characters");
+    if (!isValidJoinCode(joinCode)) {
+      setError("League code must be 6 or 8 letters or digits");
       return;
     }
     if (password !== confirm) {
@@ -76,7 +78,7 @@ function SignUpContent() {
     }
   };
 
-  const canSubmit = !loading && joinCode.trim().length === 6 && name.trim() && email &&
+  const canSubmit = !loading && isValidJoinCode(joinCode) && name.trim() && email &&
     strength && strength.label !== "TOO SHORT" && passwordsMatch && teamName.trim();
 
   if (done) {
@@ -195,7 +197,7 @@ function SignUpContent() {
                   type="text"
                   className="su-input su-input-code"
                   placeholder="XXXXXX"
-                  maxLength={6}
+                  maxLength={8}
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
                   autoComplete="off"
@@ -249,7 +251,7 @@ function SignUpContent() {
               {error === "__EMAIL_EXISTS__" ? (
                 <div className="su-exists">
                   ALREADY HAVE AN ACCOUNT?{" "}
-                  <a href={`/account/signin${joinCode ? `?code=${joinCode}` : ""}`}>
+                  <a href={withJoinCode("/account/signin", joinCode)}>
                     SIGN IN AND USE YOUR LEAGUE CODE TO JOIN.
                   </a>
                 </div>

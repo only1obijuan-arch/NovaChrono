@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 export function printCredentials(credentials) {
   if (!credentials) return;
 
@@ -5,7 +6,7 @@ export function printCredentials(credentials) {
   printWindow.document.write(`
     <html>
       <head>
-        <title>Referee Credentials — Field ${credentials.fieldNumber}</title>
+        <title>Referee Credentials — Field ${escapeHtml(credentials.fieldNumber)}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Share+Tech+Mono&family=Rajdhani:wght@600;700&display=swap');
           body { background:#091833; color:#F4F4F9; font-family:'Rajdhani',sans-serif; padding:40px; margin:0; }
@@ -26,10 +27,10 @@ export function printCredentials(credentials) {
           <div class="logo">NOVACHRONO</div>
           <div class="tagline">// TIME PAUSES. YOUR LEAGUE NEVER DOES.</div>
           <div class="title">REFEREE ACCESS CREDENTIALS</div>
-          <div class="row"><span class="label">VENUE</span><span class="value">${credentials.venueName}</span></div>
-          <div class="row"><span class="label">FIELD</span><span class="value">${credentials.fieldNumber}</span></div>
-          <div class="row"><span class="label">EMAIL</span><span class="value">${credentials.email}</span></div>
-          <div class="row"><span class="label">PASSWORD</span><span class="password">${credentials.password}</span></div>
+          <div class="row"><span class="label">VENUE</span><span class="value">${escapeHtml(credentials.venueName)}</span></div>
+          <div class="row"><span class="label">FIELD</span><span class="value">${escapeHtml(credentials.fieldNumber)}</span></div>
+          <div class="row"><span class="label">EMAIL</span><span class="value">${escapeHtml(credentials.email)}</span></div>
+          <div class="row"><span class="label">PASSWORD</span><span class="password">${escapeHtml(credentials.password)}</span></div>
           <div class="footer">KEEP THESE CREDENTIALS SECURE — DO NOT SHARE</div>
         </div>
       </body>

@@ -1,3 +1,4 @@
+import { isValidJoinCode } from "../../utils/join-code";
 import { useState } from "react";
 import {
   View,
@@ -30,8 +31,8 @@ export default function JoinLeague() {
   const [success, setSuccess] = useState(null);
 
   const handleJoin = async () => {
-    if (!joinCode.trim()) {
-      setError("Please enter a league code.");
+    if (!isValidJoinCode(joinCode)) {
+      setError("League code must be 6 or 8 letters or digits.");
       return;
     }
     if (!teamName.trim()) {

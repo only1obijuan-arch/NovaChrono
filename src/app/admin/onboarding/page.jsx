@@ -23,7 +23,7 @@ export default function AdminOnboarding() {
       const res = await fetch("/api/admin/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ venueId, role: "venue_admin" }),
+        body: JSON.stringify({ venueId }),
       });
       if (res.ok) {
         localStorage.removeItem("pendingVenueId");

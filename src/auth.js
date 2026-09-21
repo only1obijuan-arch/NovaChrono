@@ -1,3 +1,4 @@
+import { reserveLoginAttempt, clearLoginAttempts } from "@/app/api/utils/login-limit";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { hash, verify } from "argon2";
@@ -183,6 +184,8 @@ const nextAuth = NextAuth({
         if (!email || !password) return null;
         if (typeof email !== "string" || typeof password !== "string") return null;
 
+        if (!(await reserveLoginAttempt(email))) return null;
+
         const user = await Adapter(pool).getUserByEmail(email);
 
         // Signup flow
@@ -202,6 +205,7 @@ const nextAuth = NextAuth({
             providerAccountId: String(newUser.id),
             provider: "credentials",
           });
+          await clearLoginAttempts(email);
           return newUser;
         }
 
@@ -222,6 +226,7 @@ const nextAuth = NextAuth({
         return null;
         }
 
+        await clearLoginAttempts(email);
         return user;
       },
     }),

@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
@@ -72,16 +73,16 @@ export async function POST(request) {
                   <p style="margin:0 0 8px;font-size:10px;color:rgba(255,0,204,0.5);letter-spacing:4px;font-family:monospace;">// VENUE ADMIN INVITE</p>
                   <h1 style="margin:0 0 20px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">YOU'VE BEEN INVITED</h1>
                   <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.7;">
-                    You've been invited to manage <strong style="color:#F4F4F9;">${venue.name}</strong> on NovaChrono.
+                    You've been invited to manage <strong style="color:#F4F4F9;">${escapeHtml(venue.name)}</strong> on NovaChrono.
                   </p>
                   <div style="background:rgba(255,0,204,0.04);border:1px solid rgba(255,0,204,0.15);border-radius:6px;padding:20px;margin-bottom:28px;">
                     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,0,204,0.08);">
                       <span style="font-size:10px;color:rgba(255,0,204,0.5);font-family:monospace;letter-spacing:3px;">ORGANISATION</span>
-                      <span style="font-size:14px;color:#F4F4F9;font-weight:700;">${venue.org_name}</span>
+                      <span style="font-size:14px;color:#F4F4F9;font-weight:700;">${escapeHtml(venue.org_name)}</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,0,204,0.08);">
                       <span style="font-size:10px;color:rgba(255,0,204,0.5);font-family:monospace;letter-spacing:3px;">VENUE</span>
-                      <span style="font-size:14px;color:#F4F4F9;font-weight:700;">${venue.name}</span>
+                      <span style="font-size:14px;color:#F4F4F9;font-weight:700;">${escapeHtml(venue.name)}</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:8px 0;">
                       <span style="font-size:10px;color:rgba(255,0,204,0.5);font-family:monospace;letter-spacing:3px;">ROLE</span>
@@ -89,7 +90,7 @@ export async function POST(request) {
                     </div>
                   </div>
                   <div style="text-align:center;margin-bottom:20px;">
-                    <a href="${inviteUrl}" style="display:inline-block;background:linear-gradient(135deg,#FF00CC,#AA0088);color:#F4F4F9;font-family:monospace;font-size:13px;font-weight:700;letter-spacing:3px;padding:16px 40px;border-radius:4px;text-decoration:none;">
+                    <a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:linear-gradient(135deg,#FF00CC,#AA0088);color:#F4F4F9;font-family:monospace;font-size:13px;font-weight:700;letter-spacing:3px;padding:16px 40px;border-radius:4px;text-decoration:none;">
                       ACCEPT INVITE →
                     </a>
                   </div>

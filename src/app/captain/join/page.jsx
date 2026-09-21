@@ -11,11 +11,11 @@ function JoinRedirect() {
   useEffect(() => {
     const code = searchParams.get("code");
     if (code) {
-      router.replace(`/account/signup?code=${code}`);
+      router.replace(`/account/signup?code=${encodeURIComponent(code)}`);
     } else {
       router.replace("/account/signup");
     }
-  }, []);
+  }, [router, searchParams]);
 
   return null;
 }

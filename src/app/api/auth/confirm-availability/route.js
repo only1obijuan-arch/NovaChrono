@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 
@@ -146,13 +147,13 @@ export async function GET(request) {
                     <h1 style="margin:0 0 24px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">${statusText}</h1>
                     <div style="background:rgba(255,255,255,0.04);border-radius:6px;padding:20px;margin-bottom:20px;">
                       <p style="margin:0 0 8px;font-size:13px;color:rgba(180,200,220,0.6);">TEAM</p>
-                      <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:#F4F4F9;">${record.team_name}</p>
+                      <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:#F4F4F9;">${escapeHtml(record.team_name)}</p>
                       <p style="margin:0 0 8px;font-size:13px;color:rgba(180,200,220,0.6);">MATCH</p>
-                      <p style="margin:0 0 16px;font-size:15px;color:#F4F4F9;">${record.home_team_name} vs ${record.away_team_name}</p>
+                      <p style="margin:0 0 16px;font-size:15px;color:#F4F4F9;">${escapeHtml(record.home_team_name)} vs ${escapeHtml(record.away_team_name)}</p>
                       <p style="margin:0 0 8px;font-size:13px;color:rgba(180,200,220,0.6);">DATE & TIME</p>
-                      <p style="margin:0;font-size:15px;color:#F4F4F9;">${matchDate} at ${record.time_slot}</p>
+                      <p style="margin:0;font-size:15px;color:#F4F4F9;">${escapeHtml(matchDate)} at ${escapeHtml(record.time_slot)}</p>
                     </div>
-                    <p style="margin:0;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.6;">${statusMessage}</p>
+                    <p style="margin:0;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.6;">${escapeHtml(statusMessage)}</p>
                   </div>
                 </div>
               </div>
@@ -198,7 +199,7 @@ function buildPage(title, message, success) {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${title} — NovaChrono</title>
+    <title>${escapeHtml(title)} — NovaChrono</title>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@400;600&family=Share+Tech+Mono&display=swap');
       * { box-sizing:border-box; margin:0; padding:0; }
@@ -215,8 +216,8 @@ function buildPage(title, message, success) {
     <div class="card">
       <div class="top-bar"></div>
       <div class="icon">${success ? (title.includes("✅") ? "✅" : "👍") : "❌"}</div>
-      <h1 class="title">${title}</h1>
-      <p class="message">${message}</p>
+      <h1 class="title">${escapeHtml(title)}</h1>
+      <p class="message">${escapeHtml(message)}</p>
       <p class="brand">// NOVACHRONO — TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
     </div>
   </body>

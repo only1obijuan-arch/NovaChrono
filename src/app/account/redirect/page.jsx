@@ -1,9 +1,12 @@
 "use client";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { withJoinCode } from "@/utils/join-navigation";
+import { useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 
-export default function RedirectPage() {
+function RedirectContent() {
+  const searchParams = useSearchParams();
+  const code = searchParams.get("code");
   const router = useRouter();
   const { data: session, status } = useSession();
 
@@ -11,7 +14,7 @@ export default function RedirectPage() {
     if (status === "loading") return;
 
     if (status === "unauthenticated") {
-      router.replace("/account/signin");
+      router.replace(withJoinCode("/account/signin", code));
       return;
     }
 
@@ -26,12 +29,12 @@ export default function RedirectPage() {
     } else if (role === "referee") {
       router.replace("/referee");
     } else if (role === "captain") {
-      router.replace("/captain/team");
+      router.replace(withJoinCode("/captain/team", code));
     } else {
       // No role or unknown role — back to signin
-      router.replace("/account/signin");
+      router.replace(withJoinCode("/account/signin", code));
     }
-  }, [session, status, router]);
+  }, [session, status, router, code]);
 
   return (
     <div style={{
@@ -61,4 +64,7 @@ export default function RedirectPage() {
       </p>
     </div>
   );
+}
+export default function RedirectPage() {
+  return <Suspense fallback={null}><RedirectContent /></Suspense>;
 }

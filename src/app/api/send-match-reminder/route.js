@@ -1,21 +1,17 @@
-import { auth } from "@/auth";
+import { escapeHtml } from "@/utils/escape-html";
+import { requireRole } from "@/app/api/utils/auth";
+import { canAdministerVenue, UUID_RE } from "@/app/api/utils/ownership";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import crypto from "crypto";
 
 export async function POST(request) {
-  const session = await auth();
-  if (!session?.user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const userRole = session.user.role;
-  if (userRole !== "venue_admin" && userRole !== "super_admin") {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const user = await requireRole(request, "venue_admin", "super_admin");
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     const { matchId } = await request.json();
+    if (!UUID_RE.test(matchId)) return Response.json({ error: "Invalid match ID" }, { status: 400 });
 
     const matchResult = await sql`
       SELECT
@@ -53,6 +49,7 @@ export async function POST(request) {
     }
 
     const match = matchResult[0];
+    if (!canAdministerVenue(user, match.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
     const matchDate = new Date(match.match_date).toLocaleDateString("en-GB", {
       weekday: "long",
       year: "numeric",
@@ -110,37 +107,37 @@ export async function POST(request) {
                   <p style="margin:0 0 8px;font-size:10px;color:rgba(0,245,212,0.5);letter-spacing:4px;font-family:monospace;">// MATCH REMINDER</p>
                   <h1 style="margin:0 0 8px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">ARE YOU IN?</h1>
                   <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.6;">
-                    Hi ${captainName || "Captain"},<br><br>
-                    You have an upcoming match for <strong style="color:#F4F4F9;">${teamName}</strong>. Please confirm your team's availability.
+                    Hi ${escapeHtml(captainName || "Captain")},<br><br>
+                    You have an upcoming match for <strong style="color:#F4F4F9;">${escapeHtml(teamName)}</strong>. Please confirm your team's availability.
                   </p>
                   <div style="background:rgba(0,245,212,0.04);border:1px solid rgba(0,245,212,0.15);border-radius:6px;padding:20px;margin-bottom:24px;">
                     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(0,245,212,0.08);">
                       <span style="font-size:11px;color:rgba(0,245,212,0.5);font-family:monospace;letter-spacing:2px;">LEAGUE</span>
-                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">${match.league_name}</span>
+                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">${escapeHtml(match.league_name)}</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(0,245,212,0.08);">
                       <span style="font-size:11px;color:rgba(0,245,212,0.5);font-family:monospace;letter-spacing:2px;">DATE</span>
-                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">${matchDate}</span>
+                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">${escapeHtml(matchDate)}</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(0,245,212,0.08);">
                       <span style="font-size:11px;color:rgba(0,245,212,0.5);font-family:monospace;letter-spacing:2px;">TIME</span>
-                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">${match.time_slot}</span>
+                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">${escapeHtml(match.time_slot)}</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(0,245,212,0.08);">
                       <span style="font-size:11px;color:rgba(0,245,212,0.5);font-family:monospace;letter-spacing:2px;">FIELD</span>
-                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">Field ${match.field_number}</span>
+                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">Field ${escapeHtml(match.field_number)}</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:8px 0;">
                       <span style="font-size:11px;color:rgba(0,245,212,0.5);font-family:monospace;letter-spacing:2px;">OPPONENT</span>
-                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">${opponentName || "TBD"} (${isHome ? "HOME" : "AWAY"})</span>
+                      <span style="font-size:13px;color:#F4F4F9;font-weight:600;">${escapeHtml(opponentName || "TBD")} (${isHome ? "HOME" : "AWAY"})</span>
                     </div>
                   </div>
                   <p style="margin:0 0 20px;font-size:14px;color:rgba(180,200,220,0.6);text-align:center;font-family:monospace;letter-spacing:2px;">CONFIRM YOUR AVAILABILITY:</p>
                   <div style="display:flex;gap:12px;justify-content:center;">
-                    <a href="${confirmUrl}" style="flex:1;display:inline-block;background:linear-gradient(135deg,#00FF9C,#00CC78);color:#091833;font-family:monospace;font-size:14px;font-weight:900;letter-spacing:3px;padding:18px 24px;border-radius:4px;text-decoration:none;text-align:center;">
+                    <a href="${escapeHtml(confirmUrl)}" style="flex:1;display:inline-block;background:linear-gradient(135deg,#00FF9C,#00CC78);color:#091833;font-family:monospace;font-size:14px;font-weight:900;letter-spacing:3px;padding:18px 24px;border-radius:4px;text-decoration:none;text-align:center;">
                       ✅ YES, WE'RE IN
                     </a>
-                    <a href="${declineUrl}" style="flex:1;display:inline-block;background:rgba(255,0,204,0.1);border:1px solid rgba(255,0,204,0.4);color:#FF00CC;font-family:monospace;font-size:14px;font-weight:900;letter-spacing:3px;padding:18px 24px;border-radius:4px;text-decoration:none;text-align:center;">
+                    <a href="${escapeHtml(declineUrl)}" style="flex:1;display:inline-block;background:rgba(255,0,204,0.1);border:1px solid rgba(255,0,204,0.4);color:#FF00CC;font-family:monospace;font-size:14px;font-weight:900;letter-spacing:3px;padding:18px 24px;border-radius:4px;text-decoration:none;text-align:center;">
                       ❌ CAN'T MAKE IT
                     </a>
                   </div>

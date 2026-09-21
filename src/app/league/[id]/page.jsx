@@ -1,4 +1,5 @@
 "use client";
+import { weekdayLabel } from "@/utils/weekday";
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -216,9 +217,9 @@ export default function PublicLeagueView({ params }) {
               >
                 {league.status?.toUpperCase()}
               </span>
-              {league.day_of_week && (
+              {Number.isInteger(league.day_of_week) && (
                 <span className="plv-day-badge">
-                  {league.day_of_week?.toUpperCase()} LEAGUE
+                  {weekdayLabel(league.day_of_week).toUpperCase()} LEAGUE
                 </span>
               )}
             </div>

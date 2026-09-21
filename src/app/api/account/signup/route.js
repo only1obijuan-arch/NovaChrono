@@ -1,3 +1,5 @@
+import { sendCaptainWelcome } from "@/app/api/utils/captain-welcome";
+import { isValidJoinCode } from "@/utils/join-code";
 import sql, { withTransaction } from "@/app/api/utils/sql";
 import { hash } from "argon2";
 import { rateLimit } from "@/app/api/utils/rate-limit";
@@ -7,7 +9,7 @@ import crypto from "crypto";
 import { z } from "zod";
 
 const signupSchema = z.object({
-  joinCode: z.string().min(1).max(20),
+  joinCode: z.string().trim().refine(isValidJoinCode, "League code must be 6 or 8 letters or digits"),
   name: z.string().min(1).max(100),
   email: z.string().email().max(254),
   password: z.string().min(8).max(128),
@@ -113,6 +115,10 @@ export async function POST(request) {
       html: verifyEmail({ name, verifyUrl }),
       text: `NovaChrono — Verify Your Email\n\nHi ${name},\n\nClick the link below to verify your email:\n${verifyUrl}\n\nThis link expires in 24 hours.`,
     }).catch((err) => console.error("Verification email failed:", err));
+
+    await sendCaptainWelcome({ email, name, teamName, joinCode }).catch((err) => {
+      console.error("Welcome email failed:", err);
+    });
 
     return Response.json({ success: true, requiresVerification: true });
   } catch (err) {

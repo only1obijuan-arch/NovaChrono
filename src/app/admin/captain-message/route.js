@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
@@ -18,7 +19,7 @@ export async function POST(request) {
     for (const captain of captains) {
       await sql`INSERT INTO notifications (user_id, type, title, message) VALUES (${captain.id}, 'admin_message', ${`Message from Admin — ${league.name}`}, ${message.trim()})`;
       if (captain.push_token) await sendPush(captain.push_token, `Message from Admin — ${league.name}`, message.trim(), { type: "admin_message" });
-      if (captain.email) await sendEmail({ to: captain.email, subject: `Message from NovaChrono Admin — ${league.name}`, text: message.trim(), html: `<p>${message.trim()}</p>` });
+      if (captain.email) await sendEmail({ to: captain.email, subject: `Message from NovaChrono Admin — ${league.name}`, text: message.trim(), html: `<p>${escapeHtml(message.trim())}</p>` });
       sent++;
     }
     return Response.json({ success: true, sent, total: captains.length });

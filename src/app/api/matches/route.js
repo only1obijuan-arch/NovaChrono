@@ -120,32 +120,30 @@ export async function POST(request) {
 
     if (action === "DELETE_EVENT") {
       const { eventId } = data;
-      const [matchVenueRow] = await sql`
-        SELECT l.venue_id
-        FROM matches m
-        JOIN leagues l ON m.league_id = l.id
-        WHERE m.id = ${matchId}
-      `;
-      if (!matchVenueRow) return Response.json({ error: "Match not found" }, { status: 404 });
-      if (!canAccessVenue(user, matchVenueRow.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
-      if (user.role === "referee") {
-        const [match] = await sql`SELECT referee_id FROM matches WHERE id = ${matchId}`;
-        if (!match || match.referee_id !== user.id) {
-          return Response.json({ error: "Not assigned to this match" }, { status: 403 });
+      // Lock the same match as finalisation before checking state or touching its event.
+      const result = await withTransaction(async (txSql) => {
+        const [match] = await txSql`
+          SELECT m.status, m.referee_id, l.venue_id
+          FROM matches m JOIN leagues l ON m.league_id = l.id
+          WHERE m.id = ${matchId} FOR UPDATE OF m
+        `;
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        if (!canAccessVenue(user, match.venue_id) || (user.role === "referee" && match.referee_id !== user.id)) {
+          return Response.json({ error: "Access denied" }, { status: 403 });
         }
-      }
-      await withTransaction(async (txSql) => {
-        const [event] = await txSql`SELECT * FROM match_events WHERE id = ${eventId} FOR UPDATE`;
-        if (event && (event.type === "goal_home" || event.type === "goal_away")) {
-          if (event.type === "goal_home") {
-            await txSql`UPDATE matches SET home_score = GREATEST(0, home_score - 1) WHERE id = ${event.match_id}`;
-          } else {
-            await txSql`UPDATE matches SET away_score = GREATEST(0, away_score - 1) WHERE id = ${event.match_id}`;
-          }
+        if (match.status !== "live") return Response.json({ error: "Only live match goals can be corrected here" }, { status: 409 });
+        const [event] = await txSql`SELECT * FROM match_events WHERE id = ${eventId} AND match_id = ${matchId} FOR UPDATE`;
+        if (!event || event.match_id !== matchId) return Response.json({ error: "Event not found in this match" }, { status: 404 });
+        if (!["goal_home", "goal_away"].includes(event.type)) return Response.json({ error: "Only goals can be corrected" }, { status: 409 });
+        if (event.type === "goal_home") {
+          await txSql`UPDATE matches SET home_score = GREATEST(0, home_score - 1) WHERE id = ${matchId}`;
+        } else {
+          await txSql`UPDATE matches SET away_score = GREATEST(0, away_score - 1) WHERE id = ${matchId}`;
         }
-        await txSql`DELETE FROM match_events WHERE id = ${eventId}`;
+        await txSql`DELETE FROM match_events WHERE id = ${eventId} AND match_id = ${matchId}`;
+        return Response.json({ success: true });
       });
-      return Response.json({ success: true });
+      return result;
     }
 
     if (action === "END_MATCH") {

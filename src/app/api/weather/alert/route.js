@@ -1,4 +1,6 @@
-import { auth } from "@/auth";
+import { escapeHtml } from "@/utils/escape-html";
+import { requireRole } from "@/app/api/utils/auth";
+import { canAdministerVenue, UUID_RE } from "@/app/api/utils/ownership";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { sendPush } from "@/app/api/utils/send-push";
@@ -6,22 +8,17 @@ import { rateLimit } from "@/app/api/utils/rate-limit";
 
 export async function POST(request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if (session.user.role !== "venue_admin" && session.user.role !== "super_admin") {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const user = await requireRole(request, "venue_admin", "super_admin");
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { allowed } = await rateLimit(`alert:${session.user.id}`, { max: 10, windowMinutes: 60 });
+    const { allowed } = await rateLimit(`alert:${user.id}`, { max: 10, windowMinutes: 60 });
     if (!allowed) {
       return Response.json({ error: "Too many alerts sent. Try again later." }, { status: 429 });
     }
 
     const { league_id, alert_type, message } = await request.json();
 
-    if (!league_id || !alert_type || !message) {
+    if (!UUID_RE.test(league_id) || !alert_type || !message) {
       return Response.json(
         { error: "league_id, alert_type, and message required" },
         { status: 400 }
@@ -39,6 +36,8 @@ export async function POST(request) {
     if (!league) {
       return Response.json({ error: "League not found" }, { status: 404 });
     }
+
+    if (!canAdministerVenue(user, league.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
 
     const captains = await sql`
       SELECT DISTINCT au.id, au.email, au.name, au.push_token
@@ -99,12 +98,12 @@ export async function POST(request) {
                         <p style="margin:0 0 8px;font-size:10px;color:${alertColor};letter-spacing:4px;font-family:monospace;">// ${alertLabel}</p>
                         <h1 style="margin:0 0 16px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">${isWarning ? "WEATHER ALERT" : "MATCH POSTPONED"}</h1>
                         <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.6;">
-                          Hi ${captain.name || "Captain"},<br><br>
-                          ${message}
+                          Hi ${escapeHtml(captain.name || "Captain")},<br><br>
+                          ${escapeHtml(message)}
                         </p>
                         <div style="background:rgba(255,255,255,0.04);border-radius:6px;padding:20px;">
                           <p style="margin:0 0 6px;font-size:11px;color:rgba(180,200,220,0.5);font-family:monospace;">LEAGUE</p>
-                          <p style="margin:0;font-size:16px;font-weight:700;color:#F4F4F9;">${league.name}</p>
+                          <p style="margin:0;font-size:16px;font-weight:700;color:#F4F4F9;">${escapeHtml(league.name)}</p>
                         </div>
                       </div>
                     </div>

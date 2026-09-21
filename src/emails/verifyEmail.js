@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 export function verifyEmail({ name, verifyUrl }) {
   return `<!DOCTYPE html>
 <html>
@@ -16,10 +17,10 @@ export function verifyEmail({ name, verifyUrl }) {
           <p style="margin:0 0 8px;font-size:10px;color:rgba(0,245,212,0.5);letter-spacing:4px;font-family:monospace;">// ACTION REQUIRED</p>
           <h1 style="margin:0 0 16px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">VERIFY YOUR EMAIL</h1>
           <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.6;">
-            Hi ${name}, welcome to NovaChrono! Click the button below to verify your email and activate your captain account.
+            Hi ${escapeHtml(name)}, welcome to NovaChrono! Click the button below to verify your email and activate your captain account.
           </p>
           <div style="text-align:center;margin:32px 0;">
-            <a href="${verifyUrl}" style="display:inline-block;background:linear-gradient(135deg,rgba(0,245,212,0.2),rgba(0,245,212,0.1));border:1px solid rgba(0,245,212,0.5);color:#00F5D4;font-family:monospace;font-size:13px;font-weight:700;letter-spacing:3px;padding:16px 40px;border-radius:4px;text-decoration:none;">
+            <a href="${escapeHtml(verifyUrl)}" style="display:inline-block;background:linear-gradient(135deg,rgba(0,245,212,0.2),rgba(0,245,212,0.1));border:1px solid rgba(0,245,212,0.5);color:#00F5D4;font-family:monospace;font-size:13px;font-weight:700;letter-spacing:3px;padding:16px 40px;border-radius:4px;text-decoration:none;">
               VERIFY EMAIL →
             </a>
           </div>

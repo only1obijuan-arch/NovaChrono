@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
@@ -106,14 +107,14 @@ export async function POST(request) {
                       <div style="height:3px;background:#FF00CC;"></div>
                       <div style="padding:32px;">
                         <p style="margin:0 0 8px;font-size:10px;color:#FF00CC;letter-spacing:4px;font-family:monospace;">// 📅 ROUND POSTPONED</p>
-                        <h1 style="margin:0 0 16px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">ROUND ${round_number}+ POSTPONED</h1>
+                        <h1 style="margin:0 0 16px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">ROUND ${escapeHtml(round_number)}+ POSTPONED</h1>
                         <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.6;">
-                          Hi ${captain.name || "Captain"},<br><br>
-                          Round ${round_number} and all following rounds of <strong style="color:#F4F4F9;">${league.name}</strong> have been postponed by 7 days due to weather conditions.
+                          Hi ${escapeHtml(captain.name || "Captain")},<br><br>
+                          Round ${escapeHtml(round_number)} and all following rounds of <strong style="color:#F4F4F9;">${escapeHtml(league.name)}</strong> have been postponed by 7 days due to weather conditions.
                         </p>
                         <div style="background:rgba(255,255,255,0.04);border-radius:6px;padding:20px;margin-bottom:24px;">
                           <p style="margin:0 0 6px;font-size:11px;color:rgba(180,200,220,0.5);font-family:monospace;">NEW DATE</p>
-                          <p style="margin:0;font-size:18px;font-weight:700;color:#00F5D4;">${newDate}</p>
+                          <p style="margin:0;font-size:18px;font-weight:700;color:#00F5D4;">${escapeHtml(newDate)}</p>
                           <p style="margin:8px 0 0;font-size:13px;color:rgba(180,200,220,0.5);">${updatedMatches.length} match${updatedMatches.length !== 1 ? "es" : ""} rescheduled</p>
                         </div>
                         <p style="margin:0;font-size:14px;color:rgba(180,200,220,0.6);line-height:1.6;">

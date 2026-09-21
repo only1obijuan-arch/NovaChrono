@@ -1,3 +1,4 @@
+import { isValidJoinCode } from "@/utils/join-code";
 import { auth } from "@/auth";
 import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 import sql from "@/app/api/utils/sql";
@@ -10,7 +11,7 @@ export async function POST(request) {
   }
 
   const { joinCode, teamName } = await request.json();
-  if (!joinCode || !teamName) {
+  if (!isValidJoinCode(joinCode) || !teamName) {
     return Response.json({ error: "League code and team name are required" }, { status: 400 });
   }
 

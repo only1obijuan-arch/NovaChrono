@@ -1,4 +1,5 @@
 "use client";
+import { withJoinCode } from "@/utils/join-navigation";
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
@@ -75,17 +76,9 @@ function SignInContent() {
       });
 
       if (result?.ok && !result?.error) {
-        // Record successful login
-        try {
-          await fetch("/api/auth/rate-limit", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, success: true }),
-          });
-        } catch {}
         // Soft navigation keeps the SessionProvider alive so the session
         // is already in-memory when the redirect page mounts.
-        router.push("/account/redirect");
+        router.push(withJoinCode("/account/redirect", searchParams.get("code")));
         return;
       }
 
@@ -105,7 +98,7 @@ function SignInContent() {
         }
       } catch {}
 
-      // Failed — record attempt
+      // Authentication has already recorded the attempt; read its status.
       const failRes = await fetch("/api/auth/rate-limit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -1,3 +1,4 @@
+import { escapeHtml } from "@/utils/escape-html";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { hash } from "argon2";
@@ -102,11 +103,11 @@ export async function POST(request) {
                   <p style="margin:0 0 8px;font-size:10px;color:rgba(255,0,204,0.5);letter-spacing:4px;font-family:monospace;">// WELCOME ABOARD</p>
                   <h1 style="margin:0 0 20px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">ACCOUNT ACTIVATED!</h1>
                   <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.7;">
-                    Hi ${name}, your NovaChrono account is ready. You're now managing
-                    <strong style="color:#F4F4F9;">${invite.organization_name}</strong>.
+                    Hi ${escapeHtml(name)}, your NovaChrono account is ready. You're now managing
+                    <strong style="color:#F4F4F9;">${escapeHtml(invite.organization_name)}</strong>.
                   </p>
                   <div style="text-align:center;">
-                    <a href="${appUrl}/account/signin" style="display:inline-block;background:linear-gradient(135deg,#FF00CC,#AA0088);color:#F4F4F9;font-family:monospace;font-size:13px;font-weight:700;letter-spacing:3px;padding:16px 40px;border-radius:4px;text-decoration:none;">
+                    <a href="${escapeHtml(appUrl)}/account/signin" style="display:inline-block;background:linear-gradient(135deg,#FF00CC,#AA0088);color:#F4F4F9;font-family:monospace;font-size:13px;font-weight:700;letter-spacing:3px;padding:16px 40px;border-radius:4px;text-decoration:none;">
                       SIGN IN NOW →
                     </a>
                   </div>

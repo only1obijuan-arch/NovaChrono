@@ -46,7 +46,11 @@ export default auth(async (req) => {
 
   // Protect non-public API routes
   if (pathname.startsWith("/api/")) {
-    const isPublic = publicApiPrefixes.some((prefix) => pathname.startsWith(prefix));
+    const isPublic = publicApiPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix + "/")) ||
+      (req.method === "POST" && pathname === "/api/account/signup") ||
+      (req.method === "GET" && pathname === "/api/admin/invite") ||
+      (req.method === "POST" && pathname === "/api/admin/accept-invite") ||
+      (req.method === "GET" && pathname === "/api/leagues" && req.nextUrl.searchParams.has("leagueId"));
     if (isPublic) return NextResponse.next();
 
     if (!session?.user) {
@@ -65,6 +69,8 @@ export default auth(async (req) => {
 
     return NextResponse.next();
   }
+
+  if (req.method === "GET" && pathname === "/captain/join") return NextResponse.next();
 
   // Protect role-gated page routes
   const matchedPrefix = Object.keys(roleRoutes).find((prefix) =>

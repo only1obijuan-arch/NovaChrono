@@ -1,4 +1,5 @@
 "use client";
+import { weekdayNumber } from "@/utils/weekday";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
@@ -70,7 +71,7 @@ export default function CreateLeague() {
         );
       const res = await fetch("/api/leagues", {
         method: "POST",
-        body: JSON.stringify({ action: "CREATE_LEAGUE", venueId, ...data }),
+        body: JSON.stringify({ action: "CREATE_LEAGUE", venueId, ...data, dayOfWeek: weekdayNumber(data.dayOfWeek) }),
       });
       if (!res.ok) throw new Error("Failed to create league");
       return res.json();

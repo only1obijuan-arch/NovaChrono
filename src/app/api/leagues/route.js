@@ -338,8 +338,6 @@ export async function POST(request) {
 
 export async function GET(request) {
   const user = await requireRole(request, "venue_admin", "super_admin");
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
   const { searchParams } = new URL(request.url);
   const venueId = searchParams.get("venueId");
   const leagueId = searchParams.get("leagueId");
@@ -347,12 +345,25 @@ export async function GET(request) {
   if (leagueId) {
     if (!UUID_RE.test(leagueId))
       return Response.json({ error: "Invalid leagueId" }, { status: 400 });
-    const [league] = await sql`SELECT * FROM leagues WHERE id = ${leagueId}`;
-    if (!league || !canAccessVenue(user, league.venue_id)) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
+    if (user) {
+      const [league] = await sql`SELECT * FROM leagues WHERE id = ${leagueId}`;
+      if (!league) return Response.json({ error: "League not found" }, { status: 404 });
+      if (!canAccessVenue(user, league.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
+      return Response.json(league);
     }
+    // Explicit public/participant projection. No join code, tenant IDs,
+    // internal time-slot configuration or account/administrator data.
+    const [league] = await sql`
+      SELECT l.id, l.name, l.status, l.day_of_week, l.season_name,
+             l.season_start_date, l.season_end_date, l.match_format,
+             l.match_duration_minutes, l.fields_count, l.max_teams, v.name AS venue_name
+      FROM leagues l JOIN venues v ON v.id = l.venue_id WHERE l.id = ${leagueId}
+    `;
+    if (!league) return Response.json({ error: "League not found" }, { status: 404 });
     return Response.json(league);
   }
+
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   if (venueId) {
     if (!UUID_RE.test(venueId))
