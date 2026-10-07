@@ -6,7 +6,7 @@ export function RefereesSection({ referees, isLoading, onAddReferee, onDeleteRef
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div className="ad-section-title" style={{ margin: 0, flex: 1 }}>
-          // REFEREE ACCOUNTS <div className="ad-section-line" />
+          REFEREE ACCOUNTS <div className="ad-section-line" />
         </div>
         <button className="ad-add-ref-btn" onClick={onAddReferee} style={{ marginLeft: 16, flexShrink: 0 }}>
           <Shield size={12} /> GENERATE REF LOGIN
@@ -22,7 +22,7 @@ export function RefereesSection({ referees, isLoading, onAddReferee, onDeleteRef
       ) : referees.length === 0 ? (
         <div style={{ background: "rgba(11,20,40,0.6)", border: "2px dashed rgba(0,245,212,0.1)", borderRadius: 8, padding: "40px 24px", textAlign: "center" }}>
           <Shield size={32} color="rgba(0,245,212,0.2)" style={{ margin: "0 auto 12px" }} />
-          <p style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.3)", letterSpacing: 3 }}>
+          <p style={{ fontFamily: "var(--font-code)", fontSize: 10, color: "rgba(0,245,212,0.3)", letterSpacing: 3 }}>
             NO REFEREE ACCOUNTS GENERATED
           </p>
         </div>

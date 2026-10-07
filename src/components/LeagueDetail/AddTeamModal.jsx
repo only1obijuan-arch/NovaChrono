@@ -7,7 +7,7 @@ export function AddTeamModal({ show, onClose, onSubmit, teamForm, setTeamForm, i
     <div className="ld-modal-overlay">
       <div className="ld-modal">
         <div className="ld-modal-header">
-          <h3 className="ld-modal-title">// ADD TEAM</h3>
+          <h3 className="ld-modal-title">ADD TEAM</h3>
           <button className="ld-modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }}>

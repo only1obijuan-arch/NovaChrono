@@ -8,7 +8,7 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
   const panelRef = useRef(null);
   const queryClient = useQueryClient();
 
-  const { data } = useQuery({
+  const { data, dataUpdatedAt } = useQuery({
     queryKey: ["notifications"],
     queryFn: async () => {
       const res = await fetch("/api/notifications");
@@ -53,7 +53,8 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
   const unreadCount = data?.unreadCount || 0;
 
   function timeAgo(dateStr) {
-    const diff = Date.now() - new Date(dateStr).getTime();
+    const timestamp = new Date(dateStr).getTime();
+    const diff = Math.max(0, (dataUpdatedAt || timestamp) - timestamp);
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return "just now";
     if (mins < 60) return `${mins}m ago`;
@@ -78,6 +79,9 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
   return (
     <div ref={panelRef} style={{ position: "relative" }}>
       <button
+        type="button"
+        aria-label="Notifications"
+        aria-expanded={open}
         onClick={() => setOpen(!open)}
         style={{
           position: "relative",
@@ -115,7 +119,7 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontFamily: "'Share Tech Mono',monospace",
+              fontFamily: "var(--font-code)",
               fontSize: 10,
               color: "white",
               fontWeight: 700,
@@ -152,14 +156,14 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
           >
             <span
               style={{
-                fontFamily: "'Orbitron',monospace",
+                fontFamily: "var(--font-display)",
                 fontSize: 12,
                 fontWeight: 700,
                 color: "#F4F4F9",
                 letterSpacing: 2,
               }}
             >
-              // NOTIFICATIONS
+              NOTIFICATIONS
             </span>
             {unreadCount > 0 && (
               <button
@@ -167,7 +171,7 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
                 style={{
                   background: "none",
                   border: "none",
-                  fontFamily: "'Share Tech Mono',monospace",
+                  fontFamily: "var(--font-code)",
                   fontSize: 9,
                   color: `rgba(0,245,212,0.5)`,
                   letterSpacing: 2,
@@ -188,7 +192,7 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
                 style={{
                   padding: "40px 24px",
                   textAlign: "center",
-                  fontFamily: "'Share Tech Mono',monospace",
+                  fontFamily: "var(--font-code)",
                   fontSize: 10,
                   color: "rgba(0,245,212,0.2)",
                   letterSpacing: 3,
@@ -233,7 +237,7 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
                       <p
                         style={{
                           margin: "0 0 3px",
-                          fontFamily: "'Rajdhani',sans-serif",
+                          fontFamily: "var(--font-ui)",
                           fontSize: 14,
                           fontWeight: 700,
                           color: notif.read ? "rgba(180,200,220,0.5)" : "#F4F4F9",
@@ -244,7 +248,7 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
                       <p
                         style={{
                           margin: "0 0 4px",
-                          fontFamily: "'Rajdhani',sans-serif",
+                          fontFamily: "var(--font-ui)",
                           fontSize: 13,
                           color: "rgba(180,200,220,0.5)",
                           lineHeight: 1.4,
@@ -255,7 +259,7 @@ export function NotificationBell({ accentColor = "#00F5D4" }) {
                       <p
                         style={{
                           margin: 0,
-                          fontFamily: "'Share Tech Mono',monospace",
+                          fontFamily: "var(--font-code)",
                           fontSize: 9,
                           color: "rgba(180,200,220,0.25)",
                           letterSpacing: 1,

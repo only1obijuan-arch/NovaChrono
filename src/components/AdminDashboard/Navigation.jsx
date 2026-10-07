@@ -1,13 +1,14 @@
 import { Home, Users, Timer, LogOut } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import Link from "next/link";
 
 export function Navigation({ userRole }) {
   return (
     <nav className="ad-nav">
       <div className="ad-nav-left">
-        <a href="/" className="ad-nav-link">
+        <Link href="/" className="ad-nav-link">
           <Home size={14} /> HOME
-        </a>
+        </Link>
         {(userRole === "super_admin" || userRole === "venue_admin") && (
           <a href="/account/signin" className="ad-nav-link magenta">
             <Users size={14} /> CAPTAIN VIEW

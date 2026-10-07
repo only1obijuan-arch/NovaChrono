@@ -78,7 +78,7 @@ export default function Schedule() {
             marginBottom: 8,
           }}
         >
-          // MATCH SCHEDULE
+          MATCH SCHEDULE
         </Text>
         <Text
           style={{ fontFamily: F.orbitron, fontSize: 26, color: "#F4F4F9" }}

@@ -140,61 +140,60 @@ export default function CreateLeague() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         @keyframes scanline { 0% { transform:translateY(-100%); } 100% { transform:translateY(100vh); } }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 
         * { box-sizing:border-box; }
-        .cl-page { min-height:100vh; background:#091833; font-family:'Rajdhani',sans-serif; position:relative; padding:40px 24px 80px; }
+        .cl-page { min-height:100vh; background:#091833; font-family:var(--font-ui); position:relative; padding:40px 24px 80px; }
         .cl-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(255,0,204,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(255,0,204,0.02) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
         .cl-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(255,0,204,0.3),transparent); animation:scanline 7s linear infinite; pointer-events:none; z-index:100; }
         .cl-glow { position:fixed; top:-200px; right:-200px; width:600px; height:600px; background:radial-gradient(circle,rgba(255,0,204,0.04) 0%,transparent 70%); pointer-events:none; }
 
         .cl-inner { max-width:860px; margin:0 auto; position:relative; z-index:1; }
-        .cl-back { display:inline-flex; align-items:center; gap:6px; color:rgba(255,0,204,0.5); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; margin-bottom:32px; transition:all 0.2s; }
+        .cl-back { display:inline-flex; align-items:center; gap:6px; color:rgba(255,0,204,0.5); font-family:var(--font-code); font-size:11px; letter-spacing:2px; text-decoration:none; margin-bottom:32px; transition:all 0.2s; }
         .cl-back:hover { color:#FF00CC; }
 
         .cl-card { background:rgba(11,20,40,0.95); border:1px solid rgba(255,0,204,0.15); border-radius:8px; overflow:hidden; animation:fadeInUp 0.4s ease; }
         .cl-card-header { padding:32px 40px; border-bottom:1px solid rgba(255,0,204,0.1); background:rgba(255,0,204,0.03); }
-        .cl-card-title { font-family:'Orbitron',monospace; font-size:22px; font-weight:900; color:#F4F4F9; letter-spacing:3px; margin-bottom:8px; }
-        .cl-card-sub { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.4); letter-spacing:3px; }
+        .cl-card-title { font-family:var(--font-display); font-size:22px; font-weight:900; color:#F4F4F9; letter-spacing:3px; margin-bottom:8px; }
+        .cl-card-sub { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.4); letter-spacing:3px; }
 
         .cl-form { padding:40px; display:flex; flex-direction:column; gap:40px; }
 
         .cl-section { display:flex; flex-direction:column; gap:20px; }
         .cl-section-header { display:flex; align-items:center; gap:12px; padding-bottom:14px; border-bottom:1px solid rgba(255,0,204,0.08); }
         .cl-section-icon { width:36px; height:36px; background:rgba(255,0,204,0.08); border:1px solid rgba(255,0,204,0.2); border-radius:4px; display:flex; align-items:center; justify-content:center; color:#FF00CC; flex-shrink:0; }
-        .cl-section-title { font-family:'Orbitron',monospace; font-size:13px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
+        .cl-section-title { font-family:var(--font-display); font-size:13px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
 
-        .cl-venue-select { width:100%; height:48px; background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.25); border-radius:4px; padding:0 16px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; cursor:pointer; transition:all 0.2s; }
+        .cl-venue-select { width:100%; height:48px; background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.25); border-radius:4px; padding:0 16px; color:#F4F4F9; font-family:var(--font-ui); font-size:16px; outline:none; cursor:pointer; transition:all 0.2s; }
         .cl-venue-select:focus { border-color:#00F5D4; box-shadow:0 0 12px rgba(0,245,212,0.12); }
         .cl-venue-select option { background:#0D1B2E; }
-        .cl-venue-assigned { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,245,212,0.6); letter-spacing:2px; padding:12px 16px; background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.2); border-radius:4px; }
+        .cl-venue-assigned { font-family:var(--font-code); font-size:10px; color:rgba(0,245,212,0.6); letter-spacing:2px; padding:12px 16px; background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.2); border-radius:4px; }
 
         .cl-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
         .cl-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; }
         .cl-field { display:flex; flex-direction:column; gap:8px; }
-        .cl-label { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.6); letter-spacing:3px; }
-        .cl-input { height:48px; padding:0 16px; background:rgba(255,0,204,0.04); border:1px solid rgba(255,0,204,0.15); border-radius:4px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; transition:all 0.2s; }
+        .cl-label { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.6); letter-spacing:3px; }
+        .cl-input { height:48px; padding:0 16px; background:rgba(255,0,204,0.04); border:1px solid rgba(255,0,204,0.15); border-radius:4px; color:#F4F4F9; font-family:var(--font-ui); font-size:16px; outline:none; transition:all 0.2s; }
         .cl-input:focus { border-color:#FF00CC; box-shadow:0 0 12px rgba(255,0,204,0.12); }
         .cl-input::placeholder { color:rgba(180,200,220,0.2); }
-        .cl-select { height:48px; padding:0 16px; background:rgba(255,0,204,0.04); border:1px solid rgba(255,0,204,0.15); border-radius:4px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; cursor:pointer; transition:all 0.2s; }
+        .cl-select { height:48px; padding:0 16px; background:rgba(255,0,204,0.04); border:1px solid rgba(255,0,204,0.15); border-radius:4px; color:#F4F4F9; font-family:var(--font-ui); font-size:16px; outline:none; cursor:pointer; transition:all 0.2s; }
         .cl-select:focus { border-color:#FF00CC; }
         .cl-select option { background:#0D1B2E; }
-        .cl-input-disabled { height:48px; padding:0 16px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,0,204,0.06); border-radius:4px; display:flex; align-items:center; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(180,200,220,0.25); letter-spacing:2px; }
+        .cl-input-disabled { height:48px; padding:0 16px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,0,204,0.06); border-radius:4px; display:flex; align-items:center; font-family:var(--font-code); font-size:10px; color:rgba(180,200,220,0.25); letter-spacing:2px; }
 
         .cl-slots-header { display:flex; align-items:center; justify-content:space-between; }
-        .cl-add-slot { display:inline-flex; align-items:center; gap:6px; background:none; border:1px solid rgba(255,0,204,0.25); color:rgba(255,0,204,0.6); font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:2px; padding:6px 12px; border-radius:2px; cursor:pointer; transition:all 0.2s; }
+        .cl-add-slot { display:inline-flex; align-items:center; gap:6px; background:none; border:1px solid rgba(255,0,204,0.25); color:rgba(255,0,204,0.6); font-family:var(--font-code); font-size:10px; letter-spacing:2px; padding:6px 12px; border-radius:2px; cursor:pointer; transition:all 0.2s; }
         .cl-add-slot:hover { border-color:#FF00CC; color:#FF00CC; background:rgba(255,0,204,0.06); }
         .cl-slots-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:10px; }
         .cl-slot-wrap { position:relative; }
-        .cl-slot-input { width:100%; height:44px; padding:0 32px 0 12px; background:rgba(255,0,204,0.05); border:1px solid rgba(255,0,204,0.2); border-radius:4px; color:#FF00CC; font-family:'Share Tech Mono',monospace; font-size:13px; letter-spacing:1px; outline:none; transition:all 0.2s; }
+        .cl-slot-input { width:100%; height:44px; padding:0 32px 0 12px; background:rgba(255,0,204,0.05); border:1px solid rgba(255,0,204,0.2); border-radius:4px; color:#FF00CC; font-family:var(--font-code); font-size:13px; letter-spacing:1px; outline:none; transition:all 0.2s; }
         .cl-slot-input:focus { border-color:#FF00CC; box-shadow:0 0 10px rgba(255,0,204,0.1); }
         .cl-slot-remove { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:rgba(255,80,80,0.4); cursor:pointer; padding:2px; transition:color 0.2s; display:flex; align-items:center; }
         .cl-slot-remove:hover { color:rgba(255,80,80,0.9); }
 
         .cl-submit-wrap { padding-top:24px; border-top:1px solid rgba(255,0,204,0.1); }
-        .cl-submit { width:100%; height:56px; background:linear-gradient(135deg,rgba(255,0,204,0.15),rgba(255,0,204,0.08)); border:1px solid rgba(255,0,204,0.4); border-radius:4px; color:#FF00CC; font-family:'Orbitron',monospace; font-size:14px; font-weight:700; letter-spacing:3px; cursor:pointer; transition:all 0.2s; }
+        .cl-submit { width:100%; height:56px; background:linear-gradient(135deg,rgba(255,0,204,0.15),rgba(255,0,204,0.08)); border:1px solid rgba(255,0,204,0.4); border-radius:4px; color:#FF00CC; font-family:var(--font-display); font-size:14px; font-weight:700; letter-spacing:3px; cursor:pointer; transition:all 0.2s; }
         .cl-submit:hover:not(:disabled) { background:linear-gradient(135deg,rgba(255,0,204,0.25),rgba(255,0,204,0.12)); border-color:#FF00CC; box-shadow:0 0 30px rgba(255,0,204,0.2); transform:translateY(-1px); }
         .cl-submit:disabled { opacity:0.35; cursor:not-allowed; }
 
@@ -218,7 +217,7 @@ export default function CreateLeague() {
           <div className="cl-card">
             <div className="cl-card-header">
               <h1 className="cl-card-title">CREATE NEW LEAGUE</h1>
-              <p className="cl-card-sub">// CONFIGURE STRUCTURE & SCHEDULE</p>
+              <p className="cl-card-sub">CONFIGURE STRUCTURE & SCHEDULE</p>
             </div>
 
             <form onSubmit={handleSubmit} className="cl-form">

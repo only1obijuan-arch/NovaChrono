@@ -15,7 +15,6 @@ export default function LandingPage() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -412,7 +411,7 @@ export default function LandingPage() {
         <div className="hero-glow-r" />
         <div className="hero-scanline" />
 
-        <p className="hero-eyebrow">// INDOOR FOOTBALL MANAGEMENT PLATFORM</p>
+        <p className="hero-eyebrow">INDOOR FOOTBALL MANAGEMENT PLATFORM</p>
         <h1 className="hero-title">NOVA<span>CHRONO</span></h1>
         <p className="hero-sub-title">PRECISION. SPEED. CONTROL.</p>
         <p className="hero-desc">
@@ -450,7 +449,7 @@ export default function LandingPage() {
       {/* FEATURES */}
       <section className="section" id="features">
         <div className="section-inner">
-          <p className="section-label">// WHAT IT DOES</p>
+          <p className="section-label">WHAT IT DOES</p>
           <h2 className="section-title">EVERYTHING YOUR LEAGUE NEEDS</h2>
           <p className="section-desc">Built specifically for indoor football — every feature designed around the real demands of running a league.</p>
 
@@ -476,7 +475,7 @@ export default function LandingPage() {
       {/* ROLES */}
       <section className="section roles-section" id="roles">
         <div className="section-inner">
-          <p className="section-label">// WHO IT'S FOR</p>
+          <p className="section-label">WHO IT’S FOR</p>
           <h2 className="section-title">BUILT FOR EVERYONE IN THE LEAGUE</h2>
           <p className="section-desc">From the people running the venue to the captains on the pitch — every role has a dedicated portal.</p>
 
@@ -500,7 +499,7 @@ export default function LandingPage() {
       {/* HOW IT WORKS */}
       <section className="section" id="how">
         <div className="section-inner">
-          <p className="section-label">// HOW IT WORKS</p>
+          <p className="section-label">HOW IT WORKS</p>
           <h2 className="section-title">FROM SETUP TO KICKOFF</h2>
           <p className="section-desc">Get a league up and running in minutes, not days.</p>
 

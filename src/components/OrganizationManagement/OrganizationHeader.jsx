@@ -7,7 +7,7 @@ export function OrganizationHeader({ organizationName }) {
         <Building2 size={28} className="om-header-icon" />
         <h1 className="om-title">{organizationName || "LOADING..."}</h1>
       </div>
-      <p className="om-subtitle">// MANAGE VENUES & ADMINISTRATORS</p>
+      <p className="om-subtitle">MANAGE VENUES & ADMINISTRATORS</p>
     </div>
   );
 }

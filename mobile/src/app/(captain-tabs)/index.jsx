@@ -205,7 +205,7 @@ export default function TeamDashboard() {
               marginBottom: 8,
             }}
           >
-            // CAPTAIN PORTAL
+            CAPTAIN PORTAL
           </Text>
           <Text
             style={{
@@ -341,7 +341,7 @@ export default function TeamDashboard() {
                 letterSpacing: 3,
               }}
             >
-              // UPCOMING MATCHES
+              UPCOMING MATCHES
             </Text>
             <TouchableOpacity
               onPress={() => router.push("/(captain-tabs)/schedule")}
@@ -497,7 +497,7 @@ export default function TeamDashboard() {
                 letterSpacing: 3,
               }}
             >
-              // TEAM ROSTER
+              TEAM ROSTER
             </Text>
             <TouchableOpacity
               onPress={() => router.push("/players/manage")}

@@ -5,7 +5,7 @@ export function LeaguesSection({ leagues, isLoading }) {
   return (
     <div style={{ marginBottom: 48 }}>
       <div className="ad-section-title">
-        // LEAGUES <div className="ad-section-line" />
+        LEAGUES <div className="ad-section-line" />
       </div>
       {isLoading ? (
         <div className="ad-leagues">

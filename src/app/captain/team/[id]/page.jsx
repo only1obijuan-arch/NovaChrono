@@ -205,7 +205,6 @@ export default function TeamDashboard({ params, searchParams }) {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
@@ -213,7 +212,7 @@ export default function TeamDashboard({ params, searchParams }) {
         @keyframes pulse-live { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
         * { box-sizing:border-box; }
-        .td-page { min-height:100vh; background:#091833; font-family:'Rajdhani',sans-serif; position:relative; overflow-x:hidden; }
+        .td-page { min-height:100vh; background:#091833; font-family:var(--font-ui); position:relative; overflow-x:hidden; }
         .td-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(0,255,156,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,156,0.025) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
         .td-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(0,255,156,0.3),transparent); animation:scanline 7s linear infinite; pointer-events:none; z-index:100; }
         .td-glow { position:fixed; top:-200px; left:-200px; width:600px; height:600px; background:radial-gradient(circle,rgba(0,255,156,0.05) 0%,transparent 70%); pointer-events:none; }
@@ -221,91 +220,91 @@ export default function TeamDashboard({ params, searchParams }) {
         .td-hero { background:rgba(0,255,156,0.03); border-bottom:1px solid rgba(0,255,156,0.1); padding:32px 24px; position:relative; z-index:1; }
         .td-hero-inner { max-width:960px; margin:0 auto; }
         .td-hero-topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
-        .td-back { display:inline-flex; align-items:center; gap:6px; color:rgba(0,255,156,0.5); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; transition:all 0.2s; }
+        .td-back { display:inline-flex; align-items:center; gap:6px; color:rgba(0,255,156,0.5); font-family:var(--font-code); font-size:11px; letter-spacing:2px; text-decoration:none; transition:all 0.2s; }
         .td-back:hover { color:#00FF9C; }
         .td-hero-content { display:flex; align-items:center; gap:24px; }
-        .td-team-avatar { width:80px; height:80px; background:rgba(0,255,156,0.1); border:2px solid rgba(0,255,156,0.4); border-radius:8px; display:flex; align-items:center; justify-content:center; font-family:'Orbitron',monospace; font-size:28px; font-weight:900; color:#00FF9C; flex-shrink:0; box-shadow:0 0 20px rgba(0,255,156,0.2); }
-        .td-team-name { font-family:'Orbitron',monospace; font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:8px; }
+        .td-team-avatar { width:80px; height:80px; background:rgba(0,255,156,0.1); border:2px solid rgba(0,255,156,0.4); border-radius:8px; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-size:28px; font-weight:900; color:#00FF9C; flex-shrink:0; box-shadow:0 0 20px rgba(0,255,156,0.2); }
+        .td-team-name { font-family:var(--font-display); font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:8px; }
         .td-team-meta { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-        .td-meta-badge { display:inline-flex; align-items:center; gap:6px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.6); letter-spacing:2px; padding:4px 10px; border:1px solid rgba(0,255,156,0.2); border-radius:2px; }
-        .td-league-link { display:inline-flex; align-items:center; gap:6px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.5); letter-spacing:2px; text-decoration:none; padding:4px 10px; border:1px solid rgba(0,255,156,0.2); border-radius:2px; transition:all 0.2s; }
+        .td-meta-badge { display:inline-flex; align-items:center; gap:6px; font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.6); letter-spacing:2px; padding:4px 10px; border:1px solid rgba(0,255,156,0.2); border-radius:2px; }
+        .td-league-link { display:inline-flex; align-items:center; gap:6px; font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.5); letter-spacing:2px; text-decoration:none; padding:4px 10px; border:1px solid rgba(0,255,156,0.2); border-radius:2px; transition:all 0.2s; }
         .td-league-link:hover { color:#00FF9C; border-color:#00FF9C; background:rgba(0,255,156,0.05); }
 
         .td-main { max-width:960px; margin:0 auto; padding:32px 24px; display:grid; grid-template-columns:1fr 300px; gap:20px; position:relative; z-index:1; }
         .td-card { background:rgba(11,20,40,0.9); border:1px solid rgba(0,255,156,0.15); border-radius:8px; overflow:hidden; backdrop-filter:blur(10px); animation:card-enter 0.5s ease both; }
         .td-card-header { padding:20px 24px; border-bottom:1px solid rgba(0,255,156,0.1); display:flex; align-items:center; justify-content:space-between; }
-        .td-card-title { font-family:'Orbitron',monospace; font-size:13px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
+        .td-card-title { font-family:var(--font-display); font-size:13px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
         .td-card-body { padding:20px 24px; }
-        .td-add-btn { display:inline-flex; align-items:center; gap:6px; background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.3); color:#00FF9C; font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:2px; padding:8px 14px; border-radius:2px; cursor:pointer; transition:all 0.2s; }
+        .td-add-btn { display:inline-flex; align-items:center; gap:6px; background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.3); color:#00FF9C; font-family:var(--font-code); font-size:10px; letter-spacing:2px; padding:8px 14px; border-radius:2px; cursor:pointer; transition:all 0.2s; }
         .td-add-btn:hover { background:rgba(0,255,156,0.14); border-color:#00FF9C; box-shadow:0 0 12px rgba(0,255,156,0.2); }
         .td-player-list { display:flex; flex-direction:column; gap:8px; }
         .td-player { display:flex; align-items:center; gap:12px; padding:10px 14px; background:rgba(0,255,156,0.03); border:1px solid rgba(0,255,156,0.08); border-radius:4px; transition:all 0.2s; }
         .td-player:hover { border-color:rgba(0,255,156,0.2); background:rgba(0,255,156,0.06); }
         .td-player-delete { margin-left:auto; background:rgba(255,50,50,0.06); border:1px solid rgba(255,50,50,0.2); border-radius:4px; padding:6px 8px; cursor:pointer; color:rgba(255,80,80,0.7); display:flex; align-items:center; transition:all 0.2s; }
         .td-player-delete:hover { background:rgba(255,50,50,0.12); border-color:rgba(255,80,80,0.4); color:rgba(255,80,80,1); }
-        .td-player-num { width:36px; height:36px; background:rgba(0,255,156,0.1); border:1px solid rgba(0,255,156,0.25); border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:'Orbitron',monospace; font-size:11px; color:#00FF9C; flex-shrink:0; }
-        .td-player-name { font-family:'Rajdhani',sans-serif; font-size:16px; font-weight:700; color:#F4F4F9; }
+        .td-player-num { width:36px; height:36px; background:rgba(0,255,156,0.1); border:1px solid rgba(0,255,156,0.25); border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-size:11px; color:#00FF9C; flex-shrink:0; }
+        .td-player-name { font-family:var(--font-ui); font-size:16px; font-weight:700; color:#F4F4F9; }
         .td-player-empty { padding:32px; text-align:center; border:2px dashed rgba(0,255,156,0.1); border-radius:6px; }
-        .td-player-empty-text { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.3); letter-spacing:3px; }
+        .td-player-empty-text { font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.3); letter-spacing:3px; }
         .td-next-match { background:rgba(0,255,156,0.05); border:1px solid rgba(0,255,156,0.25); border-radius:6px; padding:20px; }
-        .td-next-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,255,156,0.5); letter-spacing:4px; margin-bottom:12px; }
-        .td-next-date { font-family:'Share Tech Mono',monospace; font-size:11px; color:rgba(0,255,156,0.6); letter-spacing:2px; margin-bottom:8px; }
-        .td-next-opponent { font-family:'Orbitron',monospace; font-size:16px; font-weight:700; color:#F4F4F9; margin-bottom:8px; }
+        .td-next-label { font-family:var(--font-code); font-size:9px; color:rgba(0,255,156,0.5); letter-spacing:4px; margin-bottom:12px; }
+        .td-next-date { font-family:var(--font-code); font-size:11px; color:rgba(0,255,156,0.6); letter-spacing:2px; margin-bottom:8px; }
+        .td-next-opponent { font-family:var(--font-display); font-size:16px; font-weight:700; color:#F4F4F9; margin-bottom:8px; }
         .td-next-meta { display:flex; gap:12px; }
-        .td-next-meta-item { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.5); letter-spacing:2px; }
+        .td-next-meta-item { font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.5); letter-spacing:2px; }
         .td-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
         .td-stat { background:rgba(0,255,156,0.04); border:1px solid rgba(0,255,156,0.1); border-radius:4px; padding:14px; text-align:center; }
-        .td-stat-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,255,156,0.4); letter-spacing:3px; margin-bottom:6px; }
-        .td-stat-value { font-family:'Orbitron',monospace; font-size:24px; font-weight:900; color:#00FF9C; }
+        .td-stat-label { font-family:var(--font-code); font-size:9px; color:rgba(0,255,156,0.4); letter-spacing:3px; margin-bottom:6px; }
+        .td-stat-value { font-family:var(--font-display); font-size:24px; font-weight:900; color:#00FF9C; }
         .td-position-box { background:rgba(0,255,156,0.06); border:2px solid rgba(0,255,156,0.3); border-radius:6px; padding:20px; text-align:center; margin-bottom:10px; }
-        .td-position-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,255,156,0.5); letter-spacing:4px; margin-bottom:8px; }
-        .td-position-num { font-family:'Orbitron',monospace; font-size:56px; font-weight:900; color:#00FF9C; line-height:1; text-shadow:0 0 20px rgba(0,255,156,0.4); }
-        .td-position-suffix { font-family:'Share Tech Mono',monospace; font-size:16px; color:rgba(0,255,156,0.6); }
-        .td-position-pts { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.4); letter-spacing:3px; margin-top:6px; }
+        .td-position-label { font-family:var(--font-code); font-size:9px; color:rgba(0,255,156,0.5); letter-spacing:4px; margin-bottom:8px; }
+        .td-position-num { font-family:var(--font-display); font-size:56px; font-weight:900; color:#00FF9C; line-height:1; text-shadow:0 0 20px rgba(0,255,156,0.4); }
+        .td-position-suffix { font-family:var(--font-code); font-size:16px; color:rgba(0,255,156,0.6); }
+        .td-position-pts { font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.4); letter-spacing:3px; margin-top:6px; }
         .td-scorer-list { display:flex; flex-direction:column; gap:8px; }
         .td-scorer { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:rgba(0,255,156,0.03); border:1px solid rgba(0,255,156,0.08); border-radius:4px; }
         .td-scorer-left { display:flex; align-items:center; gap:10px; }
-        .td-scorer-rank { font-family:'Orbitron',monospace; font-size:10px; color:rgba(0,255,156,0.3); width:20px; }
-        .td-scorer-name { font-family:'Rajdhani',sans-serif; font-size:15px; font-weight:700; color:#F4F4F9; }
-        .td-scorer-goals { font-family:'Orbitron',monospace; font-size:18px; font-weight:900; color:#00FF9C; }
-        .td-scorer-empty { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.2); letter-spacing:3px; text-align:center; padding:20px 0; }
+        .td-scorer-rank { font-family:var(--font-display); font-size:10px; color:rgba(0,255,156,0.3); width:20px; }
+        .td-scorer-name { font-family:var(--font-ui); font-size:15px; font-weight:700; color:#F4F4F9; }
+        .td-scorer-goals { font-family:var(--font-display); font-size:18px; font-weight:900; color:#00FF9C; }
+        .td-scorer-empty { font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.2); letter-spacing:3px; text-align:center; padding:20px 0; }
         .td-fixture-list { display:flex; flex-direction:column; gap:8px; }
         .td-fixture { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:rgba(0,255,156,0.03); border:1px solid rgba(0,255,156,0.08); border-radius:4px; }
-        .td-fixture-date { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.4); letter-spacing:1px; }
-        .td-fixture-teams { font-family:'Rajdhani',sans-serif; font-size:15px; font-weight:700; color:#F4F4F9; text-align:center; flex:1; padding:0 12px; }
-        .td-fixture-score { font-family:'Orbitron',monospace; font-size:14px; font-weight:700; color:#F4F4F9; }
-        .td-fixture-status { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:2px; padding:3px 8px; border-radius:2px; }
+        .td-fixture-date { font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.4); letter-spacing:1px; }
+        .td-fixture-teams { font-family:var(--font-ui); font-size:15px; font-weight:700; color:#F4F4F9; text-align:center; flex:1; padding:0 12px; }
+        .td-fixture-score { font-family:var(--font-display); font-size:14px; font-weight:700; color:#F4F4F9; }
+        .td-fixture-status { font-family:var(--font-code); font-size:9px; letter-spacing:2px; padding:3px 8px; border-radius:2px; }
         .td-fixture-status.scheduled { color:rgba(0,245,212,0.7); background:rgba(0,245,212,0.08); border:1px solid rgba(0,245,212,0.2); }
         .td-fixture-status.final { color:rgba(180,200,220,0.5); background:rgba(180,200,220,0.05); border:1px solid rgba(180,200,220,0.1); }
         .td-fixture-status.live { color:#FF00CC; background:rgba(255,0,204,0.08); border:1px solid rgba(255,0,204,0.3); }
         .td-sidebar { display:flex; flex-direction:column; gap:20px; }
         .td-waiting { background:rgba(255,200,0,0.04); border:1px solid rgba(255,200,0,0.15); border-radius:6px; padding:20px; text-align:center; }
-        .td-waiting-title { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,200,0,0.7); letter-spacing:3px; margin-bottom:6px; }
-        .td-waiting-sub { font-family:'Rajdhani',sans-serif; font-size:13px; color:rgba(255,200,0,0.4); }
+        .td-waiting-title { font-family:var(--font-code); font-size:10px; color:rgba(255,200,0,0.7); letter-spacing:3px; margin-bottom:6px; }
+        .td-waiting-sub { font-family:var(--font-ui); font-size:13px; color:rgba(255,200,0,0.4); }
         .td-live-dot { width:8px; height:8px; border-radius:50%; background:#FF00CC; box-shadow:0 0 8px #FF00CC; animation:pulse-live 1s infinite; flex-shrink:0; }
         .td-live-score-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; padding:14px 16px; background:rgba(255,0,204,0.06); border:1px solid rgba(255,0,204,0.2); border-radius:6px; }
-        .td-live-team { font-family:'Rajdhani',sans-serif; font-size:14px; font-weight:700; color:#F4F4F9; flex:1; }
+        .td-live-team { font-family:var(--font-ui); font-size:14px; font-weight:700; color:#F4F4F9; flex:1; }
         .td-live-team.away { text-align:right; }
-        .td-live-score { font-family:'Orbitron',monospace; font-size:24px; font-weight:900; color:#FF00CC; white-space:nowrap; }
+        .td-live-score { font-family:var(--font-display); font-size:24px; font-weight:900; color:#FF00CC; white-space:nowrap; }
         .td-live-feed { display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto; }
         .td-live-event { display:flex; align-items:center; gap:10px; padding:8px 12px; background:rgba(255,0,204,0.05); border-left:3px solid #FF00CC; border-radius:0 4px 4px 0; }
-        .td-live-event-text { font-family:'Rajdhani',sans-serif; font-size:14px; font-weight:700; color:#F4F4F9; flex:1; }
-        .td-live-event-time { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(180,200,220,0.4); letter-spacing:1px; flex-shrink:0; }
-        .td-live-empty { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.3); letter-spacing:3px; text-align:center; padding:16px 0; }
+        .td-live-event-text { font-family:var(--font-ui); font-size:14px; font-weight:700; color:#F4F4F9; flex:1; }
+        .td-live-event-time { font-family:var(--font-code); font-size:9px; color:rgba(180,200,220,0.4); letter-spacing:1px; flex-shrink:0; }
+        .td-live-empty { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.3); letter-spacing:3px; text-align:center; padding:16px 0; }
         .td-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px; }
         .td-modal { background:#0D1B2E; border:1px solid rgba(0,255,156,0.3); border-radius:8px; padding:32px; max-width:420px; width:100%; box-shadow:0 0 60px rgba(0,255,156,0.08); }
         .td-modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-        .td-modal-title { font-family:'Orbitron',monospace; font-size:16px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
+        .td-modal-title { font-family:var(--font-display); font-size:16px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
         .td-modal-close { background:none; border:none; color:rgba(0,255,156,0.4); cursor:pointer; transition:color 0.2s; }
         .td-modal-close:hover { color:#00FF9C; }
-        .td-modal-label { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.6); letter-spacing:3px; display:block; margin-bottom:8px; }
-        .td-modal-input { width:100%; height:48px; background:rgba(0,255,156,0.05); border:1px solid rgba(0,255,156,0.2); border-radius:4px; padding:0 16px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; transition:all 0.2s; margin-bottom:20px; }
+        .td-modal-label { font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.6); letter-spacing:3px; display:block; margin-bottom:8px; }
+        .td-modal-input { width:100%; height:48px; background:rgba(0,255,156,0.05); border:1px solid rgba(0,255,156,0.2); border-radius:4px; padding:0 16px; color:#F4F4F9; font-family:var(--font-ui); font-size:16px; outline:none; transition:all 0.2s; margin-bottom:20px; }
         .td-modal-input:focus { border-color:#00FF9C; box-shadow:0 0 15px rgba(0,255,156,0.15); }
         .td-modal-input::placeholder { color:rgba(180,200,220,0.3); }
         .td-modal-btns { display:flex; gap:12px; }
-        .td-modal-cancel { flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:rgba(180,200,220,0.6); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; padding:12px; border-radius:4px; cursor:pointer; transition:all 0.2s; }
+        .td-modal-cancel { flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:rgba(180,200,220,0.6); font-family:var(--font-code); font-size:11px; letter-spacing:2px; padding:12px; border-radius:4px; cursor:pointer; transition:all 0.2s; }
         .td-modal-cancel:hover { color:#F4F4F9; }
-        .td-modal-submit { flex:1; background:linear-gradient(135deg,#00FF9C,#00CC78); color:#091833; font-family:'Orbitron',monospace; font-size:11px; font-weight:700; letter-spacing:2px; padding:12px; border:none; border-radius:4px; cursor:pointer; transition:all 0.2s; }
+        .td-modal-submit { flex:1; background:linear-gradient(135deg,#00FF9C,#00CC78); color:#091833; font-family:var(--font-display); font-size:11px; font-weight:700; letter-spacing:2px; padding:12px; border:none; border-radius:4px; cursor:pointer; transition:all 0.2s; }
         .td-modal-submit:hover { box-shadow:0 0 20px rgba(0,255,156,0.4); }
         .td-modal-submit:disabled { opacity:0.4; cursor:not-allowed; }
 
@@ -331,7 +330,7 @@ export default function TeamDashboard({ params, searchParams }) {
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                 <button
                   onClick={() => router.push("/captain/team")}
-                  style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:10, color:"rgba(0,255,156,0.5)", letterSpacing:2, background:"none", border:"1px solid rgba(0,255,156,0.2)", borderRadius:2, padding:"6px 12px", cursor:"pointer" }}
+                  style={{ fontFamily:"var(--font-code)", fontSize:10, color:"rgba(0,255,156,0.5)", letterSpacing:2, background:"none", border:"1px solid rgba(0,255,156,0.2)", borderRadius:2, padding:"6px 12px", cursor:"pointer" }}
                 >
                   ⇄ SWITCH LEAGUE
                 </button>
@@ -366,7 +365,7 @@ export default function TeamDashboard({ params, searchParams }) {
                 <div className="td-card-header">
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div className="td-live-dot" />
-                    <span className="td-card-title">// LIVE MATCH</span>
+                    <span className="td-card-title">LIVE MATCH</span>
                   </div>
                 </div>
                 <div className="td-card-body">
@@ -400,7 +399,7 @@ export default function TeamDashboard({ params, searchParams }) {
             )}
             <div className="td-card">
               <div className="td-card-header">
-                <span className="td-card-title">// TEAM ROSTER</span>
+                <span className="td-card-title">TEAM ROSTER</span>
                 <button
                   className="td-add-btn"
                   onClick={() => setShowAddPlayer(true)}
@@ -441,7 +440,7 @@ export default function TeamDashboard({ params, searchParams }) {
 
             <div className="td-card" style={{ animationDelay: "0.08s" }}>
               <div className="td-card-header">
-                <span className="td-card-title">// TOP SCORERS</span>
+                <span className="td-card-title">TOP SCORERS</span>
               </div>
               <div className="td-card-body">
                 {teamScorers.length === 0 ? (
@@ -467,7 +466,7 @@ export default function TeamDashboard({ params, searchParams }) {
             {teamMatches.length > 0 && (
               <div className="td-card" style={{ animationDelay: "0.1s" }}>
                 <div className="td-card-header">
-                  <span className="td-card-title">// FIXTURES</span>
+                  <span className="td-card-title">FIXTURES</span>
                 </div>
                 <div className="td-card-body">
                   <div className="td-fixture-list">
@@ -510,7 +509,7 @@ export default function TeamDashboard({ params, searchParams }) {
             {leaguePosition > 0 && (
               <div className="td-card" style={{ animationDelay: "0.12s" }}>
                 <div className="td-card-header">
-                  <span className="td-card-title">// LEAGUE POSITION</span>
+                  <span className="td-card-title">LEAGUE POSITION</span>
                 </div>
                 <div className="td-card-body">
                   <div className="td-position-box">
@@ -546,7 +545,7 @@ export default function TeamDashboard({ params, searchParams }) {
 
             <div className="td-card" style={{ animationDelay: "0.15s" }}>
               <div className="td-card-header">
-                <span className="td-card-title">// NEXT MATCH</span>
+                <span className="td-card-title">NEXT MATCH</span>
               </div>
               <div className="td-card-body">
                 {nextMatch ? (
@@ -577,7 +576,7 @@ export default function TeamDashboard({ params, searchParams }) {
                 ) : matches.length > 0 ? (
                   <p
                     style={{
-                      fontFamily: "'Share Tech Mono',monospace",
+                      fontFamily: "var(--font-code)",
                       fontSize: 10,
                       color: "rgba(180,200,220,0.3)",
                       letterSpacing: 3,
@@ -600,7 +599,7 @@ export default function TeamDashboard({ params, searchParams }) {
 
             <div className="td-card" style={{ animationDelay: "0.2s" }}>
               <div className="td-card-header">
-                <span className="td-card-title">// SEASON STATS</span>
+                <span className="td-card-title">SEASON STATS</span>
               </div>
               <div className="td-card-body">
                 <div className="td-stats">
@@ -630,13 +629,13 @@ export default function TeamDashboard({ params, searchParams }) {
               onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(0,255,156,0.15)")}
             >
               <div className="td-card-header">
-                <span className="td-card-title">// JOIN NEW LEAGUE</span>
-                <span style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.5)", letterSpacing: 2 }}>
+                <span className="td-card-title">JOIN NEW LEAGUE</span>
+                <span style={{ fontFamily: "var(--font-code)", fontSize: 10, color: "rgba(0,245,212,0.5)", letterSpacing: 2 }}>
                   + JOIN →
                 </span>
               </div>
               <div className="td-card-body">
-                <p style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 14, color: "rgba(180,200,220,0.5)", lineHeight: 1.5 }}>
+                <p style={{ fontFamily: "var(--font-ui)", fontSize: 14, color: "rgba(180,200,220,0.5)", lineHeight: 1.5 }}>
                   Have a league code? Join another league without re-registering.
                 </p>
               </div>
@@ -661,10 +660,10 @@ export default function TeamDashboard({ params, searchParams }) {
                 }
               >
                 <div className="td-card-header">
-                  <span className="td-card-title">// LEAGUE RULES</span>
+                  <span className="td-card-title">LEAGUE RULES</span>
                   <span
                     style={{
-                      fontFamily: "'Share Tech Mono',monospace",
+                      fontFamily: "var(--font-code)",
                       fontSize: 10,
                       color: "rgba(0,255,156,0.5)",
                       letterSpacing: 2,
@@ -676,7 +675,7 @@ export default function TeamDashboard({ params, searchParams }) {
                 <div className="td-card-body">
                   <p
                     style={{
-                      fontFamily: "'Rajdhani',sans-serif",
+                      fontFamily: "var(--font-ui)",
                       fontSize: 14,
                       color: "rgba(180,200,220,0.5)",
                       lineHeight: 1.5,
@@ -695,7 +694,7 @@ export default function TeamDashboard({ params, searchParams }) {
         <div className="td-modal-overlay">
           <div className="td-modal">
             <div className="td-modal-header">
-              <h3 className="td-modal-title">// ADD PLAYER</h3>
+              <h3 className="td-modal-title">ADD PLAYER</h3>
               <button
                 className="td-modal-close"
                 onClick={() => setShowAddPlayer(false)}
@@ -751,7 +750,7 @@ export default function TeamDashboard({ params, searchParams }) {
         <div className="td-modal-overlay">
           <div className="td-modal">
             <div className="td-modal-header">
-              <h3 className="td-modal-title">// JOIN NEW LEAGUE</h3>
+              <h3 className="td-modal-title">JOIN NEW LEAGUE</h3>
               <button className="td-modal-close" onClick={() => { setShowJoinLeague(false); setJoinError(null); }}>
                 <X size={18} />
               </button>
@@ -767,7 +766,7 @@ export default function TeamDashboard({ params, searchParams }) {
                 value={joinForm.joinCode}
                 onChange={(e) => setJoinForm({ ...joinForm, joinCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })}
                 autoFocus
-                style={{ textTransform: "uppercase", letterSpacing: 6, fontFamily: "'Share Tech Mono',monospace", fontSize: 18, textAlign: "center" }}
+                style={{ textTransform: "uppercase", letterSpacing: 6, fontFamily: "var(--font-code)", fontSize: 18, textAlign: "center" }}
               />
               <label className="td-modal-label">TEAM NAME *</label>
               <input
@@ -779,8 +778,8 @@ export default function TeamDashboard({ params, searchParams }) {
                 onChange={(e) => setJoinForm({ ...joinForm, teamName: e.target.value })}
               />
               {joinError && (
-                <p style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(255,100,100,0.9)", letterSpacing: 2, marginBottom: 16 }}>
-                  // {joinError.toUpperCase()}
+                <p style={{ fontFamily: "var(--font-code)", fontSize: 10, color: "rgba(255,100,100,0.9)", letterSpacing: 2, marginBottom: 16 }}>
+                  {joinError.toUpperCase()}
                 </p>
               )}
               <div className="td-modal-btns">

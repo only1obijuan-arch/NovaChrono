@@ -8,7 +8,6 @@ export function printCredentials(credentials) {
       <head>
         <title>Referee Credentials — Field ${escapeHtml(credentials.fieldNumber)}</title>
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Share+Tech+Mono&family=Rajdhani:wght@600;700&display=swap');
           body { background:#091833; color:#F4F4F9; font-family:'Rajdhani',sans-serif; padding:40px; margin:0; }
           .card { background:#0D1B2E; border:2px solid rgba(0,245,212,0.4); border-radius:12px; padding:40px; max-width:480px; margin:0 auto; }
           .logo { font-family:'Orbitron',monospace; font-size:22px; font-weight:900; color:#00F5D4; letter-spacing:4px; margin-bottom:8px; }
@@ -25,7 +24,7 @@ export function printCredentials(credentials) {
       <body>
         <div class="card">
           <div class="logo">NOVACHRONO</div>
-          <div class="tagline">// TIME PAUSES. YOUR LEAGUE NEVER DOES.</div>
+          <div class="tagline">TIME PAUSES. YOUR LEAGUE NEVER DOES.</div>
           <div class="title">REFEREE ACCESS CREDENTIALS</div>
           <div class="row"><span class="label">VENUE</span><span class="value">${escapeHtml(credentials.venueName)}</span></div>
           <div class="row"><span class="label">FIELD</span><span class="value">${escapeHtml(credentials.fieldNumber)}</span></div>

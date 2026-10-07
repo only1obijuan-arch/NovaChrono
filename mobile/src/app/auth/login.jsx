@@ -39,7 +39,7 @@ export default function Login() {
     const role = auth.user.role;
     if (role === "referee") router.replace("/(referee-tabs)");
     else router.replace("/(captain-tabs)");
-  }, [auth, isReady]);
+  }, [auth, isReady, router]);
 
   const handleSignIn = async () => {
     if (!email.trim() || !password) {
@@ -169,7 +169,7 @@ export default function Login() {
                 marginBottom: 40,
               }}
             >
-              // TIME PAUSES. YOUR LEAGUE NEVER DOES.
+              TIME PAUSES. YOUR LEAGUE NEVER DOES.
             </Text>
 
             {/* Role pills */}
@@ -222,7 +222,7 @@ export default function Login() {
                 marginBottom: 20,
               }}
             >
-              // SIGN IN TO YOUR ACCOUNT
+              SIGN IN TO YOUR ACCOUNT
             </Text>
 
             {/* Email */}

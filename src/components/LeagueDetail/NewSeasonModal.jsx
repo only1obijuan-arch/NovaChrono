@@ -7,7 +7,7 @@ export function NewSeasonModal({ show, onClose, onCreate, seasonName, setSeasonN
     <div className="ld-modal-overlay">
       <div className="ld-modal">
         <div className="ld-modal-header">
-          <h3 className="ld-modal-title">// NEW SEASON</h3>
+          <h3 className="ld-modal-title">NEW SEASON</h3>
           <button className="ld-modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <label className="ld-modal-label">SEASON NAME</label>

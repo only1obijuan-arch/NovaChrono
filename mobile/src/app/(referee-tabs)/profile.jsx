@@ -52,7 +52,7 @@ export default function Profile() {
             marginBottom: 8,
           }}
         >
-          // REFEREE PROFILE
+          REFEREE PROFILE
         </Text>
         <Text
           style={{ fontFamily: F.orbitron, fontSize: 26, color: "#F4F4F9" }}
@@ -211,7 +211,7 @@ export default function Profile() {
               marginBottom: 20,
             }}
           >
-            // ACCOUNT DETAILS
+            ACCOUNT DETAILS
           </Text>
           <View style={{ gap: 18 }}>
             <View>
@@ -316,7 +316,7 @@ export default function Profile() {
               letterSpacing: 2,
             }}
           >
-            // TIME PAUSES. YOUR LEAGUE NEVER DOES.
+            TIME PAUSES. YOUR LEAGUE NEVER DOES.
           </Text>
         </View>
       </ScrollView>

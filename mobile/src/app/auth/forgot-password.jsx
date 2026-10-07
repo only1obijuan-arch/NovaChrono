@@ -200,7 +200,7 @@ export default function ForgotPassword() {
                   marginTop: 8,
                 }}
               >
-                // LINK EXPIRES IN 1 HOUR
+                LINK EXPIRES IN 1 HOUR
               </Text>
             </View>
           ) : (
@@ -232,7 +232,7 @@ export default function ForgotPassword() {
                     marginBottom: 8,
                   }}
                 >
-                  // ACCOUNT RECOVERY
+                  ACCOUNT RECOVERY
                 </Text>
                 <Text
                   style={{
@@ -254,7 +254,7 @@ export default function ForgotPassword() {
                     lineHeight: 20,
                   }}
                 >
-                  Enter your email and we'll send you a reset link.
+                  Enter your email and we’ll send you a reset link.
                 </Text>
               </View>
 
@@ -314,7 +314,7 @@ export default function ForgotPassword() {
                       textAlign: "center",
                     }}
                   >
-                    // {error.toUpperCase()}
+                    {error.toUpperCase()}
                   </Text>
                 </View>
               )}

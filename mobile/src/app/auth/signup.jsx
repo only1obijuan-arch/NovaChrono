@@ -290,7 +290,7 @@ export default function SignUp() {
                     marginBottom: 6,
                   }}
                 >
-                  // CAPTAIN REGISTRATION
+                  CAPTAIN REGISTRATION
                 </Text>
                 <Text
                   style={{
@@ -488,7 +488,7 @@ export default function SignUp() {
                       textAlign: "center",
                     }}
                   >
-                    // {error.toUpperCase()}
+                    {error.toUpperCase()}
                   </Text>
                 </View>
               ) : null}

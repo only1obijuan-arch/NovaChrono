@@ -247,13 +247,13 @@ export default function LeagueRules() {
           </Text>
         </TouchableOpacity>
         <Text style={{ fontFamily: F.mono, fontSize: 10, color: "rgba(0,255,156,0.5)", letterSpacing: 4, marginBottom: 8 }}>
-          // CAPTAIN PORTAL
+          CAPTAIN PORTAL
         </Text>
         <Text style={{ fontFamily: F.orbitron, fontSize: 26, color: "#F4F4F9" }}>
           LEAGUE RULES
         </Text>
         <Text style={{ fontFamily: F.mono, fontSize: 10, color: "rgba(0,255,156,0.3)", letterSpacing: 2, marginTop: 4 }}>
-          // 16 LAWS OF THE GAME
+          16 LAWS OF THE GAME
         </Text>
         {league?.name && (
           <Text style={{ fontFamily: F.rajdhani, fontSize: 14, color: "rgba(0,255,156,0.6)", marginTop: 4 }}>

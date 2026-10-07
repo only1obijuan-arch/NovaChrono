@@ -143,7 +143,7 @@ export async function GET(request) {
                 <div style="background:#0D1B2E;border:1px solid ${statusColor}40;border-radius:8px;overflow:hidden;">
                   <div style="height:3px;background:${statusColor};"></div>
                   <div style="padding:32px;">
-                    <p style="margin:0 0 8px;font-size:10px;color:${statusColor};letter-spacing:4px;font-family:monospace;">// AVAILABILITY UPDATE</p>
+                    <p style="margin:0 0 8px;font-size:10px;color:${statusColor};letter-spacing:4px;font-family:monospace;">AVAILABILITY UPDATE</p>
                     <h1 style="margin:0 0 24px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">${statusText}</h1>
                     <div style="background:rgba(255,255,255,0.04);border-radius:6px;padding:20px;margin-bottom:20px;">
                       <p style="margin:0 0 8px;font-size:13px;color:rgba(180,200,220,0.6);">TEAM</p>
@@ -201,7 +201,6 @@ function buildPage(title, message, success) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>${escapeHtml(title)} — NovaChrono</title>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@400;600&family=Share+Tech+Mono&display=swap');
       * { box-sizing:border-box; margin:0; padding:0; }
       body { min-height:100vh; background:#091833; display:flex; align-items:center; justify-content:center; padding:24px; font-family:'Rajdhani',sans-serif; }
       .card { background:#0D1B2E; border:1px solid ${color}40; border-radius:12px; padding:48px 40px; max-width:480px; width:100%; text-align:center; box-shadow:0 40px 80px rgba(0,0,0,0.5); }
@@ -218,7 +217,7 @@ function buildPage(title, message, success) {
       <div class="icon">${success ? (title.includes("✅") ? "✅" : "👍") : "❌"}</div>
       <h1 class="title">${escapeHtml(title)}</h1>
       <p class="message">${escapeHtml(message)}</p>
-      <p class="brand">// NOVACHRONO — TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
+      <p class="brand">NOVACHRONO — TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
     </div>
   </body>
 </html>`;

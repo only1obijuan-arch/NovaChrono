@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -26,8 +26,8 @@ export default function RoleSelect() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { auth, signOut } = useAuth();
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
+  const [fadeAnim] = useState(() => new Animated.Value(0));
+  const [slideAnim] = useState(() => new Animated.Value(30));
 
   useEffect(() => {
     Animated.parallel([
@@ -42,7 +42,7 @@ export default function RoleSelect() {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [fadeAnim, slideAnim]);
 
   const isSuperAdmin = auth?.user?.role === "super_admin";
 
@@ -168,7 +168,7 @@ export default function RoleSelect() {
               marginBottom: 8,
             }}
           >
-            // SELECT ACCESS LEVEL
+            SELECT ACCESS LEVEL
           </Text>
           <Text
             style={{
@@ -252,7 +252,7 @@ export default function RoleSelect() {
                 textAlign: "center",
               }}
             >
-              // SUPER ADMIN — FULL PLATFORM ACCESS VIA WEB
+              SUPER ADMIN — FULL PLATFORM ACCESS VIA WEB
             </Text>
           </View>
         )}
@@ -276,7 +276,7 @@ export default function RoleSelect() {
 }
 
 function RoleCard({ onPress, color, icon, badge, title, description }) {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const [scaleAnim] = useState(() => new Animated.Value(1));
 
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>

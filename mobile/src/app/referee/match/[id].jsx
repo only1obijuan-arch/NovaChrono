@@ -837,7 +837,7 @@ export default function MatchControl() {
                   letterSpacing: 4,
                 }}
               >
-                // MATCH FINISHED
+                MATCH FINISHED
               </Text>
             </View>
           )}
@@ -872,7 +872,7 @@ export default function MatchControl() {
                 letterSpacing: 3,
               }}
             >
-              // LIVE EVENT FEED
+              LIVE EVENT FEED
             </Text>
             <Text
               style={{
@@ -1041,7 +1041,7 @@ export default function MatchControl() {
                   letterSpacing: 2,
                 }}
               >
-                // WHO SCORED?
+                WHO SCORED?
               </Text>
               <TouchableOpacity onPress={() => setShowPlayerSelect(null)}>
                 <X size={20} color="rgba(0,245,212,0.4)" />

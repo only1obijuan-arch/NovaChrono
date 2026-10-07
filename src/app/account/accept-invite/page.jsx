@@ -97,7 +97,7 @@ function AcceptInviteForm() {
         />
         <p
           style={{
-            fontFamily: "'Share Tech Mono',monospace",
+            fontFamily: "var(--font-code)",
             fontSize: 11,
             color: "rgba(255,0,204,0.5)",
             letterSpacing: 3,
@@ -115,7 +115,7 @@ function AcceptInviteForm() {
         <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
         <h2
           style={{
-            fontFamily: "'Orbitron',monospace",
+            fontFamily: "var(--font-display)",
             fontSize: 18,
             color: "#F4F4F9",
             marginBottom: 12,
@@ -126,7 +126,7 @@ function AcceptInviteForm() {
         </h2>
         <p
           style={{
-            fontFamily: "'Share Tech Mono',monospace",
+            fontFamily: "var(--font-code)",
             fontSize: 10,
             color: "rgba(255,80,80,0.8)",
             letterSpacing: 2,
@@ -138,7 +138,7 @@ function AcceptInviteForm() {
         <a
           href="/account/signin"
           style={{
-            fontFamily: "'Share Tech Mono',monospace",
+            fontFamily: "var(--font-code)",
             fontSize: 10,
             color: "rgba(255,0,204,0.5)",
             letterSpacing: 2,
@@ -172,7 +172,7 @@ function AcceptInviteForm() {
         </div>
         <h2
           style={{
-            fontFamily: "'Orbitron',monospace",
+            fontFamily: "var(--font-display)",
             fontSize: 20,
             color: "#F4F4F9",
             letterSpacing: 2,
@@ -183,7 +183,7 @@ function AcceptInviteForm() {
         </h2>
         <p
           style={{
-            fontFamily: "'Rajdhani',sans-serif",
+            fontFamily: "var(--font-ui)",
             fontSize: 15,
             color: "rgba(180,200,220,0.5)",
             marginBottom: 28,
@@ -199,7 +199,7 @@ function AcceptInviteForm() {
             display: "inline-block",
             background: "linear-gradient(135deg,#FF00CC,#AA0088)",
             color: "#F4F4F9",
-            fontFamily: "'Orbitron',monospace",
+            fontFamily: "var(--font-display)",
             fontSize: 13,
             fontWeight: 700,
             letterSpacing: 2,
@@ -217,7 +217,7 @@ function AcceptInviteForm() {
   return (
     <div className="ai-card">
       <div className="ai-card-header">
-        <p className="ai-eyebrow">// ACCEPT INVITE</p>
+        <p className="ai-eyebrow">ACCEPT INVITE</p>
         <h1 className="ai-title">CREATE YOUR ACCOUNT</h1>
         <p className="ai-org">
           <span style={{ color: "rgba(255,0,204,0.5)" }}>ORGANISATION: </span>
@@ -296,7 +296,7 @@ function AcceptInviteForm() {
           )}
         </div>
 
-        {error && <div className="ai-error">// {error.toUpperCase()}</div>}
+        {error && <div className="ai-error">{error.toUpperCase()}</div>}
 
         <button
           type="submit"
@@ -320,41 +320,40 @@ export default function AcceptInvite() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         @keyframes scanline { 0% { transform:translateY(-100%); } 100% { transform:translateY(100vh); } }
         @keyframes spin { to { transform:rotate(360deg); } }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 
         * { box-sizing:border-box; }
-        .ai-page { min-height:100vh; background:#091833; display:flex; align-items:center; justify-content:center; padding:24px; font-family:'Rajdhani',sans-serif; position:relative; overflow:hidden; }
+        .ai-page { min-height:100vh; background:#091833; display:flex; align-items:center; justify-content:center; padding:24px; font-family:var(--font-ui); position:relative; overflow:hidden; }
         .ai-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(255,0,204,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,0,204,0.025) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
         .ai-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(255,0,204,0.4),transparent); animation:scanline 6s linear infinite; pointer-events:none; z-index:100; }
         .ai-glow { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:600px; height:600px; background:radial-gradient(circle,rgba(255,0,204,0.04) 0%,transparent 70%); pointer-events:none; }
 
         .ai-wrap { width:100%; max-width:440px; position:relative; z-index:10; animation:fadeInUp 0.5s ease; }
-        .ai-back { display:inline-flex; align-items:center; gap:6px; color:rgba(255,0,204,0.5); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; margin-bottom:24px; transition:all 0.2s; }
+        .ai-back { display:inline-flex; align-items:center; gap:6px; color:rgba(255,0,204,0.5); font-family:var(--font-code); font-size:11px; letter-spacing:2px; text-decoration:none; margin-bottom:24px; transition:all 0.2s; }
         .ai-back:hover { color:#FF00CC; }
 
         .ai-card { background:rgba(11,20,40,0.95); border:1px solid rgba(255,0,204,0.2); border-radius:8px; overflow:hidden; box-shadow:0 40px 80px rgba(0,0,0,0.5); }
         .ai-card-header { padding:28px 28px 20px; border-bottom:1px solid rgba(255,0,204,0.1); }
-        .ai-eyebrow { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(255,0,204,0.4); letter-spacing:4px; margin-bottom:8px; }
-        .ai-title { font-family:'Orbitron',monospace; font-size:18px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:10px; }
-        .ai-org { font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:2px; }
+        .ai-eyebrow { font-family:var(--font-code); font-size:9px; color:rgba(255,0,204,0.4); letter-spacing:4px; margin-bottom:8px; }
+        .ai-title { font-family:var(--font-display); font-size:18px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:10px; }
+        .ai-org { font-family:var(--font-code); font-size:10px; letter-spacing:2px; }
 
         .ai-form { padding:28px; display:flex; flex-direction:column; gap:18px; }
-        .ai-label { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.6); letter-spacing:3px; display:block; margin-bottom:8px; }
-        .ai-input { width:100%; height:48px; padding:0 16px; background:rgba(255,0,204,0.04); border:1px solid rgba(255,0,204,0.15); border-radius:4px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; transition:all 0.2s; }
+        .ai-label { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.6); letter-spacing:3px; display:block; margin-bottom:8px; }
+        .ai-input { width:100%; height:48px; padding:0 16px; background:rgba(255,0,204,0.04); border:1px solid rgba(255,0,204,0.15); border-radius:4px; color:#F4F4F9; font-family:var(--font-ui); font-size:16px; outline:none; transition:all 0.2s; }
         .ai-input:focus { border-color:#FF00CC; box-shadow:0 0 15px rgba(255,0,204,0.15); }
         .ai-input::placeholder { color:rgba(180,200,220,0.2); }
-        .ai-input-readonly { height:48px; padding:0 16px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:4px; color:rgba(180,200,220,0.5); font-family:'Rajdhani',sans-serif; font-size:16px; display:flex; align-items:center; }
+        .ai-input-readonly { height:48px; padding:0 16px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:4px; color:rgba(180,200,220,0.5); font-family:var(--font-ui); font-size:16px; display:flex; align-items:center; }
 
         .ai-strength-track { height:4px; background:rgba(255,255,255,0.05); border-radius:2px; overflow:hidden; margin-top:8px; }
         .ai-strength-fill { height:100%; border-radius:2px; transition:all 0.3s; }
-        .ai-strength-label { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:3px; margin-top:4px; }
-        .ai-match { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:2px; margin-top:6px; }
-        .ai-error { background:rgba(255,50,50,0.08); border:1px solid rgba(255,50,50,0.3); border-radius:4px; padding:12px 16px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,100,100,0.9); letter-spacing:2px; }
+        .ai-strength-label { font-family:var(--font-code); font-size:9px; letter-spacing:3px; margin-top:4px; }
+        .ai-match { font-family:var(--font-code); font-size:9px; letter-spacing:2px; margin-top:6px; }
+        .ai-error { background:rgba(255,50,50,0.08); border:1px solid rgba(255,50,50,0.3); border-radius:4px; padding:12px 16px; font-family:var(--font-code); font-size:10px; color:rgba(255,100,100,0.9); letter-spacing:2px; }
 
-        .ai-submit { height:52px; background:linear-gradient(135deg,rgba(255,0,204,0.15),rgba(255,0,204,0.08)); border:1px solid rgba(255,0,204,0.4); border-radius:4px; color:#FF00CC; font-family:'Orbitron',monospace; font-size:13px; font-weight:700; letter-spacing:3px; cursor:pointer; transition:all 0.2s; width:100%; }
+        .ai-submit { height:52px; background:linear-gradient(135deg,rgba(255,0,204,0.15),rgba(255,0,204,0.08)); border:1px solid rgba(255,0,204,0.4); border-radius:4px; color:#FF00CC; font-family:var(--font-display); font-size:13px; font-weight:700; letter-spacing:3px; cursor:pointer; transition:all 0.2s; width:100%; }
         .ai-submit:hover:not(:disabled) { border-color:#FF00CC; box-shadow:0 0 25px rgba(255,0,204,0.2); transform:translateY(-1px); }
         .ai-submit:disabled { opacity:0.4; cursor:not-allowed; }
       `}</style>

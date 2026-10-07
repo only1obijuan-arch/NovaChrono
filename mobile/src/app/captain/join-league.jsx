@@ -146,7 +146,7 @@ export default function JoinLeague() {
               marginBottom: 8,
             }}
           >
-            // JOIN A LEAGUE
+            JOIN A LEAGUE
           </Text>
           <Text
             style={{

@@ -81,7 +81,6 @@ export default function MatchDetailPage({ params }) {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         @keyframes spin { to { transform:rotate(360deg); } }
         @keyframes scanline { 0% { transform:translateY(-100%); } 100% { transform:translateY(100vh); } }
         @keyframes pulse-live { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
@@ -90,17 +89,17 @@ export default function MatchDetailPage({ params }) {
         @keyframes event-enter { from { opacity:0; transform:translateX(-12px); } to { opacity:1; transform:translateX(0); } }
 
         * { box-sizing:border-box; }
-        .md-page { min-height:100vh; background:#091833; font-family:'Rajdhani',sans-serif; position:relative; overflow-x:hidden; }
+        .md-page { min-height:100vh; background:#091833; font-family:var(--font-ui); position:relative; overflow-x:hidden; }
         .md-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(0,245,212,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,245,212,0.02) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
         .md-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(0,245,212,0.3),transparent); animation:scanline 7s linear infinite; pointer-events:none; z-index:100; }
 
         .md-hero { position:relative; z-index:2; padding:40px 24px 0; border-bottom:1px solid rgba(0,245,212,0.1); background:rgba(0,245,212,0.02); overflow:hidden; }
         .md-hero-live { background:rgba(255,0,204,0.04); border-bottom-color:rgba(255,0,204,0.2); }
         .md-hero-inner { max-width:900px; margin:0 auto; }
-        .md-back { display:inline-flex; align-items:center; gap:6px; color:rgba(0,245,212,0.5); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; margin-bottom:32px; transition:all 0.2s; }
+        .md-back { display:inline-flex; align-items:center; gap:6px; color:rgba(0,245,212,0.5); font-family:var(--font-code); font-size:11px; letter-spacing:2px; text-decoration:none; margin-bottom:32px; transition:all 0.2s; }
         .md-back:hover { color:#00F5D4; }
 
-        .md-status-pill { display:inline-flex; align-items:center; gap:8px; font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:3px; padding:6px 16px; border-radius:2px; margin-bottom:32px; }
+        .md-status-pill { display:inline-flex; align-items:center; gap:8px; font-family:var(--font-code); font-size:10px; letter-spacing:3px; padding:6px 16px; border-radius:2px; margin-bottom:32px; }
         .md-status-pill.live { background:rgba(255,0,204,0.1); border:1px solid rgba(255,0,204,0.4); color:#FF00CC; }
         .md-status-pill.scheduled { background:rgba(0,245,212,0.08); border:1px solid rgba(0,245,212,0.3); color:#00F5D4; }
         .md-status-pill.final { background:rgba(180,200,220,0.06); border:1px solid rgba(180,200,220,0.2); color:rgba(180,200,220,0.5); }
@@ -110,21 +109,21 @@ export default function MatchDetailPage({ params }) {
         .md-team { display:flex; flex-direction:column; }
         .md-team.home { align-items:flex-end; text-align:right; }
         .md-team.away { align-items:flex-start; }
-        .md-team-name { font-family:'Orbitron',monospace; font-size:clamp(16px,3vw,28px); font-weight:700; color:#F4F4F9; letter-spacing:1px; margin-bottom:6px; line-height:1.2; }
-        .md-team-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:3px; }
+        .md-team-name { font-family:var(--font-display); font-size:clamp(16px,3vw,28px); font-weight:700; color:#F4F4F9; letter-spacing:1px; margin-bottom:6px; line-height:1.2; }
+        .md-team-label { font-family:var(--font-code); font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:3px; }
         .md-score-center { display:flex; flex-direction:column; align-items:center; gap:8px; }
         .md-score-display { display:flex; align-items:center; gap:16px; }
-        .md-score { font-family:'Orbitron',monospace; font-size:clamp(48px,10vw,96px); font-weight:900; color:#F4F4F9; line-height:1; }
-        .md-score-sep { font-family:'Orbitron',monospace; font-size:32px; color:rgba(0,245,212,0.2); }
+        .md-score { font-family:var(--font-display); font-size:clamp(48px,10vw,96px); font-weight:900; color:#F4F4F9; line-height:1; }
+        .md-score-sep { font-family:var(--font-display); font-size:32px; color:rgba(0,245,212,0.2); }
 
         .md-meta-strip { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; padding:24px 0; border-top:1px solid rgba(0,245,212,0.08); margin-bottom:0; }
         .md-meta-item { text-align:center; }
-        .md-meta-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:3px; margin-bottom:6px; }
-        .md-meta-value { font-family:'Orbitron',monospace; font-size:14px; font-weight:700; color:#F4F4F9; }
+        .md-meta-label { font-family:var(--font-code); font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:3px; margin-bottom:6px; }
+        .md-meta-value { font-family:var(--font-display); font-size:14px; font-weight:700; color:#F4F4F9; }
 
         .md-main { max-width:900px; margin:0 auto; padding:32px 24px 80px; position:relative; z-index:1; display:grid; grid-template-columns:1fr 340px; gap:24px; }
 
-        .md-timeline-title { font-family:'Orbitron',monospace; font-size:13px; font-weight:700; color:#F4F4F9; letter-spacing:2px; margin-bottom:20px; display:flex; align-items:center; gap:10px; }
+        .md-timeline-title { font-family:var(--font-display); font-size:13px; font-weight:700; color:#F4F4F9; letter-spacing:2px; margin-bottom:20px; display:flex; align-items:center; gap:10px; }
         .md-timeline-icon { color:#00F5D4; }
         .md-timeline { position:relative; display:flex; flex-direction:column; gap:12px; }
         .md-timeline::before { content:''; position:absolute; left:11px; top:4px; bottom:4px; width:2px; background:linear-gradient(to bottom,rgba(0,245,212,0.3),rgba(0,245,212,0.05)); }
@@ -134,25 +133,25 @@ export default function MatchDetailPage({ params }) {
         .md-event-dot.other { background:rgba(0,245,212,0.2); border-color:rgba(0,245,212,0.3); }
         .md-event-card { background:rgba(11,20,40,0.9); border:1px solid rgba(0,245,212,0.1); border-radius:6px; padding:12px 16px; flex:1; transition:border-color 0.2s; }
         .md-event-card.goal { border-left:3px solid #FF00CC; }
-        .md-event-time { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:2px; margin-bottom:4px; }
-        .md-event-text { font-family:'Rajdhani',sans-serif; font-size:15px; font-weight:700; color:#F4F4F9; }
-        .md-event-player { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(180,200,220,0.4); letter-spacing:2px; margin-top:4px; }
-        .md-timeline-empty { background:rgba(11,20,40,0.6); border:2px dashed rgba(0,245,212,0.08); border-radius:8px; padding:40px; text-align:center; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,245,212,0.2); letter-spacing:3px; }
+        .md-event-time { font-family:var(--font-code); font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:2px; margin-bottom:4px; }
+        .md-event-text { font-family:var(--font-ui); font-size:15px; font-weight:700; color:#F4F4F9; }
+        .md-event-player { font-family:var(--font-code); font-size:9px; color:rgba(180,200,220,0.4); letter-spacing:2px; margin-top:4px; }
+        .md-timeline-empty { background:rgba(11,20,40,0.6); border:2px dashed rgba(0,245,212,0.08); border-radius:8px; padding:40px; text-align:center; font-family:var(--font-code); font-size:10px; color:rgba(0,245,212,0.2); letter-spacing:3px; }
 
         .md-sidebar { display:flex; flex-direction:column; gap:16px; }
         .md-info-card { background:rgba(11,20,40,0.9); border:1px solid rgba(0,245,212,0.12); border-radius:8px; overflow:hidden; animation:fadeInUp 0.4s ease; }
         .md-info-header { padding:16px 20px; border-bottom:1px solid rgba(0,245,212,0.08); }
-        .md-info-title { font-family:'Orbitron',monospace; font-size:12px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
+        .md-info-title { font-family:var(--font-display); font-size:12px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
         .md-info-body { padding:16px 20px; display:flex; flex-direction:column; gap:14px; }
         .md-info-row { display:flex; align-items:center; gap:12px; }
         .md-info-icon { width:32px; height:32px; background:rgba(0,245,212,0.06); border:1px solid rgba(0,245,212,0.12); border-radius:4px; display:flex; align-items:center; justify-content:center; color:rgba(0,245,212,0.5); flex-shrink:0; }
-        .md-info-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:2px; margin-bottom:3px; }
-        .md-info-value { font-family:'Rajdhani',sans-serif; font-size:15px; font-weight:700; color:#F4F4F9; }
+        .md-info-label { font-family:var(--font-code); font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:2px; margin-bottom:3px; }
+        .md-info-value { font-family:var(--font-ui); font-size:15px; font-weight:700; color:#F4F4F9; }
 
         .md-live-card { background:rgba(255,0,204,0.05); border:1px solid rgba(255,0,204,0.2); border-radius:8px; padding:24px; text-align:center; animation:fadeInUp 0.5s ease; }
-        .md-live-card-title { font-family:'Orbitron',monospace; font-size:16px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:8px; }
-        .md-live-card-sub { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.4); letter-spacing:3px; margin-bottom:20px; }
-        .md-live-card-btn { width:100%; padding:14px; background:rgba(255,0,204,0.1); border:1px solid rgba(255,0,204,0.3); border-radius:4px; color:#FF00CC; font-family:'Orbitron',monospace; font-size:11px; font-weight:700; letter-spacing:2px; cursor:pointer; transition:all 0.2s; }
+        .md-live-card-title { font-family:var(--font-display); font-size:16px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:8px; }
+        .md-live-card-sub { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.4); letter-spacing:3px; margin-bottom:20px; }
+        .md-live-card-btn { width:100%; padding:14px; background:rgba(255,0,204,0.1); border:1px solid rgba(255,0,204,0.3); border-radius:4px; color:#FF00CC; font-family:var(--font-display); font-size:11px; font-weight:700; letter-spacing:2px; cursor:pointer; transition:all 0.2s; }
         .md-live-card-btn:hover { background:rgba(255,0,204,0.18); border-color:#FF00CC; box-shadow:0 0 20px rgba(255,0,204,0.15); }
 
         @media (max-width:768px) {
@@ -285,7 +284,7 @@ export default function MatchDetailPage({ params }) {
           <div className="md-sidebar">
             <div className="md-info-card">
               <div className="md-info-header">
-                <p className="md-info-title">// MATCH INFO</p>
+                <p className="md-info-title">MATCH INFO</p>
               </div>
               <div className="md-info-body">
                 <div className="md-info-row">
@@ -320,7 +319,7 @@ export default function MatchDetailPage({ params }) {
 
             <div className="md-live-card">
               <h4 className="md-live-card-title">FOLLOW LIVE</h4>
-              <p className="md-live-card-sub">// GET INSTANT GOAL ALERTS</p>
+              <p className="md-live-card-sub">GET INSTANT GOAL ALERTS</p>
               <button className="md-live-card-btn">ENABLE NOTIFICATIONS</button>
             </div>
           </div>

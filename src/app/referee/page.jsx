@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Timer, Home, LogOut } from "lucide-react";
 
 export default function RefereeMatchList() {
@@ -40,7 +41,6 @@ export default function RefereeMatchList() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
@@ -48,7 +48,7 @@ export default function RefereeMatchList() {
         @keyframes pulse-live { 0%,100% { box-shadow:0 0 8px #FF00CC, 0 0 16px rgba(255,0,204,0.4); } 50% { box-shadow:0 0 16px #FF00CC, 0 0 32px rgba(255,0,204,0.6); } }
         @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
 
-        .ref-page { min-height:100vh; background:#091833; font-family:'Rajdhani',sans-serif; position:relative; overflow-x:hidden; }
+        .ref-page { min-height:100vh; background:#091833; font-family:var(--font-ui); position:relative; overflow-x:hidden; }
         .ref-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(0,245,212,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,245,212,0.03) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
         .ref-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(0,245,212,0.3),transparent); animation:scanline 6s linear infinite; pointer-events:none; z-index:100; }
         .ref-glow { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:600px; height:600px; background:radial-gradient(circle,rgba(0,245,212,0.04) 0%,transparent 70%); pointer-events:none; }
@@ -56,19 +56,19 @@ export default function RefereeMatchList() {
         .ref-inner { max-width:900px; margin:0 auto; padding:32px 24px; position:relative; z-index:1; }
 
         .ref-nav { display:flex; align-items:center; justify-content:space-between; margin-bottom:40px; padding-bottom:16px; border-bottom:1px solid rgba(0,245,212,0.1); }
-        .ref-nav-link { display:inline-flex; align-items:center; gap:8px; color:rgba(0,245,212,0.6); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; padding:8px 12px; border:1px solid rgba(0,245,212,0.2); border-radius:4px; transition:all 0.2s; }
+        .ref-nav-link { display:inline-flex; align-items:center; gap:8px; color:rgba(0,245,212,0.6); font-family:var(--font-code); font-size:11px; letter-spacing:2px; text-decoration:none; padding:8px 12px; border:1px solid rgba(0,245,212,0.2); border-radius:4px; transition:all 0.2s; }
         .ref-nav-link:hover { color:#00F5D4; border-color:#00F5D4; background:rgba(0,245,212,0.05); }
-        .ref-signout { display:inline-flex; align-items:center; gap:8px; color:rgba(255,0,204,0.7); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; padding:8px 12px; border:1px solid rgba(255,0,204,0.3); border-radius:4px; transition:all 0.2s; }
+        .ref-signout { display:inline-flex; align-items:center; gap:8px; color:rgba(255,0,204,0.7); font-family:var(--font-code); font-size:11px; letter-spacing:2px; text-decoration:none; padding:8px 12px; border:1px solid rgba(255,0,204,0.3); border-radius:4px; transition:all 0.2s; }
         .ref-signout:hover { color:#FF00CC; border-color:#FF00CC; background:rgba(255,0,204,0.05); }
 
         .ref-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap; gap:16px; }
-        .ref-title-label { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,245,212,0.5); letter-spacing:4px; margin-bottom:8px; }
-        .ref-title { font-family:'Orbitron',monospace; font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:6px; }
-        .ref-subtitle { font-family:'Rajdhani',sans-serif; font-size:15px; color:rgba(180,200,220,0.6); }
+        .ref-title-label { font-family:var(--font-code); font-size:10px; color:rgba(0,245,212,0.5); letter-spacing:4px; margin-bottom:8px; }
+        .ref-title { font-family:var(--font-display); font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:6px; }
+        .ref-subtitle { font-family:var(--font-ui); font-size:15px; color:rgba(180,200,220,0.6); }
 
         .ref-date-wrap { display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
-        .ref-date-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:3px; }
-        .ref-date-input { background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.3); border-radius:4px; padding:10px 16px; color:#00F5D4; font-family:'Share Tech Mono',monospace; font-size:13px; outline:none; transition:all 0.2s; }
+        .ref-date-label { font-family:var(--font-code); font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:3px; }
+        .ref-date-input { background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.3); border-radius:4px; padding:10px 16px; color:#00F5D4; font-family:var(--font-code); font-size:13px; outline:none; transition:all 0.2s; }
         .ref-date-input:focus { border-color:#00F5D4; box-shadow:0 0 15px rgba(0,245,212,0.2); }
 
         .ref-matches { display:flex; flex-direction:column; gap:16px; }
@@ -82,32 +82,32 @@ export default function RefereeMatchList() {
 
         .ref-match-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
         .ref-match-meta { display:flex; align-items:center; gap:12px; }
-        .ref-field-badge { background:rgba(0,245,212,0.1); border:1px solid rgba(0,245,212,0.3); color:#00F5D4; font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:2px; padding:4px 10px; border-radius:2px; }
-        .ref-time { font-family:'Orbitron',monospace; font-size:16px; font-weight:700; color:#F4F4F9; }
+        .ref-field-badge { background:rgba(0,245,212,0.1); border:1px solid rgba(0,245,212,0.3); color:#00F5D4; font-family:var(--font-code); font-size:10px; letter-spacing:2px; padding:4px 10px; border-radius:2px; }
+        .ref-time { font-family:var(--font-display); font-size:16px; font-weight:700; color:#F4F4F9; }
 
         .ref-status { display:flex; align-items:center; gap:8px; }
         .ref-status-dot { width:8px; height:8px; border-radius:50%; }
         .ref-status-dot.scheduled { background:#00F5D4; box-shadow:0 0 6px #00F5D4; }
         .ref-status-dot.live { background:#FF00CC; box-shadow:0 0 6px #FF00CC; animation:blink 1s infinite; }
         .ref-status-dot.final { background:rgba(180,200,220,0.4); }
-        .ref-status-text { font-family:'Share Tech Mono',monospace; font-size:10px; letter-spacing:2px; }
+        .ref-status-text { font-family:var(--font-code); font-size:10px; letter-spacing:2px; }
         .ref-status-text.scheduled { color:#00F5D4; }
         .ref-status-text.live { color:#FF00CC; }
         .ref-status-text.final { color:rgba(180,200,220,0.4); }
 
         .ref-match-teams { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:16px; }
         .ref-team { text-align:center; }
-        .ref-team-name { font-family:'Orbitron',monospace; font-size:14px; font-weight:700; color:#F4F4F9; margin-bottom:4px; letter-spacing:1px; }
-        .ref-team-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:3px; }
+        .ref-team-name { font-family:var(--font-display); font-size:14px; font-weight:700; color:#F4F4F9; margin-bottom:4px; letter-spacing:1px; }
+        .ref-team-label { font-family:var(--font-code); font-size:9px; color:rgba(0,245,212,0.4); letter-spacing:3px; }
         .ref-team.away .ref-team-label { color:rgba(255,0,204,0.4); }
 
         .ref-score-wrap { display:flex; align-items:center; gap:12px; }
-        .ref-score { font-family:'Orbitron',monospace; font-size:44px; font-weight:900; color:#F4F4F9; line-height:1; }
-        .ref-score-sep { font-family:'Orbitron',monospace; font-size:24px; color:rgba(0,245,212,0.3); }
+        .ref-score { font-family:var(--font-display); font-size:44px; font-weight:900; color:#F4F4F9; line-height:1; }
+        .ref-score-sep { font-family:var(--font-display); font-size:24px; color:rgba(0,245,212,0.3); }
 
         .ref-empty { background:rgba(11,20,40,0.8); border:2px dashed rgba(0,245,212,0.15); border-radius:8px; padding:80px 40px; text-align:center; }
-        .ref-empty-title { font-family:'Orbitron',monospace; font-size:18px; color:#F4F4F9; margin-bottom:8px; }
-        .ref-empty-sub { font-family:'Rajdhani',sans-serif; color:rgba(180,200,220,0.5); font-size:16px; }
+        .ref-empty-title { font-family:var(--font-display); font-size:18px; color:#F4F4F9; margin-bottom:8px; }
+        .ref-empty-sub { font-family:var(--font-ui); color:rgba(180,200,220,0.5); font-size:16px; }
 
         @media (max-width:600px) {
           .ref-score { font-size:32px; }
@@ -123,9 +123,9 @@ export default function RefereeMatchList() {
         <div className="ref-inner">
           {/* Nav */}
           <nav className="ref-nav">
-            <a href="/" className="ref-nav-link">
+            <Link href="/" className="ref-nav-link">
               <Home size={14} /> HOME
-            </a>
+            </Link>
             <a href="/account/logout" className="ref-signout">
               <LogOut size={14} /> SIGN OUT
             </a>
@@ -134,7 +134,7 @@ export default function RefereeMatchList() {
           {/* Header */}
           <div className="ref-header">
             <div>
-              <p className="ref-title-label">// MATCH KIOSK</p>
+              <p className="ref-title-label">MATCH KIOSK</p>
               <h1 className="ref-title">Referee Portal</h1>
               <p className="ref-subtitle">Scoring & match control</p>
             </div>

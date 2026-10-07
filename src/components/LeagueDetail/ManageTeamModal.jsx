@@ -7,7 +7,7 @@ export function ManageTeamModal({ show, onClose, onUpdate, onDelete, selectedTea
     <div className="ld-modal-overlay">
       <div className="ld-modal">
         <div className="ld-modal-header">
-          <h3 className="ld-modal-title">// MANAGE TEAM</h3>
+          <h3 className="ld-modal-title">MANAGE TEAM</h3>
           <button className="ld-modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={(e) => { e.preventDefault(); onUpdate(); }}>

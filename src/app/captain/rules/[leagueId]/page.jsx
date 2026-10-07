@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
@@ -223,38 +224,37 @@ export default function LeagueRules({ params }) {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         @keyframes scanline { 0% { transform:translateY(-100%); } 100% { transform:translateY(100vh); } }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
         @keyframes card-enter { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
         * { box-sizing:border-box; }
-        .lr-page { min-height:100vh; background:#091833; font-family:'Rajdhani',sans-serif; position:relative; overflow-x:hidden; }
+        .lr-page { min-height:100vh; background:#091833; font-family:var(--font-ui); position:relative; overflow-x:hidden; }
         .lr-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(0,255,156,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,156,0.025) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
         .lr-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(0,255,156,0.3),transparent); animation:scanline 7s linear infinite; pointer-events:none; z-index:100; }
         .lr-glow { position:fixed; top:-200px; right:-200px; width:600px; height:600px; background:radial-gradient(circle,rgba(0,255,156,0.04) 0%,transparent 70%); pointer-events:none; }
         .lr-hero { background:rgba(0,255,156,0.03); border-bottom:1px solid rgba(0,255,156,0.1); padding:32px 24px; position:relative; z-index:1; }
         .lr-hero-inner { max-width:800px; margin:0 auto; }
-        .lr-back { display:inline-flex; align-items:center; gap:6px; color:rgba(0,255,156,0.5); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; margin-bottom:24px; transition:all 0.2s; }
+        .lr-back { display:inline-flex; align-items:center; gap:6px; color:rgba(0,255,156,0.5); font-family:var(--font-code); font-size:11px; letter-spacing:2px; text-decoration:none; margin-bottom:24px; transition:all 0.2s; }
         .lr-back:hover { color:#00FF9C; }
-        .lr-eyebrow { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.5); letter-spacing:4px; margin-bottom:10px; }
-        .lr-title { font-family:'Orbitron',monospace; font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:8px; }
-        .lr-league-name { font-family:'Share Tech Mono',monospace; font-size:11px; color:rgba(0,255,156,0.6); letter-spacing:3px; }
+        .lr-eyebrow { font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.5); letter-spacing:4px; margin-bottom:10px; }
+        .lr-title { font-family:var(--font-display); font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:8px; }
+        .lr-league-name { font-family:var(--font-code); font-size:11px; color:rgba(0,255,156,0.6); letter-spacing:3px; }
         .lr-format-strip { display:flex; gap:12px; flex-wrap:wrap; margin-top:20px; }
-        .lr-format-badge { display:inline-flex; align-items:center; gap:6px; background:rgba(0,255,156,0.06); border:1px solid rgba(0,255,156,0.2); border-radius:2px; padding:6px 12px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.7); letter-spacing:2px; }
+        .lr-format-badge { display:inline-flex; align-items:center; gap:6px; background:rgba(0,255,156,0.06); border:1px solid rgba(0,255,156,0.2); border-radius:2px; padding:6px 12px; font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.7); letter-spacing:2px; }
         .lr-main { max-width:800px; margin:0 auto; padding:32px 24px 80px; position:relative; z-index:1; display:flex; flex-direction:column; gap:16px; }
         .lr-section { background:rgba(11,20,40,0.9); border:1px solid rgba(0,255,156,0.15); border-radius:8px; overflow:hidden; animation:card-enter 0.5s ease both; }
         .lr-section-header { padding:16px 24px; border-bottom:1px solid rgba(0,255,156,0.1); display:flex; align-items:center; gap:10px; background:rgba(0,255,156,0.04); }
         .lr-section-icon { color:#00FF9C; flex-shrink:0; }
-        .lr-section-title { font-family:'Orbitron',monospace; font-size:12px; font-weight:700; color:#F4F4F9; letter-spacing:3px; }
+        .lr-section-title { font-family:var(--font-display); font-size:12px; font-weight:700; color:#F4F4F9; letter-spacing:3px; }
         .lr-rules-list { padding:16px 24px; display:flex; flex-direction:column; gap:0; }
         .lr-rule { display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-bottom:1px solid rgba(0,255,156,0.05); }
         .lr-rule:last-child { border-bottom:none; }
         .lr-rule-bullet { width:6px; height:6px; border-radius:50%; background:#00FF9C; flex-shrink:0; margin-top:7px; box-shadow:0 0 6px rgba(0,255,156,0.5); }
-        .lr-rule-text { font-family:'Rajdhani',sans-serif; font-size:15px; color:rgba(180,200,220,0.8); line-height:1.5; }
+        .lr-rule-text { font-family:var(--font-ui); font-size:15px; color:rgba(180,200,220,0.8); line-height:1.5; }
         .lr-rule-text strong { color:#F4F4F9; font-weight:700; }
         .lr-footer-note { background:rgba(255,200,0,0.04); border:1px solid rgba(255,200,0,0.15); border-radius:8px; padding:20px 24px; display:flex; gap:12px; align-items:flex-start; }
         .lr-footer-note-icon { color:rgba(255,200,0,0.6); flex-shrink:0; margin-top:2px; }
-        .lr-footer-note-text { font-family:'Rajdhani',sans-serif; font-size:14px; color:rgba(255,200,0,0.6); line-height:1.6; }
+        .lr-footer-note-text { font-family:var(--font-ui); font-size:14px; color:rgba(255,200,0,0.6); line-height:1.6; }
       `}</style>
       <div className="lr-page">
         <div className="lr-grid" />
@@ -262,21 +262,21 @@ export default function LeagueRules({ params }) {
         <div className="lr-glow" />
         <div className="lr-hero">
           <div className="lr-hero-inner">
-            <a href="/captain/team" className="lr-back">
+            <Link href="/captain/team" className="lr-back">
               <ChevronLeft size={14} /> BACK TO CAPTAIN VIEW
-            </a>
-            <p className="lr-eyebrow">// CAPTAIN PORTAL</p>
+            </Link>
+            <p className="lr-eyebrow">CAPTAIN PORTAL</p>
             <h1 className="lr-title">LEAGUE RULES</h1>
             <p
               style={{
-                fontFamily: "'Share Tech Mono',monospace",
+                fontFamily: "var(--font-code)",
                 fontSize: 10,
                 color: "rgba(0,255,156,0.3)",
                 letterSpacing: 3,
                 marginTop: 8,
               }}
             >
-              // 16 LAWS OF THE GAME
+              16 LAWS OF THE GAME
             </p>
             {league?.name && (
               <p className="lr-league-name">{league.name.toUpperCase()}</p>

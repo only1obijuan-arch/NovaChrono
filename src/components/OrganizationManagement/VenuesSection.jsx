@@ -14,7 +14,7 @@ export function VenuesSection({
   return (
     <div className="om-section">
       <div className="om-section-header">
-        <span className="om-section-title">// VENUES</span>
+        <span className="om-section-title">VENUES</span>
         <button className="om-btn-primary" onClick={onAddVenue}>
           <Plus size={12} /> ADD VENUE
         </button>

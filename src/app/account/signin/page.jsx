@@ -3,23 +3,22 @@ import { withJoinCode } from "@/utils/join-navigation";
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
+import Image from "next/image";
 
 function SignInContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState(null);
-  const [toast, setToast] = useState(null);
+  const [toast] = useState(() =>
+    searchParams.get("verified") === "true"
+      ? "Email verified! You can now sign in."
+      : null
+  );
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [attemptsLeft, setAttemptsLeft] = useState(null);
   const [lockedUntil, setLockedUntil] = useState(null);
-
-  useEffect(() => {
-    if (searchParams.get("verified") === "true") {
-      setToast("Email verified! You can now sign in.");
-    }
-  }, []);
 
   // Check rate limit when email is entered
   useEffect(() => {
@@ -35,7 +34,9 @@ function SignInContent() {
           setLockedUntil(true);
         } else {
           setLockedUntil(false);
-          if (error?.includes("Too many")) setError(null);
+          setError((current) =>
+            current?.includes("Too many") ? null : current
+          );
         }
       } catch {}
     }, 500);
@@ -125,14 +126,13 @@ function SignInContent() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         @keyframes scanline { 0% { transform:translateY(-100%); } 100% { transform:translateY(100vh); } }
         @keyframes spin { to { transform:rotate(360deg); } }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
         @keyframes logo-pulse { 0%,100% { box-shadow:0 0 20px rgba(0,245,212,0.3),0 0 40px rgba(0,245,212,0.1); } 50% { box-shadow:0 0 35px rgba(0,245,212,0.6),0 0 70px rgba(0,245,212,0.2); } }
 
         * { box-sizing:border-box; margin:0; padding:0; }
-        .si-page { min-height:100vh; background:#091833; display:flex; align-items:center; justify-content:center; padding:24px; font-family:'Rajdhani',sans-serif; position:relative; overflow:hidden; }
+        .si-page { min-height:100vh; background:#091833; display:flex; align-items:center; justify-content:center; padding:24px; font-family:var(--font-ui); position:relative; overflow:hidden; }
         .si-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(0,245,212,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,245,212,0.025) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
         .si-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(0,245,212,0.4),transparent); animation:scanline 6s linear infinite; pointer-events:none; z-index:100; }
         .si-glow-tl { position:fixed; top:-300px; left:-300px; width:700px; height:700px; background:radial-gradient(circle,rgba(0,245,212,0.06) 0%,transparent 70%); pointer-events:none; }
@@ -141,24 +141,24 @@ function SignInContent() {
         .si-logo-wrap { display:flex; flex-direction:column; align-items:center; margin-bottom:32px; }
         .si-logo { width:160px; height:160px; border-radius:12px; overflow:hidden; margin-bottom:16px; animation:logo-pulse 3s infinite; }
         .si-logo img { width:100%; height:100%; object-fit:contain; display:block; }
-        .si-tagline { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,245,212,0.5); letter-spacing:4px; margin-top:6px; }
+        .si-tagline { font-family:var(--font-code); font-size:10px; color:rgba(0,245,212,0.5); letter-spacing:4px; margin-top:6px; }
         .si-card { background:rgba(11,20,40,0.95); border:1px solid rgba(0,245,212,0.2); border-radius:8px; overflow:hidden; backdrop-filter:blur(20px); box-shadow:0 40px 80px rgba(0,0,0,0.5),0 0 40px rgba(0,245,212,0.05); }
         .si-card-header { padding:24px; border-bottom:1px solid rgba(0,245,212,0.1); text-align:center; }
-        .si-card-title { font-family:'Orbitron',monospace; font-size:16px; font-weight:700; color:#F4F4F9; letter-spacing:2px; margin-bottom:6px; }
-        .si-card-sub { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,245,212,0.4); letter-spacing:3px; }
+        .si-card-title { font-family:var(--font-display); font-size:16px; font-weight:700; color:#F4F4F9; letter-spacing:2px; margin-bottom:6px; }
+        .si-card-sub { font-family:var(--font-code); font-size:10px; color:rgba(0,245,212,0.4); letter-spacing:3px; }
         .si-form { padding:28px; display:flex; flex-direction:column; gap:20px; }
         .si-field { display:flex; flex-direction:column; gap:8px; }
-        .si-label { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,245,212,0.6); letter-spacing:3px; }
-        .si-input { height:48px; padding:0 16px; background:rgba(0,245,212,0.04); border:1px solid rgba(0,245,212,0.15); border-radius:4px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; transition:all 0.2s; }
+        .si-label { font-family:var(--font-code); font-size:10px; color:rgba(0,245,212,0.6); letter-spacing:3px; }
+        .si-input { height:48px; padding:0 16px; background:rgba(0,245,212,0.04); border:1px solid rgba(0,245,212,0.15); border-radius:4px; color:#F4F4F9; font-family:var(--font-ui); font-size:16px; outline:none; transition:all 0.2s; }
         .si-input:focus { border-color:#00F5D4; box-shadow:0 0 15px rgba(0,245,212,0.15); background:rgba(0,245,212,0.06); }
         .si-input::placeholder { color:rgba(180,200,220,0.2); }
-        .si-error { background:rgba(255,50,50,0.08); border:1px solid rgba(255,50,50,0.3); border-radius:4px; padding:12px 16px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,100,100,0.9); letter-spacing:2px; }
-        .si-submit { height:52px; background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.08)); border:1px solid rgba(0,245,212,0.4); border-radius:4px; color:#00F5D4; font-family:'Orbitron',monospace; font-size:13px; font-weight:700; letter-spacing:3px; cursor:pointer; transition:all 0.2s; display:flex; align-items:center; justify-content:center; gap:10px; }
+        .si-error { background:rgba(255,50,50,0.08); border:1px solid rgba(255,50,50,0.3); border-radius:4px; padding:12px 16px; font-family:var(--font-code); font-size:10px; color:rgba(255,100,100,0.9); letter-spacing:2px; }
+        .si-submit { height:52px; background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.08)); border:1px solid rgba(0,245,212,0.4); border-radius:4px; color:#00F5D4; font-family:var(--font-display); font-size:13px; font-weight:700; letter-spacing:3px; cursor:pointer; transition:all 0.2s; display:flex; align-items:center; justify-content:center; gap:10px; }
         .si-submit:hover:not(:disabled) { background:linear-gradient(135deg,rgba(0,245,212,0.25),rgba(0,245,212,0.12)); border-color:#00F5D4; box-shadow:0 0 25px rgba(0,245,212,0.2); transform:translateY(-1px); }
         .si-submit:disabled { opacity:0.4; cursor:not-allowed; }
         .si-spinner { width:18px; height:18px; border:2px solid rgba(0,245,212,0.3); border-top-color:#00F5D4; border-radius:50%; animation:spin 0.8s linear infinite; }
-        .si-footer { text-align:center; margin-top:24px; font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(180,200,220,0.15); letter-spacing:3px; }
-        .si-toast { background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.35); border-radius:4px; padding:12px 16px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,255,156,0.9); letter-spacing:2px; margin-bottom:16px; }
+        .si-footer { text-align:center; margin-top:24px; font-family:var(--font-code); font-size:9px; color:rgba(180,200,220,0.15); letter-spacing:3px; }
+        .si-toast { background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.35); border-radius:4px; padding:12px 16px; font-family:var(--font-code); font-size:10px; color:rgba(0,255,156,0.9); letter-spacing:2px; margin-bottom:16px; }
       `}</style>
 
       <div className="si-page">
@@ -170,12 +170,15 @@ function SignInContent() {
         <div className="si-wrap">
           <div className="si-logo-wrap">
             <div className="si-logo">
-              <img
+              <Image
                 src="https://ucarecdn.com/8aaa83a5-036d-4640-875b-46aff367bee7/-/format/auto/"
                 alt="NovaChrono"
+                width={160}
+                height={160}
+                unoptimized
               />
             </div>
-            <p className="si-tagline">// TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
+            <p className="si-tagline">TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
           </div>
 
           {toast && (
@@ -190,8 +193,9 @@ function SignInContent() {
 
             <form onSubmit={onSubmit} className="si-form">
               <div className="si-field">
-                <label className="si-label">EMAIL ADDRESS</label>
+                <label className="si-label" htmlFor="signin-email">EMAIL ADDRESS</label>
                 <input
+                  id="signin-email"
                   required
                   type="email"
                   className="si-input"
@@ -204,8 +208,9 @@ function SignInContent() {
               </div>
 
               <div className="si-field">
-                <label className="si-label">PASSWORD</label>
+                <label className="si-label" htmlFor="signin-password">PASSWORD</label>
                 <input
+                  id="signin-password"
                   required
                   type="password"
                   className="si-input"
@@ -233,7 +238,7 @@ function SignInContent() {
                   background: "rgba(255,200,0,0.06)",
                   border: "1px solid rgba(255,200,0,0.25)",
                   borderRadius: 4, padding: "10px 14px",
-                  fontFamily: "'Share Tech Mono',monospace",
+                  fontFamily: "var(--font-code)",
                   fontSize: 10, color: "rgba(255,200,0,0.7)", letterSpacing: 2,
                 }}>
                   ⚠ {attemptsLeft} ATTEMPT{attemptsLeft === 1 ? "" : "S"} REMAINING BEFORE LOCKOUT
@@ -248,15 +253,15 @@ function SignInContent() {
 
               <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: "12px" }}>
                 <a href="/account/forgot-password"
-                  style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.5)", letterSpacing: 2, textDecoration: "none" }}
+                  style={{ fontFamily: "var(--font-code)", fontSize: 10, color: "rgba(0,245,212,0.5)", letterSpacing: 2, textDecoration: "none" }}
                   onMouseEnter={(e) => (e.target.style.color = "rgba(0,245,212,0.8)")}
                   onMouseLeave={(e) => (e.target.style.color = "rgba(0,245,212,0.5)")}
                 >
                   FORGOT PASSWORD?
                 </a>
                 <div style={{ height: "1px", background: "rgba(0,245,212,0.1)", margin: "4px 0" }} />
-                <p style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 10, color: "rgba(0,245,212,0.3)", letterSpacing: 2, lineHeight: 1.6 }}>
-                  // CAPTAIN? GET YOUR LEAGUE CODE FROM YOUR VENUE ADMIN
+                <p style={{ fontFamily: "var(--font-code)", fontSize: 10, color: "rgba(0,245,212,0.3)", letterSpacing: 2, lineHeight: 1.6 }}>
+                  CAPTAIN? GET YOUR LEAGUE CODE FROM YOUR VENUE ADMIN
                 </p>
               </div>
             </form>

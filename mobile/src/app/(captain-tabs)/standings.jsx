@@ -75,7 +75,7 @@ export default function Standings() {
             marginBottom: 8,
           }}
         >
-          // LEAGUE STANDINGS
+          LEAGUE STANDINGS
         </Text>
         <Text
           style={{ fontFamily: F.orbitron, fontSize: 26, color: "#F4F4F9" }}

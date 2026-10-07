@@ -8,13 +8,13 @@ export function verifyEmail({ name, verifyUrl }) {
       <div style="text-align:center;margin-bottom:32px;">
         <div style="display:inline-block;background:rgba(0,245,212,0.08);border:2px solid rgba(0,245,212,0.4);border-radius:8px;padding:16px 24px;">
           <p style="margin:0;font-size:22px;font-weight:900;color:#00F5D4;letter-spacing:6px;font-family:monospace;">NOVACHRONO</p>
-          <p style="margin:4px 0 0;font-size:9px;color:rgba(0,245,212,0.4);letter-spacing:4px;font-family:monospace;">// TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
+          <p style="margin:4px 0 0;font-size:9px;color:rgba(0,245,212,0.4);letter-spacing:4px;font-family:monospace;">TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
         </div>
       </div>
       <div style="background:#0D1B2E;border:1px solid rgba(0,245,212,0.2);border-radius:8px;overflow:hidden;">
         <div style="height:3px;background:linear-gradient(90deg,transparent,#00F5D4,transparent);"></div>
         <div style="padding:32px;">
-          <p style="margin:0 0 8px;font-size:10px;color:rgba(0,245,212,0.5);letter-spacing:4px;font-family:monospace;">// ACTION REQUIRED</p>
+          <p style="margin:0 0 8px;font-size:10px;color:rgba(0,245,212,0.5);letter-spacing:4px;font-family:monospace;">ACTION REQUIRED</p>
           <h1 style="margin:0 0 16px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">VERIFY YOUR EMAIL</h1>
           <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.6;">
             Hi ${escapeHtml(name)}, welcome to NovaChrono! Click the button below to verify your email and activate your captain account.

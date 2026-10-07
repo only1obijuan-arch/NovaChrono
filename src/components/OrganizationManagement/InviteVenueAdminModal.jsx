@@ -12,7 +12,7 @@ export function InviteVenueAdminModal({ venueName, onClose, onSubmit, isPending 
   return (
     <div className="om-modal-overlay">
       <div className="om-modal">
-        <h2 className="om-modal-title">// INVITE VENUE ADMIN</h2>
+        <h2 className="om-modal-title">INVITE VENUE ADMIN</h2>
         <p style={{ margin: "0 0 20px", fontSize: 13, color: "rgba(180,200,220,0.6)", fontFamily: "monospace" }}>
           VENUE: <span style={{ color: "#F4F4F9", fontWeight: 700 }}>{venueName}</span>
         </p>

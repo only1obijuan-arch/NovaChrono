@@ -142,83 +142,82 @@ export default function OrgAdminDashboard() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
         @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 
         * { box-sizing:border-box; }
-        .oa-page { min-height:100vh; background:#091833; font-family:'Rajdhani',sans-serif; position:relative; overflow-x:hidden; }
+        .oa-page { min-height:100vh; background:#091833; font-family:var(--font-ui); position:relative; overflow-x:hidden; }
         .oa-grid { position:fixed; inset:0; background-image:linear-gradient(rgba(255,0,204,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,0,204,0.025) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
         .oa-scanline { position:fixed; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,rgba(255,0,204,0.3),transparent); animation:scanline 8s linear infinite; pointer-events:none; z-index:100; }
         .oa-inner { max-width:1200px; margin:0 auto; padding:32px 24px; position:relative; z-index:1; }
 
         .oa-nav { display:flex; align-items:center; justify-content:space-between; margin-bottom:32px; padding-bottom:16px; border-bottom:1px solid rgba(255,0,204,0.1); }
         .oa-nav-left { display:flex; align-items:center; gap:8px; }
-        .oa-nav-brand { font-family:'Orbitron',monospace; font-size:16px; font-weight:900; color:#FF00CC; letter-spacing:3px; }
-        .oa-nav-sub { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.4); letter-spacing:3px; }
-        .oa-signout { display:inline-flex; align-items:center; gap:8px; color:rgba(255,80,80,0.7); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; text-decoration:none; padding:8px 12px; border:1px solid rgba(255,80,80,0.2); border-radius:4px; transition:all 0.2s; }
+        .oa-nav-brand { font-family:var(--font-display); font-size:16px; font-weight:900; color:#FF00CC; letter-spacing:3px; }
+        .oa-nav-sub { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.4); letter-spacing:3px; }
+        .oa-signout { display:inline-flex; align-items:center; gap:8px; color:rgba(255,80,80,0.7); font-family:var(--font-code); font-size:11px; letter-spacing:2px; text-decoration:none; padding:8px 12px; border:1px solid rgba(255,80,80,0.2); border-radius:4px; transition:all 0.2s; }
         .oa-signout:hover { color:rgba(255,80,80,1); border-color:rgba(255,80,80,0.5); }
 
         .oa-header { margin-bottom:40px; }
-        .oa-eyebrow { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.5); letter-spacing:4px; margin-bottom:8px; }
-        .oa-title { font-family:'Orbitron',monospace; font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:6px; }
-        .oa-subtitle { font-family:'Rajdhani',sans-serif; font-size:15px; color:rgba(180,200,220,0.5); }
+        .oa-eyebrow { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.5); letter-spacing:4px; margin-bottom:8px; }
+        .oa-title { font-family:var(--font-display); font-size:28px; font-weight:900; color:#F4F4F9; letter-spacing:2px; margin-bottom:6px; }
+        .oa-subtitle { font-family:var(--font-ui); font-size:15px; color:rgba(180,200,220,0.5); }
 
         .oa-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:40px; }
         .oa-stat { background:rgba(11,20,40,0.8); border:1px solid rgba(255,0,204,0.15); border-radius:8px; padding:20px 24px; display:flex; align-items:center; justify-content:space-between; }
-        .oa-stat-label { font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(255,0,204,0.5); letter-spacing:3px; margin-bottom:8px; }
-        .oa-stat-value { font-family:'Orbitron',monospace; font-size:32px; font-weight:900; color:#FF00CC; }
+        .oa-stat-label { font-family:var(--font-code); font-size:9px; color:rgba(255,0,204,0.5); letter-spacing:3px; margin-bottom:8px; }
+        .oa-stat-value { font-family:var(--font-display); font-size:32px; font-weight:900; color:#FF00CC; }
 
         .oa-section-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-        .oa-section-title { font-family:'Orbitron',monospace; font-size:14px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
-        .oa-add-btn { display:inline-flex; align-items:center; gap:8px; background:linear-gradient(135deg,#FF00CC,#AA0088); color:#F4F4F9; font-family:'Orbitron',monospace; font-size:10px; font-weight:700; letter-spacing:2px; padding:10px 16px; border:none; border-radius:4px; cursor:pointer; transition:all 0.2s; }
+        .oa-section-title { font-family:var(--font-display); font-size:14px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
+        .oa-add-btn { display:inline-flex; align-items:center; gap:8px; background:linear-gradient(135deg,#FF00CC,#AA0088); color:#F4F4F9; font-family:var(--font-display); font-size:10px; font-weight:700; letter-spacing:2px; padding:10px 16px; border:none; border-radius:4px; cursor:pointer; transition:all 0.2s; }
         .oa-add-btn:hover { box-shadow:0 0 20px rgba(255,0,204,0.4); transform:translateY(-1px); }
 
         .oa-venues { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-bottom:40px; }
         .oa-venue-card { background:rgba(11,20,40,0.8); border:1px solid rgba(255,0,204,0.15); border-radius:8px; padding:24px; transition:all 0.3s; animation:fadeInUp 0.5s ease both; }
         .oa-venue-card:hover { border-color:rgba(255,0,204,0.4); transform:translateY(-2px); }
         .oa-venue-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
-        .oa-venue-name { font-family:'Orbitron',monospace; font-size:15px; font-weight:700; color:#F4F4F9; margin-bottom:6px; letter-spacing:1px; }
-        .oa-venue-location { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.4); letter-spacing:2px; display:flex; align-items:center; gap:6px; }
+        .oa-venue-name { font-family:var(--font-display); font-size:15px; font-weight:700; color:#F4F4F9; margin-bottom:6px; letter-spacing:1px; }
+        .oa-venue-location { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.4); letter-spacing:2px; display:flex; align-items:center; gap:6px; }
         .oa-venue-meta { display:flex; gap:16px; margin-bottom:16px; }
-        .oa-venue-meta-item { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(0,245,212,0.5); display:flex; align-items:center; gap:6px; }
+        .oa-venue-meta-item { font-family:var(--font-code); font-size:10px; color:rgba(0,245,212,0.5); display:flex; align-items:center; gap:6px; }
         .oa-delete-btn { background:none; border:1px solid rgba(255,0,204,0.2); color:rgba(255,0,204,0.5); padding:6px; border-radius:4px; cursor:pointer; transition:all 0.2s; }
         .oa-delete-btn:hover { border-color:#FF00CC; color:#FF00CC; }
-        .oa-invite-btn { display:flex; align-items:center; justify-content:space-between; width:100%; background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.2); color:#00F5D4; font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; padding:12px 16px; border-radius:4px; cursor:pointer; transition:all 0.2s; margin-bottom:8px; }
+        .oa-invite-btn { display:flex; align-items:center; justify-content:space-between; width:100%; background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.2); color:#00F5D4; font-family:var(--font-code); font-size:11px; letter-spacing:2px; padding:12px 16px; border-radius:4px; cursor:pointer; transition:all 0.2s; margin-bottom:8px; }
         .oa-invite-btn:hover { background:rgba(0,245,212,0.1); border-color:#00F5D4; }
-        .oa-manage-btn { display:flex; align-items:center; justify-content:space-between; width:100%; background:rgba(255,0,204,0.05); border:1px solid rgba(255,0,204,0.2); color:#FF00CC; font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; padding:12px 16px; border-radius:4px; text-decoration:none; transition:all 0.2s; }
+        .oa-manage-btn { display:flex; align-items:center; justify-content:space-between; width:100%; background:rgba(255,0,204,0.05); border:1px solid rgba(255,0,204,0.2); color:#FF00CC; font-family:var(--font-code); font-size:11px; letter-spacing:2px; padding:12px 16px; border-radius:4px; text-decoration:none; transition:all 0.2s; }
         .oa-manage-btn:hover { background:rgba(255,0,204,0.1); border-color:#FF00CC; }
 
         .oa-empty { background:rgba(11,20,40,0.8); border:2px dashed rgba(255,0,204,0.15); border-radius:8px; padding:60px; text-align:center; }
-        .oa-empty-title { font-family:'Orbitron',monospace; font-size:16px; color:#F4F4F9; margin-bottom:8px; }
-        .oa-empty-sub { font-family:'Rajdhani',sans-serif; color:rgba(180,200,220,0.4); font-size:15px; margin-bottom:24px; }
+        .oa-empty-title { font-family:var(--font-display); font-size:16px; color:#F4F4F9; margin-bottom:8px; }
+        .oa-empty-sub { font-family:var(--font-ui); color:rgba(180,200,220,0.4); font-size:15px; margin-bottom:24px; }
 
         .oa-admins-table { background:rgba(11,20,40,0.8); border:1px solid rgba(255,0,204,0.15); border-radius:8px; overflow:hidden; }
         .oa-admins-table table { width:100%; border-collapse:collapse; }
-        .oa-admins-table th { background:rgba(255,0,204,0.08); padding:14px 20px; font-family:'Share Tech Mono',monospace; font-size:9px; color:rgba(255,0,204,0.6); letter-spacing:3px; text-align:left; border-bottom:1px solid rgba(255,0,204,0.15); }
-        .oa-admins-table td { padding:14px 20px; font-family:'Rajdhani',sans-serif; font-size:15px; color:rgba(180,200,220,0.8); border-bottom:1px solid rgba(255,0,204,0.06); }
+        .oa-admins-table th { background:rgba(255,0,204,0.08); padding:14px 20px; font-family:var(--font-code); font-size:9px; color:rgba(255,0,204,0.6); letter-spacing:3px; text-align:left; border-bottom:1px solid rgba(255,0,204,0.15); }
+        .oa-admins-table td { padding:14px 20px; font-family:var(--font-ui); font-size:15px; color:rgba(180,200,220,0.8); border-bottom:1px solid rgba(255,0,204,0.06); }
         .oa-admins-table tr:last-child td { border-bottom:none; }
-        .oa-role-badge { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:2px; padding:3px 8px; border-radius:2px; }
+        .oa-role-badge { font-family:var(--font-code); font-size:9px; letter-spacing:2px; padding:3px 8px; border-radius:2px; }
         .oa-role-venue { background:rgba(255,0,204,0.1); color:#FF00CC; border:1px solid rgba(255,0,204,0.2); }
         .oa-role-org { background:rgba(0,245,212,0.1); color:#00F5D4; border:1px solid rgba(0,245,212,0.2); }
 
         .oa-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px; }
         .oa-modal { background:#0D1B2E; border:1px solid rgba(255,0,204,0.3); border-radius:8px; padding:32px; max-width:440px; width:100%; }
         .oa-modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-        .oa-modal-title { font-family:'Orbitron',monospace; font-size:16px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
+        .oa-modal-title { font-family:var(--font-display); font-size:16px; font-weight:700; color:#F4F4F9; letter-spacing:2px; }
         .oa-modal-close { background:none; border:none; color:rgba(255,0,204,0.5); cursor:pointer; }
         .oa-modal-close:hover { color:#FF00CC; }
-        .oa-modal-label { font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,0,204,0.6); letter-spacing:3px; display:block; margin-bottom:8px; }
-        .oa-modal-input { width:100%; height:48px; background:rgba(255,0,204,0.05); border:1px solid rgba(255,0,204,0.3); border-radius:4px; padding:0 16px; color:#F4F4F9; font-family:'Rajdhani',sans-serif; font-size:16px; outline:none; transition:all 0.2s; margin-bottom:20px; }
+        .oa-modal-label { font-family:var(--font-code); font-size:10px; color:rgba(255,0,204,0.6); letter-spacing:3px; display:block; margin-bottom:8px; }
+        .oa-modal-input { width:100%; height:48px; background:rgba(255,0,204,0.05); border:1px solid rgba(255,0,204,0.3); border-radius:4px; padding:0 16px; color:#F4F4F9; font-family:var(--font-ui); font-size:16px; outline:none; transition:all 0.2s; margin-bottom:20px; }
         .oa-modal-input:focus { border-color:#FF00CC; box-shadow:0 0 15px rgba(255,0,204,0.15); }
         .oa-modal-input::placeholder { color:rgba(180,200,220,0.3); }
         .oa-modal-btns { display:flex; gap:12px; }
-        .oa-modal-cancel { flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:rgba(180,200,220,0.6); font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:2px; padding:12px; border-radius:4px; cursor:pointer; }
-        .oa-modal-submit { flex:1; background:linear-gradient(135deg,#FF00CC,#AA0088); color:#F4F4F9; font-family:'Orbitron',monospace; font-size:11px; font-weight:700; letter-spacing:2px; padding:12px; border:none; border-radius:4px; cursor:pointer; }
+        .oa-modal-cancel { flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:rgba(180,200,220,0.6); font-family:var(--font-code); font-size:11px; letter-spacing:2px; padding:12px; border-radius:4px; cursor:pointer; }
+        .oa-modal-submit { flex:1; background:linear-gradient(135deg,#FF00CC,#AA0088); color:#F4F4F9; font-family:var(--font-display); font-size:11px; font-weight:700; letter-spacing:2px; padding:12px; border:none; border-radius:4px; cursor:pointer; }
         .oa-modal-submit:disabled { opacity:0.5; cursor:not-allowed; }
-        .oa-modal-success { background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.3); border-radius:4px; padding:12px 16px; font-family:'Share Tech Mono',monospace; font-size:10px; color:#00FF9C; letter-spacing:2px; margin-bottom:16px; }
-        .oa-modal-error { background:rgba(255,50,50,0.08); border:1px solid rgba(255,50,50,0.3); border-radius:4px; padding:12px 16px; font-family:'Share Tech Mono',monospace; font-size:10px; color:rgba(255,100,100,0.9); letter-spacing:2px; margin-bottom:16px; }
+        .oa-modal-success { background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.3); border-radius:4px; padding:12px 16px; font-family:var(--font-code); font-size:10px; color:#00FF9C; letter-spacing:2px; margin-bottom:16px; }
+        .oa-modal-error { background:rgba(255,50,50,0.08); border:1px solid rgba(255,50,50,0.3); border-radius:4px; padding:12px 16px; font-family:var(--font-code); font-size:10px; color:rgba(255,100,100,0.9); letter-spacing:2px; margin-bottom:16px; }
 
         @media (max-width:768px) {
           .oa-stats { grid-template-columns:1fr; }
@@ -236,7 +235,7 @@ export default function OrgAdminDashboard() {
             <div className="oa-nav-left">
               <div>
                 <p className="oa-nav-brand">NOVACHRONO</p>
-                <p className="oa-nav-sub">// ORG ADMIN PORTAL</p>
+                <p className="oa-nav-sub">ORG ADMIN PORTAL</p>
               </div>
             </div>
             <a href="/account/logout" className="oa-signout">
@@ -246,7 +245,7 @@ export default function OrgAdminDashboard() {
 
           {/* Header */}
           <div className="oa-header">
-            <p className="oa-eyebrow">// ORGANISATION ADMIN</p>
+            <p className="oa-eyebrow">ORGANISATION ADMIN</p>
             <h1 className="oa-title">
               {organization?.name || "YOUR ORGANISATION"}
             </h1>
@@ -287,7 +286,7 @@ export default function OrgAdminDashboard() {
 
           {/* Venues */}
           <div className="oa-section-header">
-            <h2 className="oa-section-title">// VENUES</h2>
+            <h2 className="oa-section-title">VENUES</h2>
             <button
               className="oa-add-btn"
               onClick={() => setShowAddVenue(true)}
@@ -381,7 +380,7 @@ export default function OrgAdminDashboard() {
           {admins.length > 0 && (
             <>
               <div className="oa-section-header" style={{ marginTop: 8 }}>
-                <h2 className="oa-section-title">// VENUE ADMINS</h2>
+                <h2 className="oa-section-title">VENUE ADMINS</h2>
               </div>
               <div className="oa-admins-table">
                 <table>
@@ -427,7 +426,7 @@ export default function OrgAdminDashboard() {
         <div className="oa-modal-overlay">
           <div className="oa-modal">
             <div className="oa-modal-header">
-              <h2 className="oa-modal-title">// ADD VENUE</h2>
+              <h2 className="oa-modal-title">ADD VENUE</h2>
               <button
                 className="oa-modal-close"
                 onClick={() => setShowAddVenue(false)}
@@ -481,7 +480,7 @@ export default function OrgAdminDashboard() {
         <div className="oa-modal-overlay">
           <div className="oa-modal">
             <div className="oa-modal-header">
-              <h2 className="oa-modal-title">// INVITE VENUE ADMIN</h2>
+              <h2 className="oa-modal-title">INVITE VENUE ADMIN</h2>
               <button
                 className="oa-modal-close"
                 onClick={() => setShowInviteAdmin(false)}
@@ -491,7 +490,7 @@ export default function OrgAdminDashboard() {
             </div>
             <p
               style={{
-                fontFamily: "'Rajdhani',sans-serif",
+                fontFamily: "var(--font-ui)",
                 fontSize: 14,
                 color: "rgba(180,200,220,0.5)",
                 marginBottom: 20,
@@ -508,7 +507,7 @@ export default function OrgAdminDashboard() {
             )}
             {inviteError && (
               <div className="oa-modal-error">
-                // {inviteError.toUpperCase()}
+                {inviteError.toUpperCase()}
               </div>
             )}
 
@@ -548,7 +547,7 @@ export default function OrgAdminDashboard() {
             </div>
             <p
               style={{
-                fontFamily: "'Share Tech Mono',monospace",
+                fontFamily: "var(--font-code)",
                 fontSize: 9,
                 color: "rgba(180,200,220,0.2)",
                 letterSpacing: 2,
@@ -556,7 +555,7 @@ export default function OrgAdminDashboard() {
                 marginTop: 16,
               }}
             >
-              // INVITE LINK EXPIRES IN 24 HOURS
+              INVITE LINK EXPIRES IN 24 HOURS
             </p>
           </div>
         </div>

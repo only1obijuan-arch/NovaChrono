@@ -79,7 +79,7 @@ export default function RefereeMatches() {
             marginBottom: 8,
           }}
         >
-          // REFEREE PORTAL
+          REFEREE PORTAL
         </Text>
         <Text
           style={{
@@ -89,7 +89,7 @@ export default function RefereeMatches() {
             marginBottom: 16,
           }}
         >
-          TODAY'S MATCHES
+          TODAY’S MATCHES
         </Text>
         <View
           style={{

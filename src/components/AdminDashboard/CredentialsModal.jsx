@@ -6,7 +6,7 @@ export function CredentialsModal({ credentials, onClose, onCopy, onPrint, copied
       <div className="ad-modal">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <h3 className="ad-modal-title">
-            {credentials.isExisting ? "// EXISTING CREDENTIALS" : "// CREDENTIALS GENERATED"}
+            {credentials.isExisting ? "EXISTING CREDENTIALS" : "CREDENTIALS GENERATED"}
           </h3>
           <button style={{ background: "none", border: "none", color: "rgba(0,245,212,0.4)", cursor: "pointer" }} onClick={onClose}>
             <X size={18} />

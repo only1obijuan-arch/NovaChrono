@@ -139,7 +139,7 @@ export default function ManagePlayers() {
           </Text>
         </TouchableOpacity>
         <Text style={{ fontFamily: F.mono, fontSize: 10, color: "rgba(0,255,156,0.5)", letterSpacing: 4, marginBottom: 8 }}>
-          // SQUAD
+          SQUAD
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <Text style={{ fontFamily: F.orbitron, fontSize: 26, color: "#F4F4F9" }}>
@@ -194,7 +194,7 @@ export default function ManagePlayers() {
             }}
           >
             <Text style={{ fontFamily: F.mono, fontSize: 10, color: "rgba(0,255,156,0.5)", letterSpacing: 3, marginBottom: 16 }}>
-              // NEW PLAYER
+              NEW PLAYER
             </Text>
 
             <View style={{ marginBottom: 14 }}>

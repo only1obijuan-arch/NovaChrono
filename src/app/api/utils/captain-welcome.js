@@ -16,13 +16,13 @@ export async function sendCaptainWelcome({ email, name, teamName, joinCode }) {
               <div style="text-align:center;margin-bottom:32px;">
                 <div style="display:inline-block;background:rgba(0,245,212,0.08);border:2px solid rgba(0,245,212,0.4);border-radius:8px;padding:16px 32px;">
                   <p style="margin:0;font-size:22px;font-weight:900;color:#00F5D4;letter-spacing:6px;font-family:monospace;">NOVACHRONO</p>
-                  <p style="margin:4px 0 0;font-size:9px;color:rgba(0,245,212,0.4);letter-spacing:4px;font-family:monospace;">// TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
+                  <p style="margin:4px 0 0;font-size:9px;color:rgba(0,245,212,0.4);letter-spacing:4px;font-family:monospace;">TIME PAUSES. YOUR LEAGUE NEVER DOES.</p>
                 </div>
               </div>
               <div style="background:#0D1B2E;border:1px solid rgba(0,255,156,0.2);border-radius:8px;overflow:hidden;">
                 <div style="height:3px;background:linear-gradient(90deg,transparent,#00FF9C,transparent);"></div>
                 <div style="padding:32px;">
-                  <p style="margin:0 0 8px;font-size:10px;color:rgba(0,255,156,0.5);letter-spacing:4px;font-family:monospace;">// WELCOME CAPTAIN</p>
+                  <p style="margin:0 0 8px;font-size:10px;color:rgba(0,255,156,0.5);letter-spacing:4px;font-family:monospace;">WELCOME CAPTAIN</p>
                   <h1 style="margin:0 0 20px;font-size:24px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">YOUR TEAM IS IN!</h1>
                   <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.7;">
                     Hey ${escapeHtml(name)}, your team <strong style="color:#F4F4F9;">${escapeHtml(teamName)}</strong> has been successfully registered. You're ready to compete!
@@ -42,7 +42,7 @@ export async function sendCaptainWelcome({ email, name, teamName, joinCode }) {
                     </div>
                   </div>
                   <div style="margin-bottom:28px;">
-                    <p style="margin:0 0 12px;font-size:10px;color:rgba(0,255,156,0.5);letter-spacing:4px;font-family:monospace;">// WHAT'S NEXT</p>
+                    <p style="margin:0 0 12px;font-size:10px;color:rgba(0,255,156,0.5);letter-spacing:4px;font-family:monospace;">WHAT'S NEXT</p>
                     <ul style="margin:0;padding:0 0 0 20px;color:rgba(180,200,220,0.6);font-size:14px;line-height:1.8;">
                       <li>Sign in to your captain portal to view your team</li>
                       <li>Check fixtures once your admin generates the schedule</li>

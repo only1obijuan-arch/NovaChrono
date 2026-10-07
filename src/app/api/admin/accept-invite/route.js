@@ -100,7 +100,7 @@ export async function POST(request) {
               <div style="background:#0D1B2E;border:1px solid rgba(255,0,204,0.2);border-radius:8px;overflow:hidden;">
                 <div style="height:3px;background:linear-gradient(90deg,transparent,#FF00CC,transparent);"></div>
                 <div style="padding:32px;">
-                  <p style="margin:0 0 8px;font-size:10px;color:rgba(255,0,204,0.5);letter-spacing:4px;font-family:monospace;">// WELCOME ABOARD</p>
+                  <p style="margin:0 0 8px;font-size:10px;color:rgba(255,0,204,0.5);letter-spacing:4px;font-family:monospace;">WELCOME ABOARD</p>
                   <h1 style="margin:0 0 20px;font-size:22px;font-weight:900;color:#F4F4F9;letter-spacing:2px;font-family:monospace;">ACCOUNT ACTIVATED!</h1>
                   <p style="margin:0 0 24px;font-size:15px;color:rgba(180,200,220,0.7);line-height:1.7;">
                     Hi ${escapeHtml(name)}, your NovaChrono account is ready. You're now managing

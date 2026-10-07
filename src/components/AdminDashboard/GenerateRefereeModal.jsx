@@ -6,7 +6,7 @@ export function GenerateRefereeModal({ nameInput, setNameInput, fieldInput, setF
       <div className="ad-modal">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
           <div>
-            <h3 className="ad-modal-title">// GENERATE REF LOGIN</h3>
+            <h3 className="ad-modal-title">GENERATE REF LOGIN</h3>
             <p className="ad-modal-sub">CREATE CREDENTIALS FOR A FIELD REFEREE</p>
           </div>
           <button style={{ background: "none", border: "none", color: "rgba(0,245,212,0.4)", cursor: "pointer" }} onClick={onClose}>

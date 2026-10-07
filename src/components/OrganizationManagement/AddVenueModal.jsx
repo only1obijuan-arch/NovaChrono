@@ -28,7 +28,7 @@ export function AddVenueModal({ onClose, onSubmit, isPending }) {
   return (
     <div className="om-modal-overlay">
       <div className="om-modal">
-        <h2 className="om-modal-title">// ADD VENUE</h2>
+        <h2 className="om-modal-title">ADD VENUE</h2>
         <form onSubmit={handleSubmit}>
           <label className="om-modal-label">VENUE NAME</label>
           <input

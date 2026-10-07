@@ -75,7 +75,7 @@ export default function RefereeHistory() {
             marginBottom: 8,
           }}
         >
-          // MATCH HISTORY
+          MATCH HISTORY
         </Text>
         <Text
           style={{ fontFamily: F.orbitron, fontSize: 26, color: "#F4F4F9" }}

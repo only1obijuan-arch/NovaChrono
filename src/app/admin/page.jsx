@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { printCredentials } from "@/utils/printCredentials";
 import { AdminDashboardStyles } from "@/components/AdminDashboard/AdminDashboardStyles";
@@ -249,19 +250,26 @@ export default function AdminDashboard() {
               WEATHER CONDITIONS
               {adminProfile?.user?.venue_name && (
                 <span style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: 11, color: "rgba(0,245,212,0.5)", letterSpacing: 2, fontWeight: 400, marginLeft: 12 }}>
-                  // {adminProfile.user.venue_name.toUpperCase()}
+                  {adminProfile.user.venue_name.toUpperCase()}
                 </span>
               )}
               <div className="ad-section-line" />
             </div>
 
             {weatherLoading ? (
-              <div className="wx-loading">// FETCHING WEATHER DATA...</div>
+              <div className="wx-loading">FETCHING WEATHER DATA...</div>
             ) : weather ? (
               <div className={`wx-card${weather.severe ? " severe" : weather.lightning_risk ? " lightning" : ""}`}>
                 <div className="wx-icon-wrap">
                   {weatherIconUrl && (
-                    <img src={weatherIconUrl} alt={weather.description} className="wx-icon" />
+                    <Image
+                      src={weatherIconUrl}
+                      alt={weather.description}
+                      className="wx-icon"
+                      width={50}
+                      height={50}
+                      unoptimized
+                    />
                   )}
                   <span className="wx-temp">{weather.temp}°C</span>
                 </div>
@@ -301,7 +309,7 @@ export default function AdminDashboard() {
                 </div>
               </div>
             ) : (
-              <div className="wx-loading">// WEATHER DATA UNAVAILABLE</div>
+              <div className="wx-loading">WEATHER DATA UNAVAILABLE</div>
             )}
           </div>
 
@@ -362,8 +370,8 @@ export default function AdminDashboard() {
             </p>
             <p className="ad-modal-sub">
               {showAlertModal === "warning"
-                ? "// NOTIFY CAPTAINS OF WEATHER RISK"
-                : "// NOTIFY CAPTAINS OF POSTPONEMENT"}
+                ? "NOTIFY CAPTAINS OF WEATHER RISK"
+                : "NOTIFY CAPTAINS OF POSTPONEMENT"}
             </p>
 
             {alertSent ? (

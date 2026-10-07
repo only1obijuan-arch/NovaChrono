@@ -3,7 +3,7 @@ export function StandingsTab({ stats }) {
 
   if (standings.length === 0) {
     return (
-      <div style={{ padding: "60px 24px", textAlign: "center", fontFamily: "'Share Tech Mono',monospace", fontSize: 11, color: "rgba(180,200,220,0.3)", letterSpacing: 3 }}>
+      <div style={{ padding: "60px 24px", textAlign: "center", fontFamily: "var(--font-code)", fontSize: 11, color: "rgba(180,200,220,0.3)", letterSpacing: 3 }}>
         NO STANDINGS YET — FIXTURES MUST BE GENERATED FIRST
       </div>
     );
@@ -36,7 +36,7 @@ export function StandingsTab({ stats }) {
               <td style={{ fontWeight: 700, color: team.goal_difference > 0 ? "#00FF9C" : team.goal_difference < 0 ? "rgba(255,0,204,0.7)" : "rgba(180,200,220,0.6)" }}>
                 {team.goal_difference > 0 ? `+${team.goal_difference}` : team.goal_difference}
               </td>
-              <td style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:10 }}>{(team.form_last5 || []).join(" ") || "-"}</td><td style={{ color:"rgba(180,200,220,0.5)" }}>{team.movement == null ? "—" : team.movement}</td><td><span className="ld-pts">{team.points}</span></td>
+              <td style={{ fontFamily:"var(--font-code)", fontSize:10 }}>{(team.form_last5 || []).join(" ") || "-"}</td><td style={{ color:"rgba(180,200,220,0.5)" }}>{team.movement == null ? "—" : team.movement}</td><td><span className="ld-pts">{team.points}</span></td>
             </tr>
           ))}
         </tbody>

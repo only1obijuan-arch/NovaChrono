@@ -4,7 +4,7 @@ export function AdminsSection({ usersData, hasVenues, onAddAdmin, onDeleteUser }
   return (
     <div className="om-section">
       <div className="om-section-header">
-        <span className="om-section-title">// ADMINISTRATORS</span>
+        <span className="om-section-title">ADMINISTRATORS</span>
         <button className="om-btn-blue" onClick={onAddAdmin} disabled={!hasVenues}>
           <Plus size={12} /> ADD ADMIN
         </button>

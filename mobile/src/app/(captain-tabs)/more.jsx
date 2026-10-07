@@ -87,7 +87,7 @@ export default function More() {
             marginBottom: 8,
           }}
         >
-          // SETTINGS
+          SETTINGS
         </Text>
         <Text
           style={{ fontFamily: F.orbitron, fontSize: 26, color: "#F4F4F9" }}
@@ -127,7 +127,7 @@ export default function More() {
                 marginBottom: 10,
               }}
             >
-              // YOUR TEAM
+              YOUR TEAM
             </Text>
             <Text
               style={{
@@ -319,7 +319,7 @@ export default function More() {
               letterSpacing: 2,
             }}
           >
-            // TIME PAUSES. YOUR LEAGUE NEVER DOES.
+            TIME PAUSES. YOUR LEAGUE NEVER DOES.
           </Text>
         </View>
       </ScrollView>
