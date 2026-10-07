@@ -1,0 +1,64 @@
+name: NovaChrono baseline
+
+on:
+  pull_request:
+  push:
+    branches:
+      - astra/critical-stabilisation
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Unit and contract tests
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+        env:
+          AUTH_SECRET: ci-only-secret-not-used-outside-this-job
+          DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+          NEXT_PUBLIC_APP_URL: http://127.0.0.1:3100
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser smoke
+        run: npm run test:e2e
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Reject committed secret files and private keys
+        shell: bash
+        run: |
+          unexpected_env=$(git ls-files '.env*' ':!:*.example')
+          if [ -n "$unexpected_env" ]; then
+            echo "Unexpected committed environment file(s):"
+            echo "$unexpected_env"
+            exit 1
+          fi
+          if git grep -nE 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY'; then
+            echo "Private key material found in tracked files."
+            exit 1
+          fi
