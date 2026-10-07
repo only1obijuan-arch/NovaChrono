@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Database migration runner.
  *
@@ -15,9 +14,8 @@
  */
 
 import { readFileSync, readdirSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { Pool } from "@neondatabase/serverless";
 
 // ---------------------------------------------------------------------------
 // Bootstrap env from .env.local if present (no dotenv dependency needed)
@@ -55,7 +53,7 @@ loadEnvFile(join(root, ".env"));
  * terminator, and stripping single-line comments so that semicolons inside
  * comments never trigger a false split.
  */
-function splitStatements(sql) {
+export function splitStatements(sql) {
   const out = [];
   let buf = "";
   let i = 0;
@@ -113,15 +111,6 @@ function splitStatements(sql) {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-const showStatus = process.argv.includes("--status");
-
-if (!process.env.DATABASE_URL) {
-  console.error("ERROR: DATABASE_URL is not set.");
-  process.exit(1);
-}
-
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
 async function ensureMigrationsTable(client) {
   await client.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -139,40 +128,63 @@ async function getApplied(client) {
   return new Set(rows.map((r) => r.name));
 }
 
-function getMigrationFiles() {
+export async function getAppliedReadOnly(client) {
+  const { rows: relationRows } = await client.query(
+    "SELECT to_regclass('public.schema_migrations') AS relation"
+  );
+
+  if (!relationRows[0]?.relation) return new Set();
+  return getApplied(client);
+}
+
+export function getMigrationFiles() {
   const dir = join(root, "migrations");
   return readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
 }
 
-async function run() {
+export async function run({
+  showStatus = false,
+  connectionString = process.env.DATABASE_URL,
+  logger = console,
+  poolFactory = async (options) => {
+    const { Pool } = await import("@neondatabase/serverless");
+    return new Pool(options);
+  },
+} = {}) {
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is not set.");
+  }
+
+  const pool = await poolFactory({ connectionString });
   const client = await pool.connect();
   try {
-    await ensureMigrationsTable(client);
-    const applied = await getApplied(client);
     const files = getMigrationFiles();
 
     if (showStatus) {
-      console.log("\nMigration status:");
+      const applied = await getAppliedReadOnly(client);
+      logger.log("\nMigration status:");
       for (const f of files) {
         const mark = applied.has(f) ? "✓" : "○";
-        console.log(`  ${mark}  ${f}`);
+        logger.log(`  ${mark}  ${f}`);
       }
-      console.log();
+      logger.log();
       return;
     }
 
+    await ensureMigrationsTable(client);
+    const applied = await getApplied(client);
     const pending = files.filter((f) => !applied.has(f));
 
     if (pending.length === 0) {
-      console.log("No pending migrations.");
+      logger.log("No pending migrations.");
       return;
     }
 
     for (const file of pending) {
       const sql = readFileSync(join(root, "migrations", file), "utf8");
-      console.log(`Applying ${file} …`);
+      logger.log(`Applying ${file} …`);
       await client.query("BEGIN");
       try {
         const stmts = splitStatements(sql);
@@ -184,22 +196,27 @@ async function run() {
           [file]
         );
         await client.query("COMMIT");
-        console.log(`  ✓ done (${stmts.length} statements)`);
+        logger.log(`  ✓ done (${stmts.length} statements)`);
       } catch (err) {
         await client.query("ROLLBACK");
-        console.error(`  ✗ failed: ${err.message}`);
-        process.exit(1);
+        throw new Error(`Migration ${file} failed: ${err.message}`, { cause: err });
       }
     }
 
-    console.log(`\n${pending.length} migration(s) applied.`);
+    logger.log(`\n${pending.length} migration(s) applied.`);
   } finally {
     client.release();
     await pool.end();
   }
 }
 
-run().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const invokedDirectly = process.argv[1]
+  ? resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
+  : false;
+
+if (invokedDirectly) {
+  run({ showStatus: process.argv.includes("--status") }).catch((err) => {
+    console.error(`ERROR: ${err.message}`);
+    process.exitCode = 1;
+  });
+}

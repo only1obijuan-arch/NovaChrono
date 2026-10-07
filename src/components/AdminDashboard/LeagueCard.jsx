@@ -1,4 +1,5 @@
 import { Calendar, MapPin, Users as UsersIcon, ChevronRight } from "lucide-react";
+import { leagueDayLabel } from "@/utils/weekday";
 
 export function LeagueCard({ league, index }) {
   const getStatusClass = (status) => {
@@ -17,7 +18,7 @@ export function LeagueCard({ league, index }) {
         {league.status?.toUpperCase()}
       </span>
       <h3 className="ad-league-name">{league.name}</h3>
-      <p className="ad-league-day">{league.day_of_week?.toUpperCase()} LEAGUE</p>
+      <p className="ad-league-day">{leagueDayLabel(league.day_of_week)}</p>
       <div className="ad-league-meta">
         <span className="ad-league-meta-item">
           <Calendar size={14} color="rgba(255,0,204,0.5)" />{" "}

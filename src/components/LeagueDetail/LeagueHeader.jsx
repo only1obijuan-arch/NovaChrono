@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronLeft, Users, Calendar, Trophy, BarChart3, Play, StopCircle, CheckCircle, Copy, Share2, X } from "lucide-react";
+import { leagueDayLabel } from "@/utils/weekday";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://novachrono.app";
 
@@ -33,7 +34,7 @@ export function LeagueHeader({ league, activeTab, setActiveTab, onGenerateFixtur
               </span>
             </div>
             <p className="ld-league-sub">
-              {league.day_of_week?.toUpperCase()} LEAGUE
+              {leagueDayLabel(league.day_of_week)}
               {league.season_name ? ` • ${league.season_name.toUpperCase()}` : ""}
             </p>
           </div>
@@ -95,25 +96,25 @@ export function LeagueHeader({ league, activeTab, setActiveTab, onGenerateFixtur
           onClick={e => e.stopPropagation()}
         >
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
-            <p style={{ fontFamily:"'Orbitron',monospace", fontSize:16, fontWeight:700, color:"#F4F4F9", letterSpacing:2 }}>SHARE INVITE LINK</p>
+            <p style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700, color:"#F4F4F9", letterSpacing:2 }}>SHARE INVITE LINK</p>
             <button onClick={() => setShowShareModal(false)} style={{ background:"none", border:"none", color:"rgba(180,200,220,0.4)", cursor:"pointer", padding:4 }}><X size={18} /></button>
           </div>
-          <p style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:10, color:"rgba(0,255,156,0.4)", letterSpacing:3, marginBottom:24 }}>// CAPTAINS JOIN VIA THIS LINK</p>
+          <p style={{ fontFamily:"var(--font-code)", fontSize:10, color:"rgba(0,255,156,0.4)", letterSpacing:3, marginBottom:24 }}>CAPTAINS JOIN VIA THIS LINK</p>
 
-          <div style={{ background:"rgba(0,255,156,0.04)", border:"1px solid rgba(0,255,156,0.15)", borderRadius:4, padding:"12px 16px", marginBottom:20, fontFamily:"'Share Tech Mono',monospace", fontSize:11, color:"rgba(0,255,156,0.7)", wordBreak:"break-all", letterSpacing:1 }}>
+          <div style={{ background:"rgba(0,255,156,0.04)", border:"1px solid rgba(0,255,156,0.15)", borderRadius:4, padding:"12px 16px", marginBottom:20, fontFamily:"var(--font-code)", fontSize:11, color:"rgba(0,255,156,0.7)", wordBreak:"break-all", letterSpacing:1 }}>
             {inviteUrl}
           </div>
 
           <div style={{ display:"flex", gap:12 }}>
             <button
               onClick={handleCopyLink}
-              style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:8, background:"rgba(0,255,156,0.08)", border:"1px solid rgba(0,255,156,0.3)", color:"#00FF9C", fontFamily:"'Orbitron',monospace", fontSize:11, fontWeight:700, letterSpacing:2, padding:14, borderRadius:4, cursor:"pointer", transition:"all 0.2s" }}
+              style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:8, background:"rgba(0,255,156,0.08)", border:"1px solid rgba(0,255,156,0.3)", color:"#00FF9C", fontFamily:"var(--font-display)", fontSize:11, fontWeight:700, letterSpacing:2, padding:14, borderRadius:4, cursor:"pointer", transition:"all 0.2s" }}
             >
               <Copy size={14} /> COPY LINK
             </button>
             <button
               onClick={handleWhatsApp}
-              style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:8, background:"rgba(37,211,102,0.08)", border:"1px solid rgba(37,211,102,0.3)", color:"#25D366", fontFamily:"'Orbitron',monospace", fontSize:11, fontWeight:700, letterSpacing:2, padding:14, borderRadius:4, cursor:"pointer", transition:"all 0.2s" }}
+              style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:8, background:"rgba(37,211,102,0.08)", border:"1px solid rgba(37,211,102,0.3)", color:"#25D366", fontFamily:"var(--font-display)", fontSize:11, fontWeight:700, letterSpacing:2, padding:14, borderRadius:4, cursor:"pointer", transition:"all 0.2s" }}
             >
               WHATSAPP
             </button>
