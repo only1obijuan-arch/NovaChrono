@@ -1,6 +1,8 @@
 -- Gate 2B production hold point.
 -- This migration intentionally fails closed until operators assign the two
 -- currently unresolved production roles from authoritative information.
+SET LOCAL lock_timeout = '5s';
+
 DO $$
 DECLARE
   unresolved_count BIGINT;
@@ -14,4 +16,6 @@ BEGIN
 END
 $$;
 
-ALTER TABLE auth_users ALTER COLUMN role SET NOT NULL;
+ALTER TABLE auth_users
+  ALTER COLUMN role SET DEFAULT 'captain',
+  ALTER COLUMN role SET NOT NULL;

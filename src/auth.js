@@ -179,6 +179,10 @@ const nextAuth = NextAuth({
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
+        // Pin the authentication attempt before password verification begins.
+        // A concurrent password reset must be able to invalidate this attempt
+        // even if the expensive password check completes afterwards.
+        const authenticationStartedAt = Date.now();
         const { email, password } = credentials;
 
         if (!email || !password) return null;
@@ -207,7 +211,7 @@ const nextAuth = NextAuth({
         }
 
         await clearLoginAttempts(canonicalEmail);
-        return user;
+        return { ...user, session_issued_at: authenticationStartedAt };
       },
     }),
       ],
@@ -215,20 +219,31 @@ const nextAuth = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.session_issued_at = Date.now();
+        token.session_issued_at = user.session_issued_at ?? token.session_issued_at ?? Date.now();
+      } else if (token.session_issued_at == null && Number.isFinite(Number(token.iat))) {
+        // Upgrade a legacy cookie once. Auth.js can refresh `iat` whenever it
+        // re-encodes a JWT, so all future checks must use this pinned value.
+        token.session_issued_at = Number(token.iat) * 1000;
       }
 
-      if (!token.id) return { ...token, revoked: true };
+      if (!token.id) return revokedToken(token);
 
-      const result = await pool.query(
-        `SELECT id, email, name, role, venue_id, organization_id, field_number, sessions_valid_after
-         FROM auth_users WHERE id = $1`,
-        [token.id]
-      );
-      const liveUser = result.rows[0];
-      const issuedAtMs = token.session_issued_at ?? Number(token.iat) * 1000;
+      let liveUser;
+      try {
+        const result = await pool.query(
+          `SELECT id, email, name, role, venue_id, organization_id, field_number, sessions_valid_after
+           FROM auth_users WHERE id = $1`,
+          [token.id]
+        );
+        liveUser = result.rows[0];
+      } catch (error) {
+        console.error("[auth.jwt] live user lookup failed", error);
+        return revokedToken(token);
+      }
+
+      const issuedAtMs = token.session_issued_at;
       if (!liveUser || !isSessionCurrent(issuedAtMs, liveUser.sessions_valid_after)) {
-        return { ...token, revoked: true };
+        return revokedToken(token);
       }
 
       token.revoked = false;
@@ -262,3 +277,14 @@ const nextAuth = NextAuth({
   },
 });
 export const { auth, handlers, signIn, signOut } = nextAuth;
+
+function revokedToken(token) {
+  const revoked = { ...token, revoked: true };
+  delete revoked.email;
+  delete revoked.name;
+  delete revoked.role;
+  delete revoked.venue_id;
+  delete revoked.organization_id;
+  delete revoked.field_number;
+  return revoked;
+}

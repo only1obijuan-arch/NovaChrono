@@ -149,7 +149,10 @@ export async function run({
   connectionString = process.env.DATABASE_URL,
   logger = console,
   poolFactory = async (options) => {
-    const { Pool } = await import("@neondatabase/serverless");
+    const packageName = process.env.DATABASE_DRIVER === "pg"
+      ? "pg"
+      : "@neondatabase/serverless";
+    const { Pool } = await import(packageName);
     return new Pool(options);
   },
 } = {}) {

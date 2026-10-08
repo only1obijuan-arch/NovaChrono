@@ -159,11 +159,35 @@ export async function GET(request) {
     return Response.json(teams);
   }
   if (leagueId) {
-    const teams = await sql`
-      SELECT t.id, t.league_id, t.slot_id, t.name, t.status
-      FROM teams t
-      WHERE t.league_id = ${leagueId} AND t.status = 'active'
+    const [league] = await sql`
+      SELECT l.venue_id, v.organization_id
+      FROM leagues l
+      JOIN venues v ON v.id = l.venue_id
+      WHERE l.id = ${leagueId}
     `;
+    if (!league) return Response.json([]);
+
+    const user = await resolveCurrentUser(request);
+    const canSeeAdminProjection = Boolean(
+      user &&
+      ["venue_admin", "org_admin", "super_admin"].includes(user.role) &&
+      canAdministerVenue(user, league.venue_id, league.organization_id),
+    );
+
+    const teams = canSeeAdminProjection
+      ? await sql`
+          SELECT t.id, t.league_id, t.slot_id, t.name, t.status,
+                 t.captain_user_id, t.created_at, au.name AS captain_name
+          FROM teams t
+          LEFT JOIN auth_users au ON au.id = t.captain_user_id
+          WHERE t.league_id = ${leagueId} AND t.status = 'active'
+          ORDER BY t.created_at ASC
+        `
+      : await sql`
+          SELECT t.id, t.league_id, t.slot_id, t.name, t.status
+          FROM teams t
+          WHERE t.league_id = ${leagueId} AND t.status = 'active'
+        `;
     return Response.json(teams);
   }
   return Response.json({ error: "Missing parameters" }, { status: 400 });

@@ -1,6 +1,8 @@
 -- Gate 2B: canonical auth identity and credential integrity.
 -- Forward-only and safe for both production and a fresh 0001 + 0002 schema.
 
+SET LOCAL lock_timeout = '5s';
+
 DO $$
 BEGIN
   IF EXISTS (
@@ -59,8 +61,7 @@ WHERE sessions_valid_after IS NULL;
 
 ALTER TABLE auth_users
   ALTER COLUMN sessions_valid_after SET DEFAULT TIMESTAMPTZ '1970-01-01 00:00:00+00',
-  ALTER COLUMN sessions_valid_after SET NOT NULL,
-  ALTER COLUMN role SET DEFAULT 'captain';
+  ALTER COLUMN sessions_valid_after SET NOT NULL;
 
 DO $$
 DECLARE

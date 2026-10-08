@@ -4,6 +4,7 @@ import { requireRole } from "@/app/api/utils/auth";
 import { canonicalizeEmail } from "@/app/api/utils/email";
 
 const SUPPORTED_CREATED_ROLES = new Set(["captain", "referee", "venue_admin", "org_admin"]);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request) {
   try {
@@ -101,15 +102,34 @@ export async function DELETE(request) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("id");
     if (!userId) return Response.json({ error: "User ID is required" }, { status: 400 });
+    if (!UUID_RE.test(userId)) return Response.json({ error: "Invalid user ID" }, { status: 400 });
 
-    if (userId === actor.id.toString()) {
+    if (userId.toLowerCase() === actor.id.toString().toLowerCase()) {
       return Response.json({ error: "Cannot delete your own account" }, { status: 400 });
     }
 
-    await sql`DELETE FROM auth_users WHERE id = ${userId}`;
+    const deleted = await withTransaction(async (txSql) => {
+      const [target] = await txSql`
+        SELECT id FROM auth_users WHERE id = ${userId} FOR UPDATE
+      `;
+      if (!target) return false;
+
+      await txSql`UPDATE teams SET captain_user_id = NULL WHERE captain_user_id = ${userId}`;
+      await txSql`UPDATE matches SET referee_id = NULL WHERE referee_id = ${userId}`;
+      await txSql`DELETE FROM auth_users WHERE id = ${userId}`;
+      return true;
+    });
+
+    if (!deleted) return Response.json({ error: "User not found" }, { status: 404 });
 
     return Response.json({ success: true });
   } catch (err) {
+    if (err.code === "23503") {
+      return Response.json(
+        { error: "User is retained by historical records" },
+        { status: 409 },
+      );
+    }
     console.error("DELETE /api/super-admin/users error:", err);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }

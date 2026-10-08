@@ -4,6 +4,9 @@ import { encode } from "next-auth/jwt";
 const baseURL = "http://127.0.0.1:3100";
 const authSecret = "novachrono-playwright-only-secret-at-least-32-characters";
 const cookieName = "authjs.session-token";
+const organizationId = "92000000-0000-4000-8000-000000000001";
+const venueId = "93000000-0000-4000-8000-000000000001";
+const leagueId = "94000000-0000-4000-8000-000000000001";
 const authUserIds = {
   venue_admin: "91000000-0000-4000-8000-000000000001",
   captain: "91000000-0000-4000-8000-000000000002",
@@ -11,7 +14,7 @@ const authUserIds = {
 };
 
 const league = {
-  id: "league-1",
+  id: leagueId,
   name: "Tuesday Premier League",
   status: "registration",
   day_of_week: 2,
@@ -23,7 +26,7 @@ const league = {
   fields_count: 2,
   max_teams: 10,
   join_code: "A1B2C3D4",
-  venue_id: "venue-1",
+  venue_id: venueId,
   venue_name: "Nova Arena",
   win_points: 3,
   draw_points: 1,
@@ -44,8 +47,8 @@ async function authenticate(context, page, role) {
     name: `${role.replace("_", " ")} smoke user`,
     email: `${role}@example.test`,
     role,
-    venue_id: "venue-1",
-    org_id: "org-1",
+    venue_id: venueId,
+    organization_id: organizationId,
     field_number: role === "referee" ? 1 : null,
   };
   const value = await encode({
@@ -122,16 +125,19 @@ test("venue-admin dashboard renders a numeric league weekday", async ({ context,
 test("league detail renders numeric day and primary tabs", async ({ context, page }) => {
   const errors = watchRuntimeErrors(page);
   await authenticate(context, page, "venue_admin");
-  await mockJson(page, "**/api/leagues?leagueId=league-1", league);
-  await mockJson(page, "**/api/teams?leagueId=league-1", []);
-  await mockJson(page, "**/api/stats?leagueId=league-1", { standings: [], topScorers: [] });
-  await mockJson(page, "**/api/matches?leagueId=league-1", []);
-  await mockJson(page, "**/api/admin/referees?venueId=venue-1", { referees: [] });
+  await mockJson(page, `**/api/leagues?leagueId=${leagueId}`, league);
+  await mockJson(page, `**/api/stats?leagueId=${leagueId}`, { standings: [], topScorers: [] });
+  await mockJson(page, `**/api/matches?leagueId=${leagueId}`, []);
+  await mockJson(page, `**/api/admin/referees?venueId=${venueId}`, { referees: [] });
 
-  await page.goto("/admin/league/league-1");
+  await page.goto(`/admin/league/${leagueId}`);
   await expect(page.getByRole("heading", { name: league.name })).toBeVisible();
   await expect(page.getByText(/TUESDAY LEAGUE/)).toBeVisible();
   await expect(page.getByRole("button", { name: /fixtures/i })).toBeVisible();
+  await page.getByRole("button", { name: /teams/i }).click();
+  const teamRow = page.getByRole("row").filter({ hasText: "Nova United" });
+  await expect(teamRow).toContainText("Captain smoke user");
+  await expect(teamRow).toContainText(/2026/);
   expect(errors).toEqual([]);
 });
 

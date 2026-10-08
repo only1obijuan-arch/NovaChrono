@@ -2,6 +2,8 @@
 -- Business-rule changes for matches, fixtures, standings, and communications
 -- remain explicitly outside this migration.
 
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS venue_id UUID;
 
 DO $$

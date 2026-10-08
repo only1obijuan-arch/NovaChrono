@@ -23,7 +23,7 @@ import { isSessionCurrent } from "@/app/api/utils/session-security";
 
 const USER = "30000000-0000-4000-8000-000000000001";
 const VENUE = "20000000-0000-4000-8000-000000000001";
-let resetAvailable;
+let resetAvailable, existingVenue;
 
 function post(path, body) {
   return new Request(`https://example.test${path}`, {
@@ -36,6 +36,7 @@ function post(path, body) {
 beforeEach(() => {
   vi.clearAllMocks();
   resetAvailable = true;
+  existingVenue = VENUE;
   mocks.auth.mockResolvedValue({ user: { id: USER, role: "stale-role" } });
   mocks.hash.mockResolvedValue("new-hash");
   mocks.limit.mockResolvedValue({ allowed: true });
@@ -43,7 +44,7 @@ beforeEach(() => {
     let rows = [];
     if (sql.includes("SELECT * FROM auth_users WHERE id")) rows = [{ id: USER, role: "venue_admin", venue_id: VENUE }];
     else if (sql.includes("SELECT * FROM venues")) rows = [{ id: VENUE, name: "Arena", organization_id: "10000000-0000-4000-8000-000000000001" }];
-    else if (sql.includes("SELECT au.*")) rows = [{ id: USER, name: "Referee", email: "ref-field1@arena.novachrono.com" }];
+    else if (sql.includes("SELECT au.*")) rows = [{ id: "30000000-0000-4000-8000-000000000009", name: "Referee", email: "ref-field1@arena.novachrono.com", role: "referee", venue_id: existingVenue }];
     else throw new Error(`Unexpected SQL: ${sql}`);
     return { rows, rowCount: rows.length };
   });
@@ -78,6 +79,14 @@ describe("Gate 2 credential revocation", () => {
     expect(statements.some((sql) => sql.includes("INSERT INTO auth_accounts") && sql.includes("ON CONFLICT (\"userId\", provider)"))).toBe(true);
     expect(statements.some((sql) => sql.includes("sessions_valid_after = NOW()"))).toBe(true);
     expect(statements.some((sql) => sql.includes("DELETE FROM mobile_sessions"))).toBe(true);
+  });
+
+  it("refuses to rotate a colliding referee identity owned by another venue", async () => {
+    existingVenue = "20000000-0000-4000-8000-000000000099";
+    const response = await provisionReferee(post("/api/admin/referees", { venueId: VENUE, fieldNumber: 1 }));
+    expect(response.status).toBe(409);
+    expect(mocks.hash).not.toHaveBeenCalled();
+    expect(mocks.tx).not.toHaveBeenCalled();
   });
 
   it("permanently disables the legacy unrevocable bearer route", async () => {

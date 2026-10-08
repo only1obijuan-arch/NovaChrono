@@ -31,6 +31,9 @@ beforeEach(() => {
     else if (sql.includes("FROM auth_users") && sql.includes("role = 'captain'")) rows = captain ? [{ id: CAPTAIN }] : [];
     else if (sql.includes("FROM venues")) rows = missing ? [] : [{ id: params[0] }];
     else if (sql.includes("FROM players")) rows = missing ? [] : [{ id: PLAYER, team_id: TEAM }];
+    else if (sql.includes("SELECT l.venue_id, v.organization_id")) rows = missing ? [] : [{ venue_id: targetVenue, organization_id: targetOrganization }];
+    else if (sql.includes("FROM teams t") && sql.includes("LEFT JOIN auth_users au") && !sql.includes("JOIN leagues")) rows = [{ id: TEAM, league_id: LEAGUE, slot_id: id(9), name: "Team", status: "active", captain_user_id: CAPTAIN, captain_name: "Captain", created_at: "2030-01-01T00:00:00Z" }];
+    else if (sql.includes("FROM teams t") && sql.includes("t.league_id") && !sql.includes("JOIN leagues")) rows = [{ id: TEAM, league_id: LEAGUE, slot_id: id(9), name: "Team", status: "active" }];
     else if (sql.includes("FROM teams t") && sql.includes("JOIN leagues")) rows = missing ? [] : [{ id: TEAM, venue_id: targetVenue, organization_id: targetOrganization, captain_user_id: CAPTAIN }];
     else if (sql.includes("SELECT id FROM teams")) rows = duplicate ? [{ id: TEAM }] : [];
     else if (sql.includes("FROM leagues")) rows = missing ? [] : [{ id: LEAGUE, venue_id: targetVenue, status: leagueStatus, join_code: "ABC12345", name: "League" }];
@@ -88,6 +91,33 @@ describe("D2 team read object boundaries", () => {
   it("allows an organization admin only inside the live organization scope", async () => { user = { id: USER, role: "org_admin", organization_id: A }; expect((await read()).status).toBe(200); targetOrganization = B; expect((await read()).status).toBe(403); });
   it("respects a live tenant move despite stale session claims", async () => { user = { id: USER, role: "venue_admin", venue_id: B, organization_id: B }; expect((await read()).status).toBe(403); });
   it("denies deleted users even when an old session still exists", async () => { user = null; expect((await read()).status).toBe(401); });
+});
+
+describe("D2 league team projection", () => {
+  const read = () => readTeams(new Request(`https://example.test/api/teams?leagueId=${LEAGUE}`));
+  const body = async () => (await (await read()).json())[0];
+
+  it("returns captain and registration fields to the owning venue administrator", async () => {
+    expect(await body()).toMatchObject({ captain_user_id: CAPTAIN, captain_name: "Captain", created_at: "2030-01-01T00:00:00Z" });
+  });
+  it("returns the admin projection to an organization administrator in scope", async () => {
+    user = { id: USER, role: "org_admin", organization_id: A };
+    expect(await body()).toHaveProperty("captain_name", "Captain");
+  });
+  it("returns the admin projection to a platform administrator", async () => {
+    user = { id: USER, role: "super_admin" };
+    targetVenue = B;
+    expect(await body()).toHaveProperty("created_at");
+  });
+  it("keeps the five-field public projection for an administrator outside the tenant", async () => {
+    user = { id: USER, role: "venue_admin", venue_id: B };
+    expect(Object.keys(await body()).sort()).toEqual(["id", "league_id", "name", "slot_id", "status"]);
+  });
+  it("keeps the five-field public projection for anonymous callers", async () => {
+    mocks.auth.mockResolvedValue(null);
+    user = null;
+    expect(Object.keys(await body()).sort()).toEqual(["id", "league_id", "name", "slot_id", "status"]);
+  });
 });
 
 describe("D3 registration", () => {

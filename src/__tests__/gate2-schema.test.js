@@ -53,6 +53,14 @@ describe("Gate 2 forward migration contracts", () => {
 
   it("makes unresolved role enforcement an explicit fail-closed hold point", () => {
     expect(holdMigration).toContain("PRODUCTION ROLE ASSIGNMENT REQUIRED");
+    expect(authMigration).not.toContain("ALTER COLUMN role SET DEFAULT 'captain'");
+    expect(holdMigration).toContain("ALTER COLUMN role SET DEFAULT 'captain'");
     expect(holdMigration).toContain("ALTER COLUMN role SET NOT NULL");
+  });
+
+  it("bounds DDL lock acquisition inside each migration transaction", () => {
+    for (const migration of [authMigration, appMigration, holdMigration]) {
+      expect(migration).toContain("SET LOCAL lock_timeout = '5s'");
+    }
   });
 });

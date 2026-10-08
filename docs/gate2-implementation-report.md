@@ -175,13 +175,15 @@ ROLLBACK;
 Do not record or commit the query result. Before any production cutover:
 
 1. Re-run the accepted read-only preflight checks and table-size/index-definition checks.
-2. Obtain authoritative role assignments for both users and apply them through an approved, audited operator procedure.
-3. Confirm the NULL-role count is zero.
-4. Take the normal production backup/restore checkpoint.
-5. Apply `0003`, then `0004`, then `0005`, then `0006` through the migration runner. Any precondition failure stops the cutover for investigation.
-6. Verify migration ledger entries and the post-migration schema before deploying application code that depends on the new columns.
+2. Take the normal production backup/restore checkpoint.
+3. Apply `0003`, then `0004`, and verify their ledger entries and post-migration schema. Any precondition or lock-timeout failure stops the cutover for investigation.
+4. Deploy the remediated application, which no longer exposes the historical self-signup path.
+5. Run the reviewed catalogue-driven dependency scan for the two authoritatively confirmed disposable NULL-role test users.
+6. Delete only those two confirmed dummy users through the approved, audited operator procedure, then confirm the NULL-role count is zero.
+7. Apply the fail-closed `0005` role default/NOT NULL hold point, then `0006` index cleanup.
+8. Verify the final migration ledger and post-migration schema.
 
-Gate 2B implementation review may proceed now. Production migration or deployment may not proceed through `0005` while the two roles remain unresolved.
+Gate 2B implementation review may proceed now. This repository work does not authorize the production sequence, and production may not proceed through `0005` while either NULL-role user remains.
 
 ## M. Explicitly deferred Gate 3/4/5/6 work
 

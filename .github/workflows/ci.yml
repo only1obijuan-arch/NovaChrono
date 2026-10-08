@@ -14,6 +14,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: novachrono_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d novachrono_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -27,8 +42,39 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Wait for isolated PostgreSQL
+        env:
+          PGPASSWORD: postgres
+        run: pg_isready -h 127.0.0.1 -p 5432 -U postgres -d novachrono_ci
+
+      - name: Apply fresh migration chain
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/novachrono_ci
+          DATABASE_DRIVER: pg
+        run: npm run migrate
+
+      - name: Rehearse production-shaped migration chain
+        shell: bash
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres -c 'CREATE DATABASE novachrono_production_shape'
+          production_shape_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_production_shape'
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0001_initial.sql
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0002_add_unique_league_slots.sql
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f tests/fixtures/gate2-production-shape.sql
+          for migration in migrations/0003_*.sql migrations/0004_*.sql migrations/0005_*.sql migrations/0006_*.sql; do
+            psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f "$migration"
+          done
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "SELECT 1 FROM auth_users LIMIT 1"
+
       - name: Unit and contract tests
         run: npm test
+
+      - name: PostgreSQL route and concurrency tests
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/novachrono_ci
+        run: npm run test:integration
 
       - name: Lint
         run: npm run lint
@@ -37,14 +83,22 @@ jobs:
         run: npm run build
         env:
           AUTH_SECRET: ci-only-secret-not-used-outside-this-job
-          DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/novachrono_ci
+          DATABASE_DRIVER: pg
           NEXT_PUBLIC_APP_URL: http://127.0.0.1:3100
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Seed isolated browser database
+        env:
+          PGPASSWORD: postgres
+        run: psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d novachrono_ci -f tests/fixtures/gate2-playwright-users.sql
+
       - name: Browser smoke
         run: npm run test:e2e
+        env:
+          PLAYWRIGHT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/novachrono_ci
 
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high

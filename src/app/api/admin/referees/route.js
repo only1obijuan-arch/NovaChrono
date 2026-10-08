@@ -77,6 +77,13 @@ export async function POST(request) {
     `;
 
     if (existing) {
+      if (existing.role !== "referee" || existing.venue_id !== venueId) {
+        return Response.json(
+          { error: "Generated referee identity is already assigned elsewhere" },
+          { status: 409 },
+        );
+      }
+
       const newPassword = generatePassword(fieldNumber, venueSlug);
       const hashedPassword = await hash(newPassword);
 
@@ -151,26 +158,43 @@ export async function DELETE(request) {
     if (!UUID_RE.test(refereeId))
       return Response.json({ error: "Invalid id" }, { status: 400 });
 
-    if (admin.role !== "super_admin") {
-      const [referee] = await sql`
-        SELECT venue_id FROM auth_users WHERE id = ${refereeId} AND role = 'referee'
-      `;
-      if (!referee)
-        return Response.json({ error: "Referee not found" }, { status: 404 });
-      if (referee.venue_id !== admin.venue_id)
-        return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     await withTransaction(async (txSql) => {
-      await txSql`DELETE FROM auth_accounts WHERE "userId" = ${refereeId}`;
-      await txSql`DELETE FROM auth_users WHERE id = ${refereeId} AND role = 'referee'`;
+      const [referee] = await txSql`
+        SELECT id, venue_id
+        FROM auth_users
+        WHERE id = ${refereeId} AND role = 'referee'
+        FOR UPDATE
+      `;
+      if (!referee) throw routeError("REFEREE_NOT_FOUND");
+      if (admin.role !== "super_admin" && referee.venue_id !== admin.venue_id) {
+        throw routeError("REFEREE_FORBIDDEN");
+      }
+
+      await txSql`UPDATE matches SET referee_id = NULL WHERE referee_id = ${refereeId}`;
+      await txSql`DELETE FROM auth_users WHERE id = ${refereeId}`;
     });
 
     return Response.json({ success: true });
   } catch (error) {
+    if (error.message === "REFEREE_NOT_FOUND") {
+      return Response.json({ error: "Referee not found" }, { status: 404 });
+    }
+    if (error.message === "REFEREE_FORBIDDEN") {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (error.code === "23503") {
+      return Response.json(
+        { error: "Referee is retained by historical records" },
+        { status: 409 },
+      );
+    }
     console.error(error);
     return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
+}
+
+function routeError(message) {
+  return Object.assign(new Error(message), { expose: true });
 }
 
 function generatePassword(fieldNumber, venueSlug) {

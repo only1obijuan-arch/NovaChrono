@@ -1,4 +1,6 @@
 -- Gate 2B: remove only the confirmed equivalent production index, last.
+SET LOCAL lock_timeout = '5s';
+
 DO $$
 DECLARE
   kept_oid OID := to_regclass('public.idx_matches_league_id');
