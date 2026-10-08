@@ -1,6 +1,6 @@
 export const runtime = "nodejs";
 import { auth } from "@/auth";
-import { jwtVerify } from "jose";
+import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 import { NextResponse } from "next/server";
 
 const roleRoutes = {
@@ -26,23 +26,10 @@ const publicApiPrefixes = [
   "/api/cron",
 ];
 
-async function verifyBearer(req) {
-  const authHeader = req.headers.get("authorization") ?? "";
-  if (!authHeader.startsWith("Bearer ")) return null;
-  const token = authHeader.slice(7);
-  if (!token) return null;
-  try {
-    const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
-    const { payload } = await jwtVerify(token, secret);
-    return { user: payload };
-  } catch {
-    return null;
-  }
-}
-
 export default auth(async (req) => {
   const { pathname } = req.nextUrl;
-  const session = req.auth ?? (await verifyBearer(req));
+  const mobileUser = req.auth ? null : await verifyMobileToken(req);
+  const session = req.auth ?? (mobileUser ? { user: mobileUser } : null);
 
   // Protect non-public API routes
   if (pathname.startsWith("/api/")) {

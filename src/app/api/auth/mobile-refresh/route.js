@@ -30,8 +30,10 @@ export async function POST(request) {
       `SELECT u.id, u.role, u.venue_id, u.organization_id, u.email, u.name
        FROM mobile_sessions ms
        JOIN auth_users u ON u.id = ms.user_id
-       WHERE ms.jti = $1 AND ms.expires_at > NOW()`,
-      [payload.jti]
+       WHERE ms.jti = $1
+         AND ms.expires_at > NOW()
+         AND to_timestamp($2) >= u.sessions_valid_after`,
+      [payload.jti, payload.iat]
     );
 
     if (sessionResult.rowCount === 0) {

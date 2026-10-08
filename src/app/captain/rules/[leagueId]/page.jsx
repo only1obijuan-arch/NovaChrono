@@ -210,8 +210,8 @@ export default function LeagueRules({ params }) {
       icon: <Trophy size={16} />,
       category: "POINTS & STANDINGS",
       rules: [
-        `A win is worth ${league?.points_win ?? 3} points.`,
-        `A draw is worth ${league?.points_draw ?? 1} point per team.`,
+        `A win is worth ${league?.win_points ?? 3} points.`,
+        `A draw is worth ${league?.draw_points ?? 1} point per team.`,
         "A loss earns 0 points.",
         `A forfeit results in a ${league?.forfeit_score_home ?? 3}-${
           league?.forfeit_score_away ?? 0
@@ -287,7 +287,7 @@ export default function LeagueRules({ params }) {
                   <Clock size={10} /> {league.match_format} FORMAT
                 </span>
                 <span className="lr-format-badge">
-                  <Trophy size={10} /> {league.points_win ?? 3} PTS WIN
+                  <Trophy size={10} /> {league.win_points ?? 3} PTS WIN
                 </span>
                 <span className="lr-format-badge">
                   <Shield size={10} /> {league.fields_count} FIELD

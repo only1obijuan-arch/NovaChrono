@@ -3,6 +3,8 @@ import { requireRole } from "@/app/api/utils/auth";
 import { hash } from "argon2";
 import { randomBytes } from "crypto";
 import { z } from "zod";
+import { canonicalizeEmail } from "@/app/api/utils/email";
+import { invalidateUserSessions } from "@/app/api/utils/session-security";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -64,7 +66,7 @@ export async function POST(request) {
       return Response.json({ error: "Venue not found" }, { status: 404 });
 
     const venueSlug = venue.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const email = `ref-field${fieldNumber}@${venueSlug}.novachrono.com`;
+    const email = canonicalizeEmail(`ref-field${fieldNumber}@${venueSlug}.novachrono.com`);
     const refName = name?.trim() || `Referee — Field ${fieldNumber}`;
 
     const [existing] = await sql`
@@ -78,10 +80,15 @@ export async function POST(request) {
       const newPassword = generatePassword(fieldNumber, venueSlug);
       const hashedPassword = await hash(newPassword);
 
-      await sql`
-        UPDATE auth_accounts SET password = ${hashedPassword}
-        WHERE "userId" = ${existing.id} AND provider = 'credentials'
-      `;
+      await withTransaction(async (txSql) => {
+        await txSql`
+          INSERT INTO auth_accounts ("userId", type, provider, "providerAccountId", password)
+          VALUES (${existing.id}, 'credentials', 'credentials', ${email}, ${hashedPassword})
+          ON CONFLICT ("userId", provider)
+          DO UPDATE SET password = EXCLUDED.password
+        `;
+        await invalidateUserSessions(txSql, existing.id);
+      });
 
       return Response.json({
         referee: {
@@ -99,16 +106,18 @@ export async function POST(request) {
     const password = generatePassword(fieldNumber, venueSlug);
     const hashedPassword = await hash(password);
 
-    const [newUser] = await sql`
-      INSERT INTO auth_users (name, email, role, venue_id, field_number, "emailVerified")
-      VALUES (${refName}, ${email}, 'referee', ${venueId}, ${fieldNumber}, NOW())
-      RETURNING *
-    `;
-
-    await sql`
-      INSERT INTO auth_accounts ("userId", type, provider, "providerAccountId", password)
-      VALUES (${newUser.id}, 'credentials', 'credentials', ${email}, ${hashedPassword})
-    `;
+    const newUser = await withTransaction(async (txSql) => {
+      const [created] = await txSql`
+        INSERT INTO auth_users (name, email, role, venue_id, organization_id, field_number, "emailVerified")
+        VALUES (${refName}, ${email}, 'referee', ${venueId}, ${venue.organization_id}, ${fieldNumber}, NOW())
+        RETURNING *
+      `;
+      await txSql`
+        INSERT INTO auth_accounts ("userId", type, provider, "providerAccountId", password)
+        VALUES (${created.id}, 'credentials', 'credentials', ${email}, ${hashedPassword})
+      `;
+      return created;
+    });
 
     return Response.json({
       referee: {

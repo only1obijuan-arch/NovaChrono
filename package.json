@@ -23,6 +23,7 @@
     "lucide-react": "^1.7.0",
     "next": "16.3.8",
     "next-auth": "5.0.0-beta.32",
+    "pg": "^8.23.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "6.32.1",

@@ -117,8 +117,8 @@ export function OverviewTab({ league, teams, matches }) {
             ["MATCH FORMAT", league.match_format],
             ["DURATION", `${league.match_duration_minutes} MINS`],
             ["FIELDS", league.fields_count],
-            ["WIN POINTS", league.points_win],
-            ["DRAW POINTS", league.points_draw],
+            ["WIN POINTS", league.win_points],
+            ["DRAW POINTS", league.draw_points],
             ["FORFEIT SCORE", `${league.forfeit_score_home}-${league.forfeit_score_away}`],
           ].map(([label, value]) => (
             <div key={label} className="ld-rule">

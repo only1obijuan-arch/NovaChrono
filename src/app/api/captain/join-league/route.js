@@ -1,12 +1,10 @@
 import { isValidJoinCode } from "@/utils/join-code";
-import { auth } from "@/auth";
-import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 import sql from "@/app/api/utils/sql";
+import { requireRole } from "@/app/api/utils/auth";
 
 export async function POST(request) {
-  const mobileUser = await verifyMobileToken(request);
-  const session = mobileUser ? { user: mobileUser } : await auth();
-  if (!session?.user?.id || session.user.role !== "captain") {
+  const user = await requireRole(request, "captain");
+  if (!user) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -30,7 +28,7 @@ export async function POST(request) {
     SELECT t.id FROM teams t
     JOIN league_slots ls ON t.slot_id = ls.id
     WHERE ls.league_id = ${league.id}
-    AND t.captain_user_id = ${session.user.id}
+    AND t.captain_user_id = ${user.id}
     AND t.status = 'active'
   `;
   if (existing) {
@@ -50,7 +48,7 @@ export async function POST(request) {
 
   const [team] = await sql`
     INSERT INTO teams (league_id, slot_id, name, captain_user_id)
-    VALUES (${league.id}, ${availableSlot.id}, ${teamName}, ${session.user.id})
+    VALUES (${league.id}, ${availableSlot.id}, ${teamName}, ${user.id})
     RETURNING *
   `;
 

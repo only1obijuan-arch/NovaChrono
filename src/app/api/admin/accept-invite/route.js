@@ -1,8 +1,9 @@
 import { escapeHtml } from "@/utils/escape-html";
-import sql from "@/app/api/utils/sql";
+import { withTransaction } from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { hash } from "argon2";
 import { createHash } from "crypto";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 
 export async function POST(request) {
   try {
@@ -21,64 +22,50 @@ export async function POST(request) {
       );
     }
 
-    // Validate token
     const tokenHash = createHash("sha256").update(token).digest("hex");
-    const [invite] = await sql`
-      SELECT it.*, o.name as organization_name
-      FROM invite_tokens it
-      LEFT JOIN organizations o ON o.id = it.organization_id
-      WHERE it.token = ${tokenHash}
-      AND it.used = FALSE
-      AND it.expires_at > NOW()
-    `;
-
-    if (!invite) {
-      return Response.json(
-        {
-          error: "Invalid or expired invite link. Please request a new invite.",
-        },
-        { status: 400 },
-      );
-    }
-
-    // Check email not already taken
-    const [existing] = await sql`
-      SELECT id FROM auth_users WHERE LOWER(email) = LOWER(${invite.email})
-    `;
-    if (existing) {
-      return Response.json(
-        { error: "An account with this email already exists. Please sign in." },
-        { status: 400 },
-      );
-    }
-
     const hashedPassword = await hash(password);
+    const result = await withTransaction(async (txSql) => {
+      // The conditional UPDATE is the claim. Concurrent consumers cannot both
+      // receive a row, and any later failure rolls the claim back.
+      const [invite] = await txSql`
+        UPDATE invite_tokens
+        SET used = TRUE
+        WHERE token = ${tokenHash}
+          AND used = FALSE
+          AND expires_at > NOW()
+        RETURNING *
+      `;
+      if (!invite) {
+        const error = new Error("Invalid or expired invite link. Please request a new invite.");
+        error.code = "INVALID_INVITE";
+        throw error;
+      }
 
-    // Create user — include venue_id if present in invite token
-    const [newUser] = await sql`
-      INSERT INTO auth_users (name, email, role, organization_id, venue_id, "emailVerified")
-      VALUES (
-        ${name},
-        ${invite.email},
-        ${invite.role},
-        ${invite.organization_id},
-        ${invite.venue_id || null},
-        NOW()
-      )
-      RETURNING id, name, email, role
-    `;
+      const email = canonicalizeEmail(invite.email);
+      const [existing] = await txSql`
+        SELECT id FROM auth_users WHERE lower(email) = ${email}
+      `;
+      if (existing) {
+        const error = new Error("An account with this email already exists. Please sign in.");
+        error.code = "DUPLICATE_EMAIL";
+        throw error;
+      }
 
-    await sql`
-      INSERT INTO auth_accounts (
-        "userId", provider, type, "providerAccountId", password
-      )
-      VALUES (
-        ${newUser.id}, 'credentials', 'credentials', ${invite.email}, ${hashedPassword}
-      )
-    `;
-
-    // Mark token as used
-    await sql`UPDATE invite_tokens SET used = TRUE WHERE token = ${tokenHash}`;
+      const [newUser] = await txSql`
+        INSERT INTO auth_users (name, email, role, organization_id, venue_id, "emailVerified")
+        VALUES (${name.trim()}, ${email}, ${invite.role}, ${invite.organization_id}, ${invite.venue_id || null}, NOW())
+        RETURNING id, name, email, role
+      `;
+      await txSql`
+        INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)
+        VALUES (${newUser.id}, 'credentials', 'credentials', ${email}, ${hashedPassword})
+      `;
+      const [organization] = await txSql`
+        SELECT name FROM organizations WHERE id = ${invite.organization_id}
+      `;
+      return { invite: { ...invite, email, organization_name: organization?.name }, newUser };
+    });
+    const { invite } = result;
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -125,7 +112,10 @@ export async function POST(request) {
       message: "Account created successfully!",
     });
   } catch (err) {
+    if (["INVALID_INVITE", "DUPLICATE_EMAIL"].includes(err.code)) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     console.error("Accept invite error:", err);
-    return Response.json({ error: err.message }, { status: 500 });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

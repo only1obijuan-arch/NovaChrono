@@ -1,22 +1,17 @@
 import { escapeHtml } from "@/utils/escape-html";
-import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { randomBytes, createHash } from "crypto";
-
-async function requireSuperAdmin() {
-  const session = await auth();
-  if (!session?.user?.id) return null;
-  const rows = await sql`SELECT role FROM auth_users WHERE id = ${session.user.id}`;
-  return rows[0]?.role === "super_admin" ? session : null;
-}
+import { requireRole } from "@/app/api/utils/auth";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 
 export async function POST(request) {
   try {
-    const session = await requireSuperAdmin();
-    if (!session) return Response.json({ error: "Unauthorized" }, { status: 403 });
+    const user = await requireRole(request, "super_admin");
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 403 });
 
-    const { email, venueId } = await request.json();
+    const { email: submittedEmail, venueId } = await request.json();
+    const email = canonicalizeEmail(submittedEmail);
     if (!email || !venueId) {
       return Response.json({ error: "Email and venue are required" }, { status: 400 });
     }
@@ -30,13 +25,13 @@ export async function POST(request) {
     if (!venue) return Response.json({ error: "Venue not found" }, { status: 404 });
 
     const [existing] = await sql`
-      SELECT id FROM auth_users WHERE LOWER(email) = LOWER(${email})
+      SELECT id FROM auth_users WHERE lower(email) = ${email}
     `;
     if (existing) return Response.json({ error: "An account with this email already exists." }, { status: 400 });
 
     const [existingInvite] = await sql`
       SELECT id FROM invite_tokens
-      WHERE LOWER(email) = LOWER(${email})
+      WHERE lower(email) = ${email}
       AND used = FALSE AND expires_at > NOW()
     `;
     if (existingInvite) return Response.json({ error: "An active invite already exists for this email." }, { status: 400 });
@@ -47,7 +42,7 @@ export async function POST(request) {
 
     await sql`
       INSERT INTO invite_tokens (token, email, role, organization_id, venue_id, invited_by, expires_at)
-      VALUES (${tokenHash}, ${email.toLowerCase()}, 'venue_admin', ${venue.organization_id}, ${venueId}, ${session.user.id}, ${expiresAt})
+      VALUES (${tokenHash}, ${email}, 'venue_admin', ${venue.organization_id}, ${venueId}, ${user.id}, ${expiresAt})
     `;
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";

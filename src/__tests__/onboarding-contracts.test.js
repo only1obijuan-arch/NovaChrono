@@ -42,7 +42,10 @@ beforeEach(() => {
   });
   mocks.tx.mockImplementation(async (q, p) => {
     let rows = [];
-    if (q.includes("FROM league_slots")) rows = full ? [] : [{ id: B }];
+    if (q.includes("UPDATE invite_tokens")) rows = invite ? [{ token: "hashed", email: "invitee@example.test", role: "venue_admin", venue_id: A, organization_id: B }] : [];
+    else if (q.includes("SELECT id FROM auth_users")) rows = [];
+    else if (q.includes("SELECT name FROM organizations")) rows = [{ name: "Org" }];
+    else if (q.includes("FROM league_slots")) rows = full ? [] : [{ id: B }];
     else if (q.includes("INSERT INTO auth_users")) rows = [{ id: A, email: "captain@example.test" }];
     else if (q.includes("INSERT INTO leagues")) rows = [{ id: A, day_of_week: p[2], join_code: p[10] }];
     return { rows, rowCount: rows.length };
@@ -63,7 +66,14 @@ describe("D7 committed-registration mail boundary", () => {
 describe("D8 narrow anonymous middleware and authoritative handlers", () => {
   it("allows logged-out captain signup through the real middleware", async () => { expect((await through(request("/api/account/signup", "POST", signupBody("ABC12345")), signup)).status).toBe(200); });
   it("allows valid invitation inspection", async () => { expect((await through(request("/api/admin/invite?token=valid"), inspectInvite)).status).toBe(200); expect(mocks.query.mock.calls[0][0]).toContain("it.expires_at > NOW()"); expect(mocks.query.mock.calls[0][0]).toContain("it.used = FALSE"); });
-  it("allows valid token acceptance", async () => { expect((await through(request("/api/admin/accept-invite", "POST", { token: "valid", name: "Admin", password: "password123" }), acceptInvite)).status).toBe(200); });
+  it("claims a valid invitation atomically before creating the identity", async () => {
+    expect((await through(request("/api/admin/accept-invite", "POST", { token: "valid", name: "Admin", password: "password123" }), acceptInvite)).status).toBe(200);
+    const claimIndex = mocks.tx.mock.calls.findIndex(([q]) => q.includes("UPDATE invite_tokens"));
+    const userIndex = mocks.tx.mock.calls.findIndex(([q]) => q.includes("INSERT INTO auth_users"));
+    expect(claimIndex).toBeGreaterThan(-1); expect(claimIndex).toBeLessThan(userIndex);
+    expect(mocks.tx.mock.calls[claimIndex][0]).toContain("used = FALSE");
+    expect(mocks.tx.mock.calls[claimIndex][0]).toContain("expires_at > NOW()");
+  });
   it.each(["invalid", "expired", "used"])("handler still rejects %s invite", async token => { invite = false; expect((await through(request("/api/admin/invite?token=" + token), inspectInvite)).status).toBe(400); expect((await through(request("/api/admin/accept-invite", "POST", { token, name: "Admin", password: "password123" }), acceptInvite)).status).toBe(400); expect(mocks.send).not.toHaveBeenCalled(); });
   it("keeps invitation creation protected", async () => { expect((await through(request("/api/admin/invite", "POST", {}), createInvite)).status).toBe(401); expect(mocks.query).not.toHaveBeenCalled(); });
   it.each([["/api/account/signup", "GET"], ["/api/admin/accept-invite", "GET"], ["/api/admin/profile", "GET"], ["/api/admin/invite/anything", "GET"], ["/api/leagues", "GET"], ["/api/leagues?leagueId=" + A, "POST"]])("does not exempt %s %s", async (path, method) => { expect((await middleware(request(path, method))).status).toBe(401); });

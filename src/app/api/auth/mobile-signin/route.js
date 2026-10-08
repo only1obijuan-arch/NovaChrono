@@ -4,6 +4,7 @@ import { verify } from "argon2";
 import { SignJWT } from "jose";
 import { randomUUID } from "crypto";
 import { z } from "zod";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 
 const signinSchema = z.object({
   email: z.string().email().max(254),
@@ -23,12 +24,13 @@ export async function POST(request) {
     if (!parsed.success) {
       return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
-    const { email, password } = parsed.data;
+    const { password } = parsed.data;
+    const email = canonicalizeEmail(parsed.data.email);
 
     const ip = request.headers.get("x-forwarded-for") ?? "unknown";
     const [{ allowed: ipAllowed }, { allowed: emailAllowed }] = await Promise.all([
       rateLimit(`mobile-signin:ip:${ip}`, { max: 20, windowMinutes: 15 }),
-      rateLimit(`mobile-signin:email:${email.toLowerCase().trim()}`, { max: 5, windowMinutes: 15 }),
+      rateLimit(`mobile-signin:email:${email}`, { max: 5, windowMinutes: 15 }),
     ]);
     if (!ipAllowed || !emailAllowed) {
       return Response.json({ error: "Too many requests" }, { status: 429 });
@@ -37,7 +39,7 @@ export async function POST(request) {
     // Fetch user + credentials account
     const userResult = await pool.query(
       "SELECT * FROM auth_users WHERE email = $1",
-      [email.toLowerCase().trim()]
+      [email]
     );
     if (userResult.rowCount === 0) {
       return Response.json({ error: "Invalid email or password" }, { status: 401 });

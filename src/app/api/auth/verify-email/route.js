@@ -1,5 +1,6 @@
 import sql from "@/app/api/utils/sql";
 import crypto from "crypto";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 
 export async function GET(request) {
   try {
@@ -22,7 +23,8 @@ export async function GET(request) {
       return Response.redirect(new URL("/account/verify?error=invalid_token", request.url));
     }
 
-    const { identifier: email, expires } = rows[0];
+    const { expires } = rows[0];
+    const email = canonicalizeEmail(rows[0].identifier);
 
     if (new Date(expires) < new Date()) {
       await sql`DELETE FROM auth_verification_token WHERE token = ${tokenHash}`;
@@ -32,7 +34,7 @@ export async function GET(request) {
     await sql`
       UPDATE auth_users
       SET "emailVerified" = NOW()
-      WHERE LOWER(email) = LOWER(${email})
+      WHERE lower(email) = ${email}
       AND "emailVerified" IS NULL
     `;
 

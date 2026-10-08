@@ -1,8 +1,10 @@
 import { reserveLoginAttempt, clearLoginAttempts } from "@/app/api/utils/login-limit";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { hash, verify } from "argon2";
+import { verify } from "argon2";
 import { pool } from "@/app/api/utils/db";
+import { canonicalizeAccountIdentifier, canonicalizeEmail } from "@/app/api/utils/email";
+import { isSessionCurrent } from "@/app/api/utils/session-security";
 
 // NeonDB Adapter
 function Adapter(client) {
@@ -13,7 +15,7 @@ function Adapter(client) {
         `INSERT INTO auth_users (name, email, "emailVerified", image)
          VALUES ($1, $2, $3, $4)
          RETURNING id, name, email, "emailVerified", image`,
-        [name, email, emailVerified, image]
+        [name, canonicalizeEmail(email), emailVerified, image]
       );
       return result.rows[0];
     },
@@ -30,8 +32,8 @@ function Adapter(client) {
     },
     async getUserByEmail(email) {
       const result = await client.query(
-        "SELECT * FROM auth_users WHERE email = $1",
-        [email]
+        "SELECT * FROM auth_users WHERE lower(email) = $1",
+        [canonicalizeEmail(email)]
       );
       if (result.rowCount === 0) return null;
       const userData = result.rows[0];
@@ -46,7 +48,7 @@ function Adapter(client) {
         `SELECT u.* FROM auth_users u
          JOIN auth_accounts a ON u.id = a."userId"
          WHERE a.provider = $1 AND a."providerAccountId" = $2`,
-        [provider, providerAccountId]
+        [provider, canonicalizeAccountIdentifier(provider, providerAccountId)]
       );
       return result.rowCount !== 0 ? result.rows[0] : null;
     },
@@ -62,7 +64,7 @@ function Adapter(client) {
         `UPDATE auth_users SET name=$2, email=$3, "emailVerified"=$4, image=$5
          WHERE id=$1
          RETURNING id, name, email, "emailVerified", image`,
-        [id, name, email, emailVerified, image]
+        [id, name, canonicalizeEmail(email), emailVerified, image]
       );
       return result.rows[0];
     },
@@ -78,7 +80,7 @@ function Adapter(client) {
           account.userId,
           account.provider,
           account.type,
-          account.providerAccountId,
+          canonicalizeAccountIdentifier(account.provider, account.providerAccountId),
           account.access_token,
           account.expires_at,
           account.refresh_token,
@@ -138,7 +140,7 @@ function Adapter(client) {
     async unlinkAccount({ provider, providerAccountId }) {
       await client.query(
         'DELETE FROM auth_accounts WHERE "providerAccountId"=$1 AND provider=$2',
-        [providerAccountId, provider]
+        [canonicalizeAccountIdentifier(provider, providerAccountId), provider]
       );
     },
     async deleteUser(userId) {
@@ -175,39 +177,17 @@ const nextAuth = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
-        name: { label: "Name", type: "text", required: false },
-        isSignup: { label: "Is Signup", type: "text", required: false },
       },
       async authorize(credentials) {
-        const { email, password, isSignup } = credentials;
+        const { email, password } = credentials;
 
         if (!email || !password) return null;
         if (typeof email !== "string" || typeof password !== "string") return null;
 
-        if (!(await reserveLoginAttempt(email))) return null;
+        const canonicalEmail = canonicalizeEmail(email);
+        if (!(await reserveLoginAttempt(canonicalEmail))) return null;
 
-        const user = await Adapter(pool).getUserByEmail(email);
-
-        // Signup flow
-        if (isSignup === "true") {
-          if (user) return null; // already exists
-          const newUser = await Adapter(pool).createUser({
-            email,
-            emailVerified: null,
-            name: typeof credentials.name === "string" && credentials.name.trim()
-              ? credentials.name.trim()
-              : undefined,
-          });
-          await Adapter(pool).linkAccount({
-            extraData: { password: await hash(password) },
-            type: "credentials",
-            userId: newUser.id,
-            providerAccountId: String(newUser.id),
-            provider: "credentials",
-          });
-          await clearLoginAttempts(email);
-          return newUser;
-        }
+        const user = await Adapter(pool).getUserByEmail(canonicalEmail);
 
         // Signin flow
         if (!user) return null;
@@ -226,7 +206,7 @@ const nextAuth = NextAuth({
         return null;
         }
 
-        await clearLoginAttempts(email);
+        await clearLoginAttempts(canonicalEmail);
         return user;
       },
     }),
@@ -234,25 +214,41 @@ const nextAuth = NextAuth({
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        const result = await pool.query(
-          "SELECT role, venue_id, organization_id FROM auth_users WHERE id = $1",
-          [user.id]
-        );
-        if (result.rows[0]) {
-          token.id = user.id;
-          token.role = result.rows[0].role;
-          token.venue_id = result.rows[0].venue_id;
-          token.organization_id = result.rows[0].organization_id;
-        }
+        token.id = user.id;
+        token.session_issued_at = Date.now();
       }
+
+      if (!token.id) return { ...token, revoked: true };
+
+      const result = await pool.query(
+        `SELECT id, email, name, role, venue_id, organization_id, field_number, sessions_valid_after
+         FROM auth_users WHERE id = $1`,
+        [token.id]
+      );
+      const liveUser = result.rows[0];
+      const issuedAtMs = token.session_issued_at ?? Number(token.iat) * 1000;
+      if (!liveUser || !isSessionCurrent(issuedAtMs, liveUser.sessions_valid_after)) {
+        return { ...token, revoked: true };
+      }
+
+      token.revoked = false;
+      token.email = liveUser.email;
+      token.name = liveUser.name;
+      token.role = liveUser.role;
+      token.venue_id = liveUser.venue_id;
+      token.organization_id = liveUser.organization_id;
+      token.field_number = liveUser.field_number;
       return token;
     },
     async session({ session, token }) {
-      if (token && session.user) {
+      if (token?.revoked) {
+        session.user = null;
+      } else if (token && session.user) {
         session.user.id = token.id;
         session.user.role = token.role;
         session.user.venue_id = token.venue_id;
         session.user.organization_id = token.organization_id;
+        session.user.field_number = token.field_number;
       }
       return session;
     },

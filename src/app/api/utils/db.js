@@ -1,19 +1,24 @@
-import { Pool } from "@neondatabase/serverless";
+import { Pool as NeonPool } from "@neondatabase/serverless";
+import pg from "pg";
 
-// Singleton pool — one WebSocket connection pool for the entire process.
+const { Pool: NodePostgresPool } = pg;
+
+// Singleton pool for the entire process. Neon remains the production default;
+// the standard PostgreSQL driver is opt-in for local migration/E2E databases.
 //
 // The `globalThis` guard prevents Next.js HMR from creating a fresh Pool
 // on every hot-reload in development. In production the module is loaded
 // once so the guard is a no-op, but it doesn't hurt.
 const globalForDb = globalThis;
 
-if (!globalForDb._neonPool) {
-  globalForDb._neonPool = new Pool({
+if (!globalForDb._novaPool) {
+  const Pool = process.env.DATABASE_DRIVER === "pg" ? NodePostgresPool : NeonPool;
+  globalForDb._novaPool = new Pool({
     connectionString: process.env.DATABASE_URL,
   });
 }
 
-export const pool = globalForDb._neonPool;
+export const pool = globalForDb._novaPool;
 
 // Tagged-template sql helper — same call signature as the neon() HTTP client
 // so all existing  sql`SELECT ...`  queries work without changes.

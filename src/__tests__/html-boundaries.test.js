@@ -21,6 +21,7 @@ beforeEach(() => {
   mocks.query.mockImplementation(async q => {
     let rows = [];
     if (q.includes("FROM availability_responses")) rows = [{ team_name: payload, home_team_name: payload, away_team_name: payload, match_date: "2030-01-01", time_slot: payload, venue_id: "venue", match_id: "match", response: payload, responded_at: responded ? "2030-01-01" : null }];
+    else if (q.includes("SELECT * FROM auth_users WHERE id")) rows = [{ id: "admin", role: "venue_admin", venue_id: "venue" }];
     else if (q.includes("SELECT email, name FROM auth_users")) rows = [{ email: "admin@example.test" }];
     else if (q.includes("FROM leagues")) rows = [{ id: "league", name: payload, venue_id: "venue" }];
     else if (q.includes("SELECT DISTINCT au")) rows = [{ id: "captain", email: "captain@example.test" }];

@@ -7,7 +7,7 @@ vi.mock("@/app/api/utils/send-email", () => ({ sendEmail: mocks.send }));
 vi.mock("@/app/api/utils/send-push", () => ({ sendPush: mocks.push }));
 vi.mock("@/app/api/utils/rate-limit", () => ({ rateLimit: mocks.limit }));
 import { PUT as profile } from "@/app/api/admin/profile/route";
-import { POST as teams } from "@/app/api/teams/route";
+import { GET as readTeams, POST as teams } from "@/app/api/teams/route";
 import { POST as addPlayer, DELETE as deletePlayer } from "@/app/api/players/route";
 import { POST as weather } from "@/app/api/weather/alert/route";
 import { POST as reminder } from "@/app/api/send-match-reminder/route";
@@ -16,12 +16,12 @@ import { SignJWT } from "jose";
 
 const id = n => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
 const A = id(1), B = id(2), USER = id(3), LEAGUE = id(4), TEAM = id(5), PLAYER = id(6), MATCH = id(7), CAPTAIN = id(8);
-let user, targetVenue, missing, captain, duplicate, leagueStatus;
+let user, targetVenue, targetOrganization, missing, captain, duplicate, leagueStatus;
 const request = (body, method = "POST", path = "/api/test") => new Request("https://example.test" + path, { method, ...(method === "DELETE" ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
 const writes = () => mocks.query.mock.calls.filter(([sql]) => /^\s*(INSERT|UPDATE|DELETE)/i.test(sql));
 beforeEach(() => {
   vi.clearAllMocks();
-  user = { id: USER, role: "venue_admin", venue_id: A }; targetVenue = A; missing = false; captain = true; duplicate = false; leagueStatus = "registration";
+  user = { id: USER, role: "venue_admin", venue_id: A, organization_id: A }; targetVenue = A; targetOrganization = A; missing = false; captain = true; duplicate = false; leagueStatus = "registration";
   mocks.auth.mockImplementation(async () => ({ user: { id: USER, role: "super_admin", venue_id: B } })); // deliberately stale claims
   mocks.limit.mockResolvedValue({ allowed: true }); mocks.send.mockResolvedValue({}); mocks.push.mockResolvedValue({});
   mocks.query.mockImplementation(async (sql, params) => {
@@ -31,7 +31,7 @@ beforeEach(() => {
     else if (sql.includes("FROM auth_users") && sql.includes("role = 'captain'")) rows = captain ? [{ id: CAPTAIN }] : [];
     else if (sql.includes("FROM venues")) rows = missing ? [] : [{ id: params[0] }];
     else if (sql.includes("FROM players")) rows = missing ? [] : [{ id: PLAYER, team_id: TEAM }];
-    else if (sql.includes("FROM teams t JOIN leagues")) rows = missing ? [] : [{ id: TEAM, venue_id: targetVenue, captain_user_id: CAPTAIN }];
+    else if (sql.includes("FROM teams t") && sql.includes("JOIN leagues")) rows = missing ? [] : [{ id: TEAM, venue_id: targetVenue, organization_id: targetOrganization, captain_user_id: CAPTAIN }];
     else if (sql.includes("SELECT id FROM teams")) rows = duplicate ? [{ id: TEAM }] : [];
     else if (sql.includes("FROM leagues")) rows = missing ? [] : [{ id: LEAGUE, venue_id: targetVenue, status: leagueStatus, join_code: "ABC12345", name: "League" }];
     else if (sql.includes("FROM matches m")) rows = missing ? [] : [{ id: MATCH, venue_id: targetVenue, match_date: "2030-01-01", home_team_id: TEAM, home_captain_email: "captain@example.test", home_captain_id: CAPTAIN, home_team_name: "Team", time_slot: "18:30" }];
@@ -80,6 +80,15 @@ it.each([
 it("D2 rejects malformed player deletion ID", async () => { expect((await deletePlayer(request(null, "DELETE", "/api/players?playerId=bad"))).status).toBe(400); expect(writes()).toEqual([]); });
 it("D2 captain can maintain owned roster across venue context", async () => { user = { id: CAPTAIN, role: "captain", venue_id: null }; expect((await addPlayer(request({ teamId: TEAM, name: "Player" }))).status).toBe(200); });
 it("D2 captain cannot maintain another captain's roster", async () => { user.role = "captain"; expect((await addPlayer(request({ teamId: TEAM, name: "Player" }))).status).toBe(403); expect(writes()).toEqual([]); });
+
+describe("D2 team read object boundaries", () => {
+  const read = () => readTeams(new Request(`https://example.test/api/teams?teamId=${TEAM}`));
+  it("allows a captain to read the owned private team", async () => { user = { id: CAPTAIN, role: "captain" }; expect((await read()).status).toBe(200); });
+  it("denies a captain changing the team ID to another captain's team", async () => { user = { id: USER, role: "captain" }; expect((await read()).status).toBe(403); });
+  it("allows an organization admin only inside the live organization scope", async () => { user = { id: USER, role: "org_admin", organization_id: A }; expect((await read()).status).toBe(200); targetOrganization = B; expect((await read()).status).toBe(403); });
+  it("respects a live tenant move despite stale session claims", async () => { user = { id: USER, role: "venue_admin", venue_id: B, organization_id: B }; expect((await read()).status).toBe(403); });
+  it("denies deleted users even when an old session still exists", async () => { user = null; expect((await read()).status).toBe(401); });
+});
 
 describe("D3 registration", () => {
   const body = () => ({ leagueId: LEAGUE, captainUserId: CAPTAIN, teamName: "Team", joinCode: "abc12345" });

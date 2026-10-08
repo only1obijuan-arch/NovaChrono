@@ -1,10 +1,10 @@
 import sql from "@/app/api/utils/sql";
-import { requireRole } from "@/app/api/utils/auth";
+import { requireRole, resolveCurrentUser } from "@/app/api/utils/auth";
 import { canAdministerVenue, canManageTeam, UUID_RE } from "@/app/api/utils/ownership";
 
 export async function POST(request) {
   try {
-    const user = await requireRole(request, "captain", "venue_admin", "super_admin");
+    const user = await requireRole(request, "captain", "venue_admin", "org_admin", "super_admin");
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const { action, ...data } = await request.json();
@@ -35,7 +35,7 @@ export async function POST(request) {
     }
 
     if (action === "ADD_TEAM") {
-      if (!["venue_admin", "super_admin"].includes(user.role)) {
+      if (!["venue_admin", "org_admin", "super_admin"].includes(user.role)) {
         return Response.json(
           { error: "Admin access required" },
           { status: 403 },
@@ -43,9 +43,13 @@ export async function POST(request) {
       }
       const { leagueId, teamName, captainUserId } = data;
       if (!UUID_RE.test(leagueId)) return Response.json({ error: "Invalid league ID" }, { status: 400 });
-      const [league] = await sql`SELECT venue_id FROM leagues WHERE id = ${leagueId}`;
+      const [league] = await sql`
+        SELECT l.venue_id, v.organization_id
+        FROM leagues l JOIN venues v ON v.id = l.venue_id
+        WHERE l.id = ${leagueId}
+      `;
       if (!league) return Response.json({ error: "League not found" }, { status: 404 });
-      if (!canAdministerVenue(user, league.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
+      if (!canAdministerVenue(user, league.venue_id, league.organization_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
       const [availableSlot] = await sql`
         SELECT ls.id
         FROM league_slots ls
@@ -70,7 +74,9 @@ export async function POST(request) {
       const { teamId, teamName } = data;
       if (!UUID_RE.test(teamId)) return Response.json({ error: "Invalid team ID" }, { status: 400 });
       const [existingTeam] = await sql`
-        SELECT t.*, l.venue_id FROM teams t JOIN leagues l ON t.league_id = l.id WHERE t.id = ${teamId}
+        SELECT t.*, l.venue_id, v.organization_id
+        FROM teams t JOIN leagues l ON t.league_id = l.id
+        JOIN venues v ON v.id = l.venue_id WHERE t.id = ${teamId}
       `;
       if (!existingTeam) return Response.json({ error: "Team not found" }, { status: 404 });
       if (!canManageTeam(user, existingTeam)) return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -84,10 +90,12 @@ export async function POST(request) {
       const { teamId } = data;
       if (!UUID_RE.test(teamId)) return Response.json({ error: "Invalid team ID" }, { status: 400 });
       const [team] = await sql`
-        SELECT t.id, l.venue_id FROM teams t JOIN leagues l ON t.league_id = l.id WHERE t.id = ${teamId}
+        SELECT t.id, l.venue_id, v.organization_id
+        FROM teams t JOIN leagues l ON t.league_id = l.id
+        JOIN venues v ON v.id = l.venue_id WHERE t.id = ${teamId}
       `;
       if (!team) return Response.json({ error: "Team not found" }, { status: 404 });
-      if (!canAdministerVenue(user, team.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
+      if (!canAdministerVenue(user, team.venue_id, team.organization_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
       await sql`UPDATE teams SET status = 'inactive' WHERE id = ${teamId}`;
       return Response.json({ success: true });
     }
@@ -107,34 +115,53 @@ export async function GET(request) {
   const captainUserId = searchParams.get("captainUserId");
 
   if (teamId) {
-    const [team] = await sql`SELECT * FROM teams WHERE id = ${teamId}`;
+    if (!UUID_RE.test(teamId)) return Response.json({ error: "Invalid team ID" }, { status: 400 });
+    const user = await resolveCurrentUser(request);
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const [team] = await sql`
+      SELECT t.*, au.name AS captain_name, l.venue_id, v.organization_id
+      FROM teams t
+      JOIN leagues l ON l.id = t.league_id
+      JOIN venues v ON v.id = l.venue_id
+      LEFT JOIN auth_users au ON au.id = t.captain_user_id
+      WHERE t.id = ${teamId}
+    `;
+    if (!team) return Response.json({ error: "Team not found" }, { status: 404 });
+    if (!canManageTeam(user, team)) return Response.json({ error: "Forbidden" }, { status: 403 });
     return Response.json(team);
   }
   if (captainUserId) {
+    if (!UUID_RE.test(captainUserId)) return Response.json({ error: "Invalid captain ID" }, { status: 400 });
+    const user = await resolveCurrentUser(request);
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
     const [team] = await sql`
-      SELECT t.*, au.name as captain_name
+      SELECT t.*, au.name as captain_name, l.venue_id, v.organization_id
       FROM teams t
+      JOIN leagues l ON l.id = t.league_id
+      JOIN venues v ON v.id = l.venue_id
       LEFT JOIN auth_users au ON t.captain_user_id = au.id
       WHERE t.captain_user_id = ${captainUserId}
       AND t.status = 'active'
       ORDER BY t.created_at DESC
       LIMIT 1
     `;
+    if (team && !canManageTeam(user, team)) return Response.json({ error: "Forbidden" }, { status: 403 });
     return Response.json(team || null);
   }
   if (joinCode) {
     const [league] =
       await sql`SELECT id FROM leagues WHERE join_code = ${joinCode}`;
     if (!league) return Response.json([]);
-    const teams =
-      await sql`SELECT * FROM teams WHERE league_id = ${league.id} AND status = 'active'`;
+    const teams = await sql`
+      SELECT id, league_id, slot_id, name, status
+      FROM teams WHERE league_id = ${league.id} AND status = 'active'
+    `;
     return Response.json(teams);
   }
   if (leagueId) {
     const teams = await sql`
-      SELECT t.*, au.name as captain_name
+      SELECT t.id, t.league_id, t.slot_id, t.name, t.status
       FROM teams t
-      LEFT JOIN auth_users au ON t.captain_user_id = au.id
       WHERE t.league_id = ${leagueId} AND t.status = 'active'
     `;
     return Response.json(teams);

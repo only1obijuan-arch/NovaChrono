@@ -1,5 +1,6 @@
 import sql from "@/app/api/utils/sql";
 import { rateLimit } from "@/app/api/utils/rate-limit";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 
 export async function GET(request) {
   try {
@@ -14,13 +15,13 @@ export async function GET(request) {
     if (!allowed) return Response.json({ unverified: false });
 
     const { searchParams } = new URL(request.url);
-    const email = searchParams.get("email");
+    const email = canonicalizeEmail(searchParams.get("email"));
     if (!email) return Response.json({ unverified: false });
 
     const [user] = await sql`
       SELECT "emailVerified"
       FROM auth_users
-      WHERE LOWER(email) = LOWER(${email})
+      WHERE lower(email) = ${email}
     `;
 
     // Only return true when the account exists AND is not yet verified.

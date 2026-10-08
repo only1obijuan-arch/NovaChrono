@@ -3,6 +3,7 @@ import { hash } from "argon2";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 import crypto from "crypto";
 import { z } from "zod";
+import { invalidateUserSessions } from "@/app/api/utils/session-security";
 
 const resetPasswordSchema = z.object({
   token: z.string().min(1).max(512),
@@ -56,42 +57,29 @@ export async function POST(request) {
       return Response.json({ error: "Too many attempts. Try again later." }, { status: 429 });
     }
 
-    const resetToken = await fetchResetToken(token);
-
-    if (!resetToken) {
-      return Response.json(
-        { error: "Invalid or expired reset token" },
-        { status: 400 },
-      );
-    }
-
-    if (resetToken.used) {
-      return Response.json(
-        { error: "This reset token has already been used" },
-        { status: 400 },
-      );
-    }
-
-    if (new Date(resetToken.expires_at) < new Date()) {
-      return Response.json(
-        { error: "This reset token has expired" },
-        { status: 400 },
-      );
-    }
-
     const hashedPassword = await hash(password);
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
     await withTransaction(async (txSql) => {
+      const [resetToken] = await txSql`
+        UPDATE password_reset_tokens
+        SET used = TRUE
+        WHERE token = ${tokenHash}
+          AND used = FALSE
+          AND expires_at > NOW()
+        RETURNING id, user_id
+      `;
+      if (!resetToken) {
+        const error = new Error("Invalid, expired, or already used reset token");
+        error.code = "INVALID_RESET_TOKEN";
+        throw error;
+      }
       await txSql`
         INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)
         VALUES (${resetToken.user_id}, 'credentials', 'credentials', ${resetToken.user_id}, ${hashedPassword})
         ON CONFLICT ("userId", provider) DO UPDATE SET password = ${hashedPassword}
       `;
-      await txSql`
-        UPDATE password_reset_tokens
-        SET used = TRUE
-        WHERE id = ${resetToken.id}
-      `;
+      await invalidateUserSessions(txSql, resetToken.user_id);
     });
 
     return Response.json({
@@ -99,6 +87,9 @@ export async function POST(request) {
       message: "Password has been reset successfully",
     });
   } catch (error) {
+    if (error.code === "INVALID_RESET_TOKEN") {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     console.error("Error resetting password:", error);
     return Response.json(
       { error: "An unexpected error occurred." },

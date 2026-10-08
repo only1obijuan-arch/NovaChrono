@@ -72,7 +72,6 @@ function SignInContent() {
       const result = await signIn("credentials", {
         email,
         password,
-        isSignup: "false",
         redirect: false,
       });
 

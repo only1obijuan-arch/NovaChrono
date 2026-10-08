@@ -1,11 +1,9 @@
-import { auth } from "@/auth";
-import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
+import { requireRole } from "@/app/api/utils/auth";
 import sql from "@/app/api/utils/sql";
 
 export async function GET(request) {
-  const mobileUser = await verifyMobileToken(request);
-  const session = mobileUser ? { user: mobileUser } : await auth();
-  if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireRole(request, "captain");
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const teams = await sql`
     SELECT
@@ -17,7 +15,7 @@ export async function GET(request) {
     JOIN league_slots ls ON t.slot_id = ls.id
     JOIN leagues l ON ls.league_id = l.id
     JOIN venues v ON l.venue_id = v.id
-    WHERE t.captain_user_id = ${session.user.id}
+    WHERE t.captain_user_id = ${user.id}
     AND t.status = 'active'
     ORDER BY l.created_at DESC
   `;

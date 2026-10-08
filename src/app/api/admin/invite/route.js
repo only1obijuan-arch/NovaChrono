@@ -1,5 +1,6 @@
-import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
+import { requireRole } from "@/app/api/utils/auth";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { inviteOrgAdminEmail } from "@/emails/inviteOrgAdminEmail";
 import { randomBytes, createHash } from "crypto";
@@ -15,9 +16,8 @@ const inviteSchema = z.object({
 // Called by the super-admin portal.
 export async function POST(request) {
   try {
-    const session = await auth();
-    const user = session?.user;
-    if (!user || user.role !== "super_admin") {
+    const user = await requireRole(request, "super_admin");
+    if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -25,11 +25,12 @@ export async function POST(request) {
     if (!parsed.success) {
       return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
-    const { email, organizationId, role } = parsed.data;
+    const { organizationId, role } = parsed.data;
+    const email = canonicalizeEmail(parsed.data.email);
 
     // Reject if account already exists
     const [existingUser] = await sql`
-      SELECT id FROM auth_users WHERE LOWER(email) = LOWER(${email}) LIMIT 1
+      SELECT id FROM auth_users WHERE lower(email) = ${email} LIMIT 1
     `;
     if (existingUser) {
       return Response.json({ error: "An account with this email already exists." }, { status: 400 });
@@ -38,7 +39,7 @@ export async function POST(request) {
     // Reject if an unused invite is already pending
     const [existingInvite] = await sql`
       SELECT id FROM invite_tokens
-      WHERE LOWER(email) = LOWER(${email})
+      WHERE lower(email) = ${email}
       AND used = FALSE
       AND expires_at > NOW()
       LIMIT 1
@@ -58,7 +59,7 @@ export async function POST(request) {
 
     await sql`
       INSERT INTO invite_tokens (token, email, role, organization_id, invited_by, expires_at)
-      VALUES (${tokenHash}, ${email.toLowerCase()}, ${role}, ${organizationId}, ${user.id}, ${expiresAt})
+      VALUES (${tokenHash}, ${email}, ${role}, ${organizationId}, ${user.id}, ${expiresAt})
     `;
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";

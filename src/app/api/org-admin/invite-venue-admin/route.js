@@ -1,9 +1,10 @@
 import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { inviteVenueAdminEmail } from "@/emails/inviteVenueAdminEmail";
-import { auth } from "@/auth";
 import { randomBytes, createHash } from "crypto";
 import { z } from "zod";
+import { requireRole } from "@/app/api/utils/auth";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 
 const inviteVenueAdminSchema = z.object({
   email: z.string().email().max(254),
@@ -12,15 +13,15 @@ const inviteVenueAdminSchema = z.object({
 
 export async function POST(request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id)
+    const currentUser = await requireRole(request, "org_admin", "super_admin");
+    if (!currentUser)
       return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const [inviter] = await sql`
       SELECT au.*, o.name as org_name
       FROM auth_users au
       LEFT JOIN organizations o ON o.id = au.organization_id
-      WHERE au.id = ${session.user.id}
+      WHERE au.id = ${currentUser.id}
     `;
     if (!inviter || !["org_admin", "super_admin"].includes(inviter.role)) {
       return Response.json(
@@ -33,7 +34,8 @@ export async function POST(request) {
     if (!parsed.success) {
       return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
-    const { email, venueId } = parsed.data;
+    const { venueId } = parsed.data;
+    const email = canonicalizeEmail(parsed.data.email);
 
     const [venue] = await sql`
       SELECT * FROM venues WHERE id = ${venueId} AND organization_id = ${inviter.organization_id}
@@ -42,7 +44,7 @@ export async function POST(request) {
       return Response.json({ error: "Venue not found" }, { status: 404 });
 
     const [existing] = await sql`
-      SELECT id FROM auth_users WHERE LOWER(email) = LOWER(${email}) LIMIT 1
+      SELECT id FROM auth_users WHERE lower(email) = ${email} LIMIT 1
     `;
     if (existing)
       return Response.json(
@@ -52,7 +54,7 @@ export async function POST(request) {
 
     const [existingInvite] = await sql`
       SELECT id FROM invite_tokens
-      WHERE LOWER(email) = LOWER(${email})
+      WHERE lower(email) = ${email}
       AND used = FALSE AND expires_at > NOW()
       LIMIT 1
     `;
@@ -68,7 +70,7 @@ export async function POST(request) {
 
     await sql`
       INSERT INTO invite_tokens (token, email, role, organization_id, venue_id, invited_by, expires_at)
-      VALUES (${tokenHash}, ${email.toLowerCase()}, 'venue_admin', ${
+      VALUES (${tokenHash}, ${email}, 'venue_admin', ${
         inviter.organization_id
       }, ${venueId}, ${inviter.id}, ${expiresAt})
     `;

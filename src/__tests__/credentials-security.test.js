@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ query: vi.fn(), auth: vi.fn(), verify: vi.fn(), hash: vi.fn(), config: null }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), auth: vi.fn(), verify: vi.fn(), hash: vi.fn(), release: vi.fn(), config: null }));
 vi.mock("next-auth", () => ({ default: config => { mocks.config = config; return { auth: mocks.auth }; } }));
 vi.mock("next-auth/providers/credentials", () => ({ default: config => config }));
 vi.mock("argon2", () => ({ verify: mocks.verify, hash: mocks.hash }));
-vi.mock("@neondatabase/serverless", () => ({ Pool: class { query(...args) { return mocks.query(...args); } } }));
+vi.mock("@neondatabase/serverless", () => ({ Pool: class { query(...args) { return mocks.query(...args); } async connect() { return { query: mocks.query, release: mocks.release }; } } }));
 import "@/auth";
 import { POST as feedback, GET as status } from "@/app/api/auth/rate-limit/route";
 import { POST as provision } from "@/app/api/super-admin/users/route";
@@ -12,16 +12,18 @@ let account, allowed, lock;
 const credentials = () => mocks.config.providers[0].authorize({ email: "person@example.test", password: "correct-password" });
 const bodyRequest = (body) => new Request("https://example.test/api/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 beforeEach(() => {
-  vi.clearAllMocks(); account = { id: "captain", email: "person@example.test", role: "captain", emailVerified: "2030-01-01" }; allowed = true; lock = null;
+  vi.clearAllMocks(); account = { id: "captain", email: "person@example.test", role: "captain", emailVerified: "2030-01-01", sessions_valid_after: new Date(0).toISOString() }; allowed = true; lock = null;
   mocks.auth.mockResolvedValue({ user: { id: "platform" } }); mocks.verify.mockResolvedValue(true); mocks.hash.mockResolvedValue("fixture-hash");
   mocks.query.mockImplementation(async (sql, values) => {
     let rows = [];
-    if (sql.startsWith("INSERT INTO auth_rate_limits")) rows = allowed ? [{ attempts: 1 }] : [];
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) rows = [];
+    else if (sql.startsWith("INSERT INTO auth_rate_limits")) rows = allowed ? [{ attempts: 1 }] : [];
     else if (sql.startsWith("DELETE FROM auth_rate_limits")) rows = [];
     else if (sql.startsWith("SELECT attempts")) rows = lock ? [lock] : [];
-    else if (sql.includes("SELECT * FROM auth_users WHERE email")) rows = account ? [account] : [];
+    else if (sql.includes("SELECT id, email, name, role, venue_id, organization_id, field_number, sessions_valid_after")) rows = account ? [account] : [];
+    else if (sql.includes("SELECT * FROM auth_users WHERE lower(email)")) rows = account ? [account] : [];
+    else if (sql.includes("SELECT * FROM auth_users WHERE id")) rows = [{ id: "platform", role: "super_admin" }];
     else if (sql.includes("SELECT * FROM auth_accounts")) rows = [{ provider: "credentials", password: "fixture-hash" }];
-    else if (sql.includes("SELECT role FROM auth_users")) rows = [{ role: "super_admin" }];
     else if (sql.includes("SELECT id FROM auth_users")) rows = [];
     else if (sql.includes("INSERT INTO auth_users")) { account = { id: "new-admin", email: values[0], name: values[1], role: values[2], emailVerified: sql.includes('"emailVerified"') ? "2030-01-01" : null }; rows = [account]; }
     else if (sql.includes("INSERT INTO auth_accounts")) rows = [];
@@ -48,6 +50,10 @@ describe("D5 authoritative credentials limiting", () => {
   it("expired lock permits status without deleting data", async () => { lock = { attempts: 5, locked_until: new Date(0), last_attempt: new Date(0) }; expect((await (await status(new Request("https://example.test/api/auth/rate-limit?email=a%40b.test"))).json()).allowed).toBe(true); expect(mocks.query.mock.calls.every(([q]) => q.startsWith("SELECT"))).toBe(true); });
   it("canonicalises only limiter keys and uses atomic bounded reservation", async () => { await reserveLoginAttempt(" User@Example.test "); expect(mocks.query.mock.calls[0][1]).toEqual(["user@example.test", 5]); expect(mocks.query.mock.calls[0][0]).toContain("ON CONFLICT (identifier) DO UPDATE"); expect(mocks.query.mock.calls[0][0]).toContain("auth_rate_limits.attempts < $2"); });
   it("fails closed when limiter unavailable", async () => { mocks.query.mockRejectedValue(new Error("fixture unavailable")); await expect(credentials()).rejects.toThrow("fixture unavailable"); expect(mocks.verify).not.toHaveBeenCalled(); });
+  it("blocks the removed isSignup self-registration input", async () => { account = null; expect(await mocks.config.providers[0].authorize({ email: "new@example.test", password: "password123", isSignup: "true", name: "Owner" })).toBeNull(); expect(mocks.query.mock.calls.every(([q]) => !q.includes("INSERT INTO auth_users"))).toBe(true); });
+  it("canonicalises credential email lookup", async () => { await mocks.config.providers[0].authorize({ email: " Person@Example.Test ", password: "correct-password" }); const lookup = mocks.query.mock.calls.find(([q]) => q.includes("lower(email)")); expect(lookup[1]).toEqual(["person@example.test"]); });
+  it("refreshes role and tenant claims from the live user row", async () => { account.role = "referee"; account.venue_id = "venue-new"; const token = await mocks.config.callbacks.jwt({ token: { id: account.id, iat: 2_000_000_000 }, user: null }); expect(token).toMatchObject({ role: "referee", venue_id: "venue-new", revoked: false }); });
+  it("revokes a deleted user and a token older than the session boundary", async () => { account = null; expect((await mocks.config.callbacks.jwt({ token: { id: "deleted", iat: 2_000_000_000 }, user: null })).revoked).toBe(true); account = { id: "captain", role: "captain", sessions_valid_after: "2099-01-01T00:00:00.000Z" }; expect((await mocks.config.callbacks.jwt({ token: { id: "captain", iat: 2_000_000_000 }, user: null })).revoked).toBe(true); });
 });
 describe("D19 directly provisioned administrator", () => {
   it("creates verified credentials that pass the unchanged verification requirement", async () => {

@@ -63,21 +63,31 @@ CREATE TABLE auth_users (
   organization_id UUID        REFERENCES organizations(id),-- set for org_admins
   field_number    INT,                                     -- referees only (1-based)
   push_token      TEXT,                                    -- Expo push token for mobile notifications
+  sessions_valid_after TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '1970-01-01 00:00:00+00',
+  image           TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_auth_users_email_lower ON auth_users (LOWER(email));
+CREATE UNIQUE INDEX auth_users_email_lower_unique ON auth_users (LOWER(email));
 
 -- One row per user for password-based auth (NextAuth credentials provider).
 -- Column names follow NextAuth conventions (camelCase with double-quotes).
 CREATE TABLE auth_accounts (
-  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id                   TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   "userId"             UUID NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
   type                 TEXT NOT NULL,                      -- always 'credentials'
   provider             TEXT NOT NULL,                      -- always 'credentials'
   "providerAccountId"  TEXT NOT NULL,
   password             TEXT,                               -- argon2 hash
-  UNIQUE ("userId", provider)
+  access_token         TEXT,
+  expires_at           BIGINT,
+  refresh_token        TEXT,
+  id_token             TEXT,
+  scope                TEXT,
+  session_state        TEXT,
+  token_type           TEXT,
+  UNIQUE ("userId", provider),
+  UNIQUE (provider, "providerAccountId")
 );
 
 -- Single-use email verification tokens; expire after 24 h.
@@ -147,6 +157,10 @@ CREATE TABLE leagues (
                            CHECK (status IN ('registration','active','cancelled','completed')),
   season_name            TEXT,                             -- human label for this season, set on CREATE_NEW_SEASON
   parent_league_id       UUID    REFERENCES leagues(id),  -- links season chain; NULL = first season
+  win_points             INT     NOT NULL DEFAULT 3,
+  draw_points            INT     NOT NULL DEFAULT 1,
+  forfeit_score_home     INT     NOT NULL DEFAULT 3,
+  forfeit_score_away     INT     NOT NULL DEFAULT 0,
   created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -261,9 +275,7 @@ CREATE TABLE availability_responses (
 CREATE TABLE notifications (
   id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    UUID        NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
-  type       TEXT        NOT NULL
-               CHECK (type IN ('availability_confirmed','availability_declined',
-                               'match_reminder','round_postponed','unconfirmed_alert')),
+  type       TEXT        NOT NULL,
   title      TEXT        NOT NULL,
   message    TEXT        NOT NULL,
   match_id   UUID        REFERENCES matches(id),           -- NULL for non-match notifications

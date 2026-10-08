@@ -1,21 +1,19 @@
 import { escapeHtml } from "@/utils/escape-html";
-import { auth } from "@/auth";
 import sql from "@/app/api/utils/sql";
+import { requireRole } from "@/app/api/utils/auth";
+import { canAdministerVenue } from "@/app/api/utils/ownership";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { sendPush } from "@/app/api/utils/send-push";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 
 export async function POST(request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await requireRole(request, "venue_admin", "org_admin", "super_admin");
+    if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-    if (session.user.role !== "venue_admin" && session.user.role !== "super_admin") {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
 
-    const { allowed } = await rateLimit(`alert:${session.user.id}`, { max: 10, windowMinutes: 60 });
+    const { allowed } = await rateLimit(`alert:${user.id}`, { max: 10, windowMinutes: 60 });
     if (!allowed) {
       return Response.json({ error: "Too many alerts sent. Try again later." }, { status: 429 });
     }
@@ -29,8 +27,12 @@ export async function POST(request) {
       );
     }
 
-    const [league] = await sql`SELECT * FROM leagues WHERE id = ${league_id} AND venue_id = ${session.user.venue_id}`;
-    if (!league) {
+    const [league] = await sql`
+      SELECT l.*, v.organization_id
+      FROM leagues l JOIN venues v ON v.id = l.venue_id
+      WHERE l.id = ${league_id}
+    `;
+    if (!league || !canAdministerVenue(user, league.venue_id, league.organization_id)) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 

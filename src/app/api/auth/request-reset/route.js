@@ -2,10 +2,12 @@ import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 import crypto from "crypto";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 
 export async function POST(request) {
   try {
-    const { email } = await request.json();
+    const { email: submittedEmail } = await request.json();
+    const email = canonicalizeEmail(submittedEmail);
 
     if (!email) {
       return Response.json({ error: "Email is required" }, { status: 400 });
@@ -20,7 +22,7 @@ export async function POST(request) {
     const users = await sql`
       SELECT id, email, name, role
       FROM auth_users
-      WHERE LOWER(email) = LOWER(${email})
+      WHERE lower(email) = ${email}
     `;
 
     // Always return success even if user not found (security best practice)
@@ -103,7 +105,9 @@ export async function POST(request) {
       user.name || "there"
     },\n\nClick the link below to reset your password:\n${resetUrl}\n\nThis link expires in 1 hour.\nIf you didn't request this, ignore this email.`;
 
-    await sendEmail({ to: user.email, subject, html, text });
+    await sendEmail({ to: user.email, subject, html, text }).catch((error) => {
+      console.error("Password reset email delivery failed:", error);
+    });
 
     return Response.json({
       success: true,

@@ -1,7 +1,6 @@
 import sql, { withTransaction } from "@/app/api/utils/sql";
-import { auth } from "@/auth";
 import { rateLimit } from "@/app/api/utils/rate-limit";
-import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
+import { resolveCurrentUser } from "@/app/api/utils/auth";
 import { z } from "zod";
 
 const MATCH_STATUSES = ["scheduled", "live", "final", "postponed", "cancelled"];
@@ -36,13 +35,6 @@ const matchActionSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-async function getSession(request) {
-  const mobileUser = await verifyMobileToken(request);
-  if (mobileUser) return mobileUser;
-  const session = await auth();
-  return session?.user ?? null;
-}
-
 const WRITE_ROLES = ["referee", "venue_admin", "super_admin"];
 const ADMIN_ROLES = ["venue_admin", "super_admin"];
 
@@ -52,7 +44,7 @@ function canAccessVenue(user, venueId) {
 
 export async function POST(request) {
   try {
-    const user = await getSession(request);
+    const user = await resolveCurrentUser(request);
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
     if (!WRITE_ROLES.includes(user.role)) {
       return Response.json(

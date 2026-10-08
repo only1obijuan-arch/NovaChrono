@@ -1,14 +1,17 @@
 // Keep the existing platform-wide exception explicit. Other administrators
 // must match the venue established from the target's database relationships.
-export function canAdministerVenue(user, venueId) {
+export function canAdministerVenue(user, venueId, organizationId = null) {
   return user?.role === "super_admin" || (
     user?.role === "venue_admin" && user.venue_id != null &&
     user.venue_id === venueId
+  ) || (
+    user?.role === "org_admin" && user.organization_id != null &&
+    organizationId != null && user.organization_id === organizationId
   );
 }
 
 export function canManageTeam(user, team) {
-  return !!team && (canAdministerVenue(user, team.venue_id) || (
+  return !!team && (canAdministerVenue(user, team.venue_id, team.organization_id) || (
     user?.role === "captain" && team.captain_user_id === user.id
   ));
 }

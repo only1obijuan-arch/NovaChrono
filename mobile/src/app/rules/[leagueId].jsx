@@ -204,8 +204,8 @@ export default function LeagueRules() {
       category: "POINTS & STANDINGS",
       color: "#FF00CC",
       items: [
-        `A win is worth ${league?.points_win ?? 3} points.`,
-        `A draw is worth ${league?.points_draw ?? 1} point per team.`,
+        `A win is worth ${league?.win_points ?? 3} points.`,
+        `A draw is worth ${league?.draw_points ?? 1} point per team.`,
         "A loss earns 0 points.",
         `A forfeit results in a ${league?.forfeit_score_home ?? 3}-${league?.forfeit_score_away ?? 0} score against the forfeiting team.`,
         "In the case of a tie on points, goal difference, then goals scored, then head-to-head result is used to determine the final standing.",
@@ -275,7 +275,7 @@ export default function LeagueRules() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(0,255,156,0.06)", borderWidth: 1, borderColor: "rgba(0,255,156,0.2)", borderRadius: 4, paddingHorizontal: 10, paddingVertical: 5 }}>
               <Trophy size={9} color="rgba(0,255,156,0.7)" />
               <Text style={{ fontFamily: F.mono, fontSize: 9, color: "rgba(0,255,156,0.7)", letterSpacing: 1 }}>
-                {league.points_win ?? 3} PTS WIN
+                {league.win_points ?? 3} PTS WIN
               </Text>
             </View>
             {league.fields_count != null && (

@@ -7,6 +7,7 @@ import { sendEmail } from "@/app/api/utils/send-email";
 import { verifyEmail } from "@/emails/verifyEmail";
 import crypto from "crypto";
 import { z } from "zod";
+import { canonicalizeEmail } from "@/app/api/utils/email";
 
 const signupSchema = z.object({
   joinCode: z.string().trim().refine(isValidJoinCode, "League code must be 6 or 8 letters or digits"),
@@ -28,7 +29,8 @@ export async function POST(request) {
     if (!parsed.success) {
       return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
-    const { joinCode, name, email, password, teamName } = parsed.data;
+    const { joinCode, name, password, teamName } = parsed.data;
+    const email = canonicalizeEmail(parsed.data.email);
 
     // Validate league code
     const [league] = await sql`
@@ -101,7 +103,7 @@ export async function POST(request) {
 
       await txSql`
         INSERT INTO auth_verification_token (identifier, token, expires)
-        VALUES (${email.toLowerCase()}, ${verifyTokenHash}, ${verifyExpires})
+        VALUES (${email}, ${verifyTokenHash}, ${verifyExpires})
       `;
     });
 

@@ -4,6 +4,11 @@ import { encode } from "next-auth/jwt";
 const baseURL = "http://127.0.0.1:3100";
 const authSecret = "novachrono-playwright-only-secret-at-least-32-characters";
 const cookieName = "authjs.session-token";
+const authUserIds = {
+  venue_admin: "91000000-0000-4000-8000-000000000001",
+  captain: "91000000-0000-4000-8000-000000000002",
+  referee: "91000000-0000-4000-8000-000000000003",
+};
 
 const league = {
   id: "league-1",
@@ -20,8 +25,8 @@ const league = {
   join_code: "A1B2C3D4",
   venue_id: "venue-1",
   venue_name: "Nova Arena",
-  points_win: 3,
-  points_draw: 1,
+  win_points: 3,
+  draw_points: 1,
   forfeit_score_home: 3,
   forfeit_score_away: 0,
 };
@@ -34,8 +39,8 @@ function watchRuntimeErrors(page) {
 
 async function authenticate(context, page, role) {
   const user = {
-    id: `${role}-1`,
-    sub: `${role}-1`,
+    id: authUserIds[role],
+    sub: authUserIds[role],
     name: `${role.replace("_", " ")} smoke user`,
     email: `${role}@example.test`,
     role,
