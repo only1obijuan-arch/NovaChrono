@@ -21,6 +21,7 @@ const apiRoleRoutes = {
 // API routes that do not require a session
 const publicApiPrefixes = [
   "/api/auth",
+  "/api/health",
   "/api/stats",
   "/api/matches",
   "/api/cron",
