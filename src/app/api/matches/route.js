@@ -5,26 +5,27 @@ import { recomputeLeagueStandings } from "@/app/api/matches/standings";
 import { z } from "zod";
 
 const MATCH_STATUSES = ["scheduled", "live", "final", "postponed", "cancelled"];
+const uuid = () => z.string().uuid();
 
 const matchActionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("START_MATCH"), matchId: z.string().min(1) }),
+  z.object({ action: z.literal("START_MATCH"), matchId: uuid() }),
   z.object({
     action: z.literal("RECORD_GOAL"),
-    matchId: z.string().min(1),
+    matchId: uuid(),
     type: z.enum(["goal_home", "goal_away"]),
-    opId: z.string().uuid(),
-    playerId: z.string().min(1).nullable().optional(),
+    opId: uuid().optional(),
+    playerId: uuid().nullable().optional(),
   }),
   z.object({
     action: z.literal("DELETE_EVENT"),
-    matchId: z.string().min(1),
-    eventId: z.string().min(1),
+    matchId: uuid(),
+    eventId: uuid(),
   }),
-  z.object({ action: z.literal("END_MATCH"), matchId: z.string().min(1) }),
-  z.object({ action: z.literal("START_SECOND_HALF"), matchId: z.string().min(1) }),
+  z.object({ action: z.literal("END_MATCH"), matchId: uuid() }),
+  z.object({ action: z.literal("START_SECOND_HALF"), matchId: uuid() }),
   z.object({
     action: z.literal("ADMIN_OVERRIDE"),
-    matchId: z.string().min(1),
+    matchId: uuid(),
     homeScore: z.number().int().min(0).max(99),
     awayScore: z.number().int().min(0).max(99),
     status: z.enum(MATCH_STATUSES),
@@ -32,8 +33,8 @@ const matchActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("ASSIGN_REFEREE"),
-    matchId: z.string().min(1),
-    refereeId: z.string().min(1).nullable(),
+    matchId: uuid(),
+    refereeId: uuid().nullable(),
   }),
 ]);
 
@@ -79,6 +80,11 @@ export async function POST(request) {
   try {
     const user = await resolveCurrentUser(request);
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    // Cheap fail-fast only. Every authoritative role, venue, and referee check
+    // is repeated against live data after the match row is locked.
+    if (!WRITE_ROLES.includes(user.role)) {
+      return Response.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
 
     const parsed = matchActionSchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -142,28 +148,36 @@ export async function POST(request) {
           }
         }
 
-        const [inserted] = await txSql`
-          INSERT INTO match_events (match_id, type, player_id, team_id, operation_id)
-          VALUES (${matchId}, ${type}, ${playerId ?? null}, ${team.id}, ${opId})
-          ON CONFLICT (match_id, operation_id) WHERE operation_id IS NOT NULL
-          DO NOTHING
-          RETURNING id
-        `;
-
-        if (!inserted) {
-          const [existing] = await txSql`
-            SELECT type, player_id, team_id
-            FROM match_events
-            WHERE match_id = ${matchId} AND operation_id = ${opId}
+        if (opId == null) {
+          console.warn("[matches] Legacy RECORD_GOAL received without opId; request is atomic but not retry-idempotent.");
+          await txSql`
+            INSERT INTO match_events (match_id, type, player_id, team_id, operation_id)
+            VALUES (${matchId}, ${type}, ${playerId ?? null}, ${team.id}, NULL)
           `;
-          const sameCommand = existing
-            && existing.type === type
-            && (existing.player_id ?? null) === (playerId ?? null)
-            && existing.team_id === team.id;
-          if (!sameCommand) {
-            return Response.json({ error: "opId was already used for a different goal command" }, { status: 409 });
+        } else {
+          const [inserted] = await txSql`
+            INSERT INTO match_events (match_id, type, player_id, team_id, operation_id)
+            VALUES (${matchId}, ${type}, ${playerId ?? null}, ${team.id}, ${opId})
+            ON CONFLICT (match_id, operation_id) WHERE operation_id IS NOT NULL
+            DO NOTHING
+            RETURNING id
+          `;
+
+          if (!inserted) {
+            const [existing] = await txSql`
+              SELECT type, player_id, team_id
+              FROM match_events
+              WHERE match_id = ${matchId} AND operation_id = ${opId}
+            `;
+            const sameCommand = existing
+              && existing.type === type
+              && (existing.player_id ?? null) === (playerId ?? null)
+              && existing.team_id === team.id;
+            if (!sameCommand) {
+              return Response.json({ error: "opId was already used for a different goal command" }, { status: 409 });
+            }
+            return Response.json({ success: true, idempotent: true });
           }
-          return Response.json({ success: true, idempotent: true });
         }
 
         if (type === "goal_home") {
@@ -171,7 +185,7 @@ export async function POST(request) {
         } else {
           await txSql`UPDATE matches SET away_score = away_score + 1 WHERE id = ${matchId}`;
         }
-        return Response.json({ success: true, idempotent: false });
+        return Response.json({ success: true, idempotent: false, legacy: opId == null });
       });
     }
 

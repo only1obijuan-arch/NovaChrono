@@ -235,6 +235,28 @@ const eventCount = async (matchId, type) => Number((await pool.query(
   [matchId, type],
 )).rows[0].count);
 
+async function waitForMatchRowLockQueue() {
+  const observer = await pool.connect();
+  try {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const { rows: [state] } = await observer.query(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND query LIKE '%FOR UPDATE OF m%'
+        ) AS waiting
+      `);
+      if (state.waiting) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("Route request never queued on the locked match row");
+  } finally {
+    observer.release();
+  }
+}
+
 async function startMatch(matchId = IDS.match) {
   authState.actorId = IDS.referee;
   return postMatch({ action: "START_MATCH", matchId });
@@ -256,6 +278,19 @@ async function installFailureTrigger({ name, table, timing = "BEFORE", event, bo
 async function removeFailureTrigger(name, table) {
   await pool.query(`DROP TRIGGER IF EXISTS ${name}_trigger ON ${table}; DROP FUNCTION IF EXISTS ${name}()`);
 }
+
+describe("Gate 3 match command UUID validation", () => {
+  it.each([
+    ["matchId", { action: "START_MATCH", matchId: "not-a-uuid" }],
+    ["playerId", { action: "RECORD_GOAL", matchId: IDS.match, type: "goal_home", playerId: "not-a-uuid", opId: opId(90) }],
+    ["eventId", { action: "DELETE_EVENT", matchId: IDS.match, eventId: "not-a-uuid" }],
+    ["refereeId", { action: "ASSIGN_REFEREE", matchId: IDS.match, refereeId: "not-a-uuid" }],
+    ["opId", { action: "RECORD_GOAL", matchId: IDS.match, type: "goal_home", playerId: null, opId: "not-a-uuid" }],
+  ])("returns 400 for a malformed %s", async (_field, body) => {
+    authState.actorId = IDS.referee;
+    expect((await postMatch(body)).status).toBe(400);
+  });
+});
 
 describe("Gate 3 match command transactions", () => {
   it("starts scheduled matches atomically and rejects repeated starts", async () => {
@@ -289,6 +324,33 @@ describe("Gate 3 match command transactions", () => {
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
     expect(await eventCount(IDS.match, "start_first_half")).toBe(1);
+  });
+
+  it("observes a committed referee reassignment after queueing on the match lock", async () => {
+    const blocker = await pool.connect();
+    let blockerFinished = false;
+    let queuedRequest;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match]);
+      await blocker.query("UPDATE matches SET referee_id = $1 WHERE id = $2", [IDS.protectedReferee, IDS.match]);
+
+      authState.actorId = IDS.referee;
+      queuedRequest = postMatch({ action: "START_MATCH", matchId: IDS.match });
+      await waitForMatchRowLockQueue();
+
+      await blocker.query("COMMIT");
+      blockerFinished = true;
+
+      expect((await queuedRequest).status).toBe(403);
+      expect((await pool.query("SELECT status, referee_id FROM matches WHERE id = $1", [IDS.match])).rows[0])
+        .toMatchObject({ status: "scheduled", referee_id: IDS.protectedReferee });
+      expect(await eventCount(IDS.match, "start_first_half")).toBe(0);
+    } finally {
+      if (!blockerFinished) await blocker.query("ROLLBACK");
+      blocker.release();
+      if (queuedRequest) await queuedRequest.catch(() => {});
+    }
   });
 
   it("rolls START_MATCH back when phase-event insertion fails", async () => {
@@ -355,15 +417,30 @@ describe("Gate 3 match command transactions", () => {
 });
 
 describe("Gate 3 goal-operation schema enforcement", () => {
-  it("allows historical NULL operation IDs but rejects them on non-goal events", async () => {
-    await pool.query(
-      "INSERT INTO match_events (match_id, type) VALUES ($1, 'start_first_half')",
-      [IDS.match],
-    );
-    await expect(pool.query(
-      "INSERT INTO match_events (match_id, type, operation_id) VALUES ($1, 'end_match', $2)",
-      [IDS.match, opId(80)],
-    )).rejects.toMatchObject({ code: "23514" });
+  it("allows historical NULL operation IDs and rejects operation IDs on NULL or non-goal types", async () => {
+    await pool.query("ALTER TABLE match_events ALTER COLUMN type DROP NOT NULL");
+    try {
+      await pool.query(
+        "INSERT INTO match_events (match_id, type) VALUES ($1, 'start_first_half')",
+        [IDS.match],
+      );
+      await pool.query("INSERT INTO match_events (match_id, type) VALUES ($1, NULL)", [IDS.match]);
+      await expect(pool.query(
+        "INSERT INTO match_events (match_id, type, operation_id) VALUES ($1, NULL, $2)",
+        [IDS.match, opId(79)],
+      )).rejects.toMatchObject({ code: "23514" });
+      await expect(pool.query(
+        "INSERT INTO match_events (match_id, type, operation_id) VALUES ($1, 'end_match', $2)",
+        [IDS.match, opId(80)],
+      )).rejects.toMatchObject({ code: "23514" });
+      await expect(pool.query(
+        "INSERT INTO match_events (match_id, type, team_id, operation_id) VALUES ($1, 'goal_home', $2, $3)",
+        [IDS.match, IDS.team, opId(82)],
+      )).resolves.toBeTruthy();
+    } finally {
+      await pool.query("DELETE FROM match_events WHERE type IS NULL");
+      await pool.query("ALTER TABLE match_events ALTER COLUMN type SET NOT NULL");
+    }
   });
 
   it("enforces operation uniqueness per match while allowing another match", async () => {
@@ -394,6 +471,39 @@ describe("Gate 3 goal integrity and audit", () => {
     playerId: IDS.playerA,
     opId: opId(1),
     ...overrides,
+  });
+
+  it("keeps valid legacy goals atomic while storing a NULL operation ID", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await goal({ opId: undefined });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ success: true, idempotent: false, legacy: true });
+      expect(warning).toHaveBeenCalledWith(
+        "[matches] Legacy RECORD_GOAL received without opId; request is atomic but not retry-idempotent.",
+      );
+    } finally {
+      warning.mockRestore();
+    }
+    const event = (await pool.query(
+      "SELECT player_id, team_id, operation_id FROM match_events WHERE match_id = $1 AND type = 'goal_home'",
+      [IDS.match],
+    )).rows[0];
+    expect(event).toMatchObject({ player_id: IDS.playerA, team_id: IDS.team, operation_id: null });
+    expect((await pool.query("SELECT home_score FROM matches WHERE id = $1", [IDS.match])).rows[0].home_score).toBe(1);
+  });
+
+  it("retains authorization and player-team validation for legacy goals", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect((await goal({ opId: undefined, playerId: IDS.playerB })).status).toBe(409);
+      authState.actorId = IDS.protectedReferee;
+      expect((await goal({ opId: undefined })).status).toBe(403);
+    } finally {
+      warning.mockRestore();
+    }
+    expect(await eventCount(IDS.match, "goal_home")).toBe(0);
+    expect((await pool.query("SELECT home_score FROM matches WHERE id = $1", [IDS.match])).rows[0].home_score).toBe(0);
   });
 
   it("writes the event and score once for duplicate delivery", async () => {
@@ -445,10 +555,12 @@ describe("Gate 3 goal integrity and audit", () => {
       body: "IF NEW.home_score <> OLD.home_score OR NEW.away_score <> OLD.away_score THEN RAISE EXCEPTION 'forced score failure'; END IF;",
     });
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      expect((await goal()).status).toBe(500);
+      expect((await goal({ opId: undefined })).status).toBe(500);
     } finally {
       log.mockRestore();
+      warning.mockRestore();
       await removeFailureTrigger("gate3_fail_score", "matches");
     }
     expect(await eventCount(IDS.match, "goal_home")).toBe(0);

@@ -18,7 +18,10 @@ BEGIN
   ) THEN
     ALTER TABLE match_events
       ADD CONSTRAINT match_events_goal_operation_check
-      CHECK (operation_id IS NULL OR type IN ('goal_home', 'goal_away'))
+      CHECK (
+        operation_id IS NULL
+        OR (type IS NOT NULL AND type IN ('goal_home', 'goal_away'))
+      )
       NOT VALID;
   END IF;
 END

@@ -17,7 +17,7 @@ describe("Gate 3 goal idempotency migration", () => {
   it("keeps historical events nullable while constraining goal operation IDs", () => {
     expect(migration).toContain("ADD COLUMN IF NOT EXISTS operation_id UUID");
     expect(migration).not.toMatch(/operation_id UUID\s+NOT NULL/);
-    expect(migration).toContain("operation_id IS NULL OR type IN ('goal_home', 'goal_away')");
+    expect(migration).toMatch(/operation_id IS NULL\s+OR \(type IS NOT NULL AND type IN \('goal_home', 'goal_away'\)\)/);
     expect(migration).toContain("ON match_events (match_id, operation_id)");
     expect(migration).toContain("WHERE operation_id IS NOT NULL");
   });
