@@ -49,9 +49,10 @@ $gate2 = @(
   "0005_enforce_user_role_not_null.sql",
   "0006_remove_redundant_match_index.sql"
 )
+$gate3 = @("0007_match_goal_idempotency.sql")
 
 New-TestDatabase $freshDb
-foreach ($migration in ($historical + $gate2)) {
+foreach ($migration in ($historical + $gate2 + $gate3)) {
   Invoke-PsqlFile $freshDb (Join-Path $root "migrations\$migration")
 }
 
@@ -61,6 +62,11 @@ foreach ($migration in $historical) {
 }
 Invoke-PsqlFile $productionDb (Join-Path $root "tests\fixtures\gate2-production-shape.sql")
 foreach ($migration in $gate2) {
+  Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
+}
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO match_events (match_id, type) VALUES ('70000000-0000-4000-8000-000000000001', 'start_first_half')"
+if ($LASTEXITCODE -ne 0) { throw "Failed seeding a historical match event before Gate 3 migration" }
+foreach ($migration in $gate3) {
   Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
 }
 
@@ -80,6 +86,8 @@ Assert-PsqlValue $productionDb "SELECT count(*) FROM information_schema.columns 
 Assert-PsqlValue $productionDb "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'leagues' AND column_name IN ('points_win', 'points_draw')" "0" "Legacy scoring aliases must not be introduced"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.idx_matches_league_id')" "1" "The canonical matches league index must remain"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.matches_league_idx')" "0" "The redundant matches league index must be removed"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM match_events WHERE match_id = '70000000-0000-4000-8000-000000000001' AND type = 'start_first_half' AND operation_id IS NULL" "1" "Historical match events must survive Gate 3 migration"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.match_events_match_goal_operation_unique')" "1" "Goal idempotency index must exist"
 
 New-TestDatabase $holdDb
 foreach ($migration in $historical) {
@@ -122,4 +130,4 @@ Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_
 Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_schema_integrity.sql") "duplicate availability match/team rows exist"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c "DELETE FROM availability_responses WHERE token = 'duplicate-availability'"
 
-Write-Output "Gate 2 migration verification passed: fresh, production-shaped, NULL-role hold, and anomaly fail-closed paths."
+Write-Output "Gate 2/3 migration verification passed: fresh, production-shaped, historical-event preservation, NULL-role hold, and anomaly fail-closed paths."

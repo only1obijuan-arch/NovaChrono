@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import * as Crypto from "expo-crypto";
 import { apiFetch } from "@/utils/api";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -36,17 +37,38 @@ const HALF_DURATION = 20 * 60; // 20 minutes in seconds
 const C = "#A42DB4";
 const CYAN = "#00F5D4";
 
+async function requireCommandSuccess(response) {
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // Preserve the HTTP error below when the server did not return JSON.
+  }
+  if (!response.ok) {
+    const detail = typeof payload?.error === "string"
+      ? payload.error
+      : `Match command failed (${response.status})`;
+    const error = new Error(detail);
+    error.retryable = response.status >= 500;
+    throw error;
+  }
+  return payload;
+}
+
+const retryTransientCommand = (failureCount, error) =>
+  failureCount < 1 && error?.retryable !== false;
+
 export default function MatchControl() {
   const { id } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  const [seconds, setSeconds] = useState(0);
-  const [isActive, setIsActive] = useState(false);
-  const [half, setHalf] = useState(1);
-  const [halfStatus, setHalfStatus] = useState("pre"); // pre | running | halftime | second | finished_halves | finished
+  const [isPaused, setIsPaused] = useState(false);
+  const [serverNow, setServerNow] = useState(null);
   const [showPlayerSelect, setShowPlayerSelect] = useState(null); // 'home' | 'away' | null
+  const [pendingGoalOpId, setPendingGoalOpId] = useState(null);
+  const [pendingGoalSide, setPendingGoalSide] = useState(null);
   const timerRef = useRef(null);
 
   const { data, isLoading } = useQuery({
@@ -82,19 +104,18 @@ export default function MatchControl() {
         method: "POST",
         body: JSON.stringify({ action: "START_MATCH", matchId: id }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
-    onSuccess: () => {
-      setIsActive(true);
-      setHalfStatus("running");
-      setHalf(1);
-      setSeconds(0);
-      queryClient.invalidateQueries(["match-detail", id]);
+    retry: retryTransientCommand,
+    onSuccess: async () => {
+      setIsPaused(false);
+      await queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
     },
+    onError: (error) => Alert.alert("Unable to start match", error.message),
   });
 
   const recordGoalMutation = useMutation({
-    mutationFn: async ({ type, playerId }) => {
+    mutationFn: async ({ type, playerId, opId }) => {
       const res = await apiFetch("/api/matches", {
         method: "POST",
         body: JSON.stringify({
@@ -102,15 +123,20 @@ export default function MatchControl() {
           matchId: id,
           type,
           playerId,
+          opId,
         }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
+    retry: retryTransientCommand,
     onSuccess: () => {
-      queryClient.invalidateQueries(["match-detail", id]);
+      queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
       setShowPlayerSelect(null);
+      setPendingGoalOpId(null);
+      setPendingGoalSide(null);
       Vibration.vibrate(100);
     },
+    onError: (error) => Alert.alert("Unable to record goal", error.message),
   });
 
   const deleteEventMutation = useMutation({
@@ -119,9 +145,11 @@ export default function MatchControl() {
         method: "POST",
         body: JSON.stringify({ action: "DELETE_EVENT", matchId: id, eventId }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
-    onSuccess: () => queryClient.invalidateQueries(["match-detail", id]),
+    retry: retryTransientCommand,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["match-detail", id] }),
+    onError: (error) => Alert.alert("Unable to delete goal", error.message),
   });
 
   const endMatchMutation = useMutation({
@@ -130,40 +158,51 @@ export default function MatchControl() {
         method: "POST",
         body: JSON.stringify({ action: "END_MATCH", matchId: id }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
-    onSuccess: () => {
-      setIsActive(false);
-      setHalfStatus("finished");
+    retry: retryTransientCommand,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
       router.replace("/(referee-tabs)");
     },
+    onError: (error) => Alert.alert("Unable to end match", error.message),
   });
 
-  // Timer
+  const match = data?.match;
+  const events = data?.events ?? [];
+  const isLive = match?.status === "live";
+  const isFinished = match?.status === "final";
+  const half = match?.half2_start_time ? 2 : 1;
+  const startPoint = half === 2 ? match?.half2_start_time : match?.start_time;
+  const timerEnd = isFinished && match?.end_time
+    ? new Date(match.end_time).getTime()
+    : serverNow ?? (startPoint ? new Date(startPoint).getTime() : 0);
+  const elapsed = startPoint
+    ? Math.max(0, Math.floor((timerEnd - new Date(startPoint).getTime()) / 1000))
+    : 0;
+  const seconds = Math.min(elapsed, HALF_DURATION);
+  const halfStatus = isFinished
+    ? "finished"
+    : isLive
+      ? seconds >= HALF_DURATION
+        ? half === 2 ? "finished_halves" : "halftime"
+        : half === 2 ? "second" : "running"
+      : "pre";
+  const isActive = isLive && !isPaused && seconds < HALF_DURATION;
+  const canScore = isLive && (halfStatus === "running" || halfStatus === "second");
+  const isHalftime = halfStatus === "halftime";
+  const isFulltime = halfStatus === "finished_halves";
+
+  // The display derives from server timestamps. This interval only advances
+  // the current-time reference between server refetches.
   useEffect(() => {
-    if (isActive) {
-      timerRef.current = setInterval(() => {
-        setSeconds((prev) => {
-          if (prev + 1 >= HALF_DURATION) {
-            clearInterval(timerRef.current);
-            setIsActive(false);
-            if (halfStatus === "running") {
-              setHalfStatus("halftime");
-              Vibration.vibrate([0, 200, 100, 200]);
-            } else if (halfStatus === "second") {
-              setHalfStatus("finished_halves");
-              Vibration.vibrate([0, 200, 100, 200, 100, 200]);
-            }
-            return HALF_DURATION;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    } else {
+    if (!isActive) {
       clearInterval(timerRef.current);
+      return undefined;
     }
+    timerRef.current = setInterval(() => setServerNow(Date.now()), 1000);
     return () => clearInterval(timerRef.current);
-  }, [isActive, halfStatus]);
+  }, [isActive]);
 
   const startSecondHalfMutation = useMutation({
     mutationFn: async () => {
@@ -171,15 +210,14 @@ export default function MatchControl() {
         method: "POST",
         body: JSON.stringify({ action: "START_SECOND_HALF", matchId: id }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
-    onSuccess: () => {
-      setSeconds(0);
-      setHalf(2);
-      setHalfStatus("second");
-      setIsActive(true);
-      queryClient.invalidateQueries(["match-detail", id]);
+    retry: retryTransientCommand,
+    onSuccess: async () => {
+      setIsPaused(false);
+      await queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
     },
+    onError: (error) => Alert.alert("Unable to start second half", error.message),
   });
 
   const startSecondHalf = () => startSecondHalfMutation.mutate();
@@ -194,10 +232,16 @@ export default function MatchControl() {
 
   const handleGoalClick = (side) => {
     const players = side === "home" ? homePlayers : awayPlayers;
+    const opId = pendingGoalSide === side && pendingGoalOpId
+      ? pendingGoalOpId
+      : Crypto.randomUUID();
+    setPendingGoalOpId(opId);
+    setPendingGoalSide(side);
     if (players.length === 0) {
       recordGoalMutation.mutate({
         type: side === "home" ? "goal_home" : "goal_away",
         playerId: null,
+        opId,
       });
     } else {
       setShowPlayerSelect(side);
@@ -242,15 +286,7 @@ export default function MatchControl() {
     );
   }
 
-  const { match, events = [] } = data || {};
   if (!match) return null;
-
-  const isLive = match.status === "live";
-  const isFinished = match.status === "final";
-  const canScore =
-    isLive && (halfStatus === "running" || halfStatus === "second");
-  const isHalftime = halfStatus === "halftime";
-  const isFulltime = halfStatus === "finished_halves";
 
   const timerColor = isHalftime
     ? "#FFD700"
@@ -453,7 +489,7 @@ export default function MatchControl() {
             </Text>
             <TouchableOpacity
               onPress={() => handleGoalClick("home")}
-              disabled={!canScore}
+              disabled={!canScore || recordGoalMutation.isPending}
               activeOpacity={0.7}
               style={{
                 width: "100%",
@@ -548,7 +584,7 @@ export default function MatchControl() {
             </Text>
             <TouchableOpacity
               onPress={() => handleGoalClick("away")}
-              disabled={!canScore}
+              disabled={!canScore || recordGoalMutation.isPending}
               activeOpacity={0.7}
               style={{
                 width: "100%",
@@ -613,6 +649,7 @@ export default function MatchControl() {
             </Text>
             <TouchableOpacity
               onPress={startSecondHalf}
+              disabled={startSecondHalfMutation.isPending}
               activeOpacity={0.8}
               style={{
                 backgroundColor: "#FFD700",
@@ -711,7 +748,7 @@ export default function MatchControl() {
           {isLive && !isHalftime && (
             <View style={{ flexDirection: "row", gap: 10 }}>
               <TouchableOpacity
-                onPress={() => setIsActive(!isActive)}
+                onPress={() => setIsPaused(!isPaused)}
                 activeOpacity={0.8}
                 style={{
                   flex: 1,
@@ -759,6 +796,7 @@ export default function MatchControl() {
                   )
                 }
                 activeOpacity={0.8}
+                disabled={endMatchMutation.isPending}
                 style={{
                   flex: 1,
                   height: 52,
@@ -964,6 +1002,7 @@ export default function MatchControl() {
                     </Text>
                     {(isHomeGoal || isAwayGoal) && isLive && (
                       <TouchableOpacity
+                        disabled={deleteEventMutation.isPending}
                         onPress={() =>
                           Alert.alert(
                             "Delete Goal",
@@ -1002,7 +1041,13 @@ export default function MatchControl() {
         visible={!!showPlayerSelect}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowPlayerSelect(null)}
+        onRequestClose={() => {
+          if (!recordGoalMutation.isPending) {
+            setShowPlayerSelect(null);
+            setPendingGoalOpId(null);
+            setPendingGoalSide(null);
+          }
+        }}
       >
         <View
           style={{
@@ -1043,7 +1088,14 @@ export default function MatchControl() {
               >
                 WHO SCORED?
               </Text>
-              <TouchableOpacity onPress={() => setShowPlayerSelect(null)}>
+              <TouchableOpacity
+                disabled={recordGoalMutation.isPending}
+                onPress={() => {
+                  setShowPlayerSelect(null);
+                  setPendingGoalOpId(null);
+                  setPendingGoalSide(null);
+                }}
+              >
                 <X size={20} color="rgba(0,245,212,0.4)" />
               </TouchableOpacity>
             </View>
@@ -1051,11 +1103,13 @@ export default function MatchControl() {
             <ScrollView contentContainerStyle={{ padding: 16, gap: 8 }}>
               {/* Unknown player option */}
               <TouchableOpacity
+                disabled={recordGoalMutation.isPending}
                 onPress={() =>
                   recordGoalMutation.mutate({
                     type:
                       showPlayerSelect === "home" ? "goal_home" : "goal_away",
                     playerId: null,
+                    opId: pendingGoalOpId,
                   })
                 }
                 activeOpacity={0.7}
@@ -1105,6 +1159,7 @@ export default function MatchControl() {
                 (player) => (
                   <TouchableOpacity
                     key={player.id}
+                    disabled={recordGoalMutation.isPending}
                     onPress={() =>
                       recordGoalMutation.mutate({
                         type:
@@ -1112,6 +1167,7 @@ export default function MatchControl() {
                             ? "goal_home"
                             : "goal_away",
                         playerId: player.id,
+                        opId: pendingGoalOpId,
                       })
                     }
                     activeOpacity={0.7}

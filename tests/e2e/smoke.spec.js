@@ -128,6 +128,15 @@ test("league detail renders numeric day and primary tabs", async ({ context, pag
   await mockJson(page, `**/api/leagues?leagueId=${leagueId}`, league);
   await mockJson(page, `**/api/stats?leagueId=${leagueId}`, { standings: [], topScorers: [] });
   await mockJson(page, `**/api/matches?leagueId=${leagueId}`, []);
+  await mockJson(page, `**/api/teams?leagueId=${leagueId}`, [{
+    id: "team-1",
+    league_id: leagueId,
+    slot_id: "slot-1",
+    name: "Nova United",
+    status: "active",
+    captain_name: "Captain smoke user",
+    created_at: "2026-10-01T00:00:00.000Z",
+  }]);
   await mockJson(page, `**/api/admin/referees?venueId=${venueId}`, { referees: [] });
 
   await page.goto(`/admin/league/${leagueId}`);
@@ -170,6 +179,81 @@ test("referee area renders match-day shell", async ({ context, page }) => {
   await page.goto("/referee");
   await expect(page.getByRole("heading", { name: "Referee Portal" })).toBeVisible();
   await expect(page.getByText("NO MATCHES TODAY")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("referee match commands surface HTTP failures without false success", async ({ context, page }) => {
+  const errors = watchRuntimeErrors(page);
+  await authenticate(context, page, "referee");
+  await mockJson(page, "**/api/matches?matchId=match-command-failure", {
+    match: {
+      id: "match-command-failure",
+      status: "scheduled",
+      field_number: 1,
+      home_score: 0,
+      away_score: 0,
+      home_team_name: "Nova United",
+      away_team_name: "Orion City",
+      home_team_id: "team-home",
+      away_team_id: "team-away",
+      time_slot: "18:30",
+      match_duration_minutes: 20,
+    },
+    events: [],
+  });
+  await mockJson(page, "**/api/players?teamId=*", []);
+  await page.route("**/api/matches", (route) => route.fulfill({
+    status: 409,
+    json: { error: "Cannot start a match with status 'live'" },
+  }));
+
+  await page.goto("/referee/match/match-command-failure");
+  await page.getByRole("button", { name: /start match/i }).click();
+  await expect(page.getByText("Cannot start a match with status 'live'")).toBeVisible();
+  await expect(page.getByText("1st half started!")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("referee goal retry preserves one operation ID and server score authority", async ({ context, page }) => {
+  const errors = watchRuntimeErrors(page);
+  await authenticate(context, page, "referee");
+  await mockJson(page, "**/api/matches?matchId=match-goal-retry", {
+    match: {
+      id: "match-goal-retry",
+      status: "live",
+      field_number: 1,
+      home_score: 0,
+      away_score: 0,
+      home_team_name: "Nova United",
+      away_team_name: "Orion City",
+      home_team_id: "team-home",
+      away_team_id: "team-away",
+      start_time: new Date(Date.now() - 10_000).toISOString(),
+      half2_start_time: null,
+      time_slot: "18:30",
+      match_duration_minutes: 20,
+    },
+    events: [],
+  });
+  await mockJson(page, "**/api/players?teamId=*", []);
+  const commands = [];
+  await page.route("**/api/matches", async (route) => {
+    commands.push(route.request().postDataJSON());
+    if (commands.length === 1) {
+      await route.fulfill({ status: 500, json: { error: "Temporary database failure" } });
+    } else {
+      await route.fulfill({ status: 200, json: { success: true, idempotent: false } });
+    }
+  });
+
+  await page.goto("/referee/match/match-goal-retry");
+  await page.getByRole("button", { name: /\+ goal/i }).first().click();
+  await page.getByRole("button", { name: /unknown \/ no roster/i }).click();
+  await expect(page.getByText("Goal recorded!")).toBeVisible();
+  expect(commands).toHaveLength(2);
+  expect(commands[0].opId).toBe(commands[1].opId);
+  expect(commands[0].opId).toMatch(/^[0-9a-f-]{36}$/);
+  await expect(page.locator(".mc-score-display").first()).toHaveText("0");
   expect(errors).toEqual([]);
 });
 

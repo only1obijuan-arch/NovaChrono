@@ -66,7 +66,9 @@ jobs:
           for migration in migrations/0003_*.sql migrations/0004_*.sql migrations/0005_*.sql migrations/0006_*.sql; do
             psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f "$migration"
           done
-          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "SELECT 1 FROM auth_users LIMIT 1"
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO match_events (match_id, type) VALUES ('70000000-0000-4000-8000-000000000001', 'start_first_half')"
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0007_match_goal_idempotency.sql
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "SELECT operation_id FROM match_events WHERE match_id = '70000000-0000-4000-8000-000000000001'"
 
       - name: Unit and contract tests
         run: npm test

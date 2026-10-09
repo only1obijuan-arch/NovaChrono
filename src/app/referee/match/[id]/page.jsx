@@ -15,6 +15,27 @@ import {
 
 const HALF_DURATION = 20 * 60; // 20 minutes in seconds
 
+async function requireCommandSuccess(response) {
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // Preserve the HTTP error below when the server did not return JSON.
+  }
+  if (!response.ok) {
+    const detail = typeof payload?.error === "string"
+      ? payload.error
+      : `Match command failed (${response.status})`;
+    const error = new Error(detail);
+    error.retryable = response.status >= 500;
+    throw error;
+  }
+  return payload;
+}
+
+const retryTransientCommand = (failureCount, error) =>
+  failureCount < 1 && error?.retryable !== false;
+
 export default function MatchControl({ params }) {
   const { id } = React.use(params);
   const router = useRouter();
@@ -23,6 +44,7 @@ export default function MatchControl({ params }) {
   const [isPaused, setIsPaused] = useState(false);
   const [showPlayerSelect, setShowPlayerSelect] = useState(null);
   const [pendingGoalType, setPendingGoalType] = useState(null);
+  const [pendingGoalOpId, setPendingGoalOpId] = useState(null);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [serverNow, setServerNow] = useState(null);
   const timerRef = useRef(null);
@@ -31,8 +53,9 @@ export default function MatchControl({ params }) {
     queryKey: ["match-detail", id],
     queryFn: async () => {
       const res = await fetch(`/api/matches?matchId=${id}`);
-      return res.json();
+      return requireCommandSuccess(res);
     },
+    retry: retryTransientCommand,
     refetchInterval: 5000,
   });
 
@@ -61,18 +84,20 @@ export default function MatchControl({ params }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "START_MATCH", matchId: id }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
+    retry: retryTransientCommand,
     onSuccess: () => {
       setIsPaused(false);
       setSeconds(0);
       toast.success("1st half started!");
       queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
     },
+    onError: (error) => toast.error(error.message),
   });
 
   const recordGoalMutation = useMutation({
-    mutationFn: async ({ type, playerId }) => {
+    mutationFn: async ({ type, playerId, opId }) => {
       const res = await fetch("/api/matches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -81,15 +106,20 @@ export default function MatchControl({ params }) {
           matchId: id,
           type,
           playerId,
+          opId,
         }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
+    retry: retryTransientCommand,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
       setShowPlayerSelect(null);
+      setPendingGoalType(null);
+      setPendingGoalOpId(null);
       toast.success("Goal recorded!");
     },
+    onError: (error) => toast.error(error.message),
   });
 
   const deleteEventMutation = useMutation({
@@ -99,12 +129,14 @@ export default function MatchControl({ params }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "DELETE_EVENT", matchId: id, eventId }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
+    retry: retryTransientCommand,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
       toast.success("Event deleted!");
     },
+    onError: (error) => toast.error(error.message),
   });
 
   const startSecondHalfMutation = useMutation({
@@ -114,14 +146,16 @@ export default function MatchControl({ params }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "START_SECOND_HALF", matchId: id }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
+    retry: retryTransientCommand,
     onSuccess: () => {
       setSeconds(0);
       setIsPaused(false);
       toast.success("2nd half started!");
       queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
     },
+    onError: (error) => toast.error(error.message),
   });
 
   const endMatchMutation = useMutation({
@@ -131,12 +165,15 @@ export default function MatchControl({ params }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "END_MATCH", matchId: id }),
       });
-      return res.json();
+      return requireCommandSuccess(res);
     },
-    onSuccess: () => {
+    retry: retryTransientCommand,
+    onSuccess: async () => {
       toast.success("Match ended!");
+      await queryClient.invalidateQueries({ queryKey: ["match-detail", id] });
       router.push("/referee");
     },
+    onError: (error) => toast.error(error.message),
   });
 
   const half = data?.match?.half2_start_time ? 2 : 1;
@@ -181,6 +218,7 @@ export default function MatchControl({ params }) {
   const handleGoalClick = (type) => {
     const team = type === "goal_home" ? "home" : "away";
     setPendingGoalType(type);
+    setPendingGoalOpId(crypto.randomUUID());
     setShowPlayerSelect(team);
   };
 
@@ -448,7 +486,7 @@ export default function MatchControl({ params }) {
               className="mc-goal-btn"
               style={{ "--team-color": "#00F5D4" }}
               onClick={() => handleGoalClick("goal_home")}
-              disabled={!canScoreGoals}
+              disabled={!canScoreGoals || recordGoalMutation.isPending}
             >
               + GOAL
             </button>
@@ -469,7 +507,7 @@ export default function MatchControl({ params }) {
               className="mc-goal-btn"
               style={{ "--team-color": "#FF00CC" }}
               onClick={() => handleGoalClick("goal_away")}
-              disabled={!canScoreGoals}
+              disabled={!canScoreGoals || recordGoalMutation.isPending}
             >
               + GOAL
             </button>
@@ -481,7 +519,7 @@ export default function MatchControl({ params }) {
           <div className="mc-halftime-banner">
             <p className="mc-halftime-title">⏸ HALF TIME</p>
             <p className="mc-halftime-sub">1ST HALF COMPLETE — REST PERIOD</p>
-            <button className="mc-halftime-btn" onClick={startSecondHalf}>
+            <button className="mc-halftime-btn" onClick={startSecondHalf} disabled={startSecondHalfMutation.isPending}>
               ▶ START 2ND HALF
             </button>
           </div>
@@ -505,6 +543,7 @@ export default function MatchControl({ params }) {
             <button
               className="mc-ctrl-btn mc-start-btn"
               onClick={() => startMatchMutation.mutate()}
+              disabled={startMatchMutation.isPending}
             >
               <Play size={28} fill="currentColor" /> START MATCH
             </button>
@@ -520,13 +559,14 @@ export default function MatchControl({ params }) {
               </button>
               <button
                 className="mc-ctrl-btn mc-end-btn"
+                disabled={endMatchMutation.isPending}
                 onClick={() => {
                    setShowEndConfirm(true);
                 }}
               >
                 <CheckCircle2 size={20} /> END MATCH
               </button>
-               <button className="mc-ctrl-btn mc-abandon-btn" onClick={handleUndoLastGoal}>
+               <button className="mc-ctrl-btn mc-abandon-btn" onClick={handleUndoLastGoal} disabled={deleteEventMutation.isPending}>
                 <AlertTriangle size={20} /> UNDO LAST GOAL
               </button>
             </div>
@@ -580,6 +620,7 @@ export default function MatchControl({ params }) {
                     isLive && (
                       <button
                         className="mc-event-delete"
+                        disabled={deleteEventMutation.isPending}
                         onClick={() => {
                           if (confirm("Delete this goal?"))
                             deleteEventMutation.mutate(event.id);
@@ -612,7 +653,7 @@ export default function MatchControl({ params }) {
             </div>
             <div className="mc-modal-btns">
               <button className="mc-modal-cancel" onClick={() => setShowEndConfirm(false)}>GO BACK / EDIT</button>
-              <button className="mc-modal-submit" onClick={() => endMatchMutation.mutate()}>CONFIRM END MATCH</button>
+              <button className="mc-modal-submit" disabled={endMatchMutation.isPending} onClick={() => endMatchMutation.mutate()}>CONFIRM END MATCH</button>
             </div>
           </div>
         </div>
@@ -626,7 +667,12 @@ export default function MatchControl({ params }) {
               <h3 className="mc-modal-title">WHO SCORED?</h3>
               <button
                 className="mc-modal-close"
-                onClick={() => setShowPlayerSelect(null)}
+                disabled={recordGoalMutation.isPending}
+                onClick={() => {
+                  setShowPlayerSelect(null);
+                  setPendingGoalType(null);
+                  setPendingGoalOpId(null);
+                }}
               >
                 <X size={18} />
               </button>
@@ -634,10 +680,12 @@ export default function MatchControl({ params }) {
             <div className="mc-modal-list">
               <button
                 className="mc-player-btn"
+                disabled={recordGoalMutation.isPending}
                 onClick={() =>
                   recordGoalMutation.mutate({
                     type: pendingGoalType || (showPlayerSelect === "home" ? "goal_home" : "goal_away"),
                     playerId: null,
+                    opId: pendingGoalOpId,
                   })
                 }
               >
@@ -649,10 +697,12 @@ export default function MatchControl({ params }) {
                   <button
                     key={player.id}
                     className="mc-player-btn"
+                    disabled={recordGoalMutation.isPending}
                     onClick={() =>
                       recordGoalMutation.mutate({
                          type: pendingGoalType || (showPlayerSelect === "home" ? "goal_home" : "goal_away"),
                         playerId: player.id,
+                        opId: pendingGoalOpId,
                       })
                     }
                   >
