@@ -1,28 +1,31 @@
 import sql, { withTransaction } from "@/app/api/utils/sql";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 import { resolveCurrentUser } from "@/app/api/utils/auth";
+import { recomputeLeagueStandings } from "@/app/api/matches/standings";
 import { z } from "zod";
 
 const MATCH_STATUSES = ["scheduled", "live", "final", "postponed", "cancelled"];
+const uuid = () => z.string().uuid();
 
 const matchActionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("START_MATCH"), matchId: z.string().min(1) }),
+  z.object({ action: z.literal("START_MATCH"), matchId: uuid() }),
   z.object({
     action: z.literal("RECORD_GOAL"),
-    matchId: z.string().min(1),
+    matchId: uuid(),
     type: z.enum(["goal_home", "goal_away"]),
-    playerId: z.string().min(1).nullable().optional(),
+    opId: uuid().optional(),
+    playerId: uuid().nullable().optional(),
   }),
   z.object({
     action: z.literal("DELETE_EVENT"),
-    matchId: z.string().min(1),
-    eventId: z.string().min(1),
+    matchId: uuid(),
+    eventId: uuid(),
   }),
-  z.object({ action: z.literal("END_MATCH"), matchId: z.string().min(1) }),
-  z.object({ action: z.literal("START_SECOND_HALF"), matchId: z.string().min(1) }),
+  z.object({ action: z.literal("END_MATCH"), matchId: uuid() }),
+  z.object({ action: z.literal("START_SECOND_HALF"), matchId: uuid() }),
   z.object({
     action: z.literal("ADMIN_OVERRIDE"),
-    matchId: z.string().min(1),
+    matchId: uuid(),
     homeScore: z.number().int().min(0).max(99),
     awayScore: z.number().int().min(0).max(99),
     status: z.enum(MATCH_STATUSES),
@@ -30,8 +33,8 @@ const matchActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("ASSIGN_REFEREE"),
-    matchId: z.string().min(1),
-    refereeId: z.string().min(1).nullable(),
+    matchId: uuid(),
+    refereeId: uuid().nullable(),
   }),
 ]);
 
@@ -42,15 +45,45 @@ function canAccessVenue(user, venueId) {
   return user.role === "super_admin" || (user.venue_id != null && user.venue_id === venueId);
 }
 
+async function lockMatch(txSql, matchId) {
+  const [match] = await txSql`
+    SELECT m.*, l.venue_id AS league_venue_id
+    FROM matches m
+    JOIN leagues l ON l.id = m.league_id
+    WHERE m.id = ${matchId}
+    FOR UPDATE OF m
+  `;
+  return match ?? null;
+}
+
+async function authorizeLockedMatch(txSql, identityId, match, roles = WRITE_ROLES) {
+  const [actor] = await txSql`
+    SELECT id, role, venue_id, organization_id
+    FROM auth_users
+    WHERE id = ${identityId}
+    FOR SHARE
+  `;
+  if (!actor) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
+  if (!roles.includes(actor.role)) {
+    return { response: Response.json({ error: "Insufficient permissions" }, { status: 403 }) };
+  }
+  if (!canAccessVenue(actor, match.league_venue_id)) {
+    return { response: Response.json({ error: "Access denied" }, { status: 403 }) };
+  }
+  if (actor.role === "referee" && match.referee_id !== actor.id) {
+    return { response: Response.json({ error: "Not assigned to this match" }, { status: 403 }) };
+  }
+  return { actor };
+}
+
 export async function POST(request) {
   try {
     const user = await resolveCurrentUser(request);
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    // Cheap fail-fast only. Every authoritative role, venue, and referee check
+    // is repeated against live data after the match row is locked.
     if (!WRITE_ROLES.includes(user.role)) {
-      return Response.json(
-        { error: "Insufficient permissions" },
-        { status: 403 },
-      );
+      return Response.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
     const parsed = matchActionSchema.safeParse(await request.json());
@@ -59,70 +92,111 @@ export async function POST(request) {
     }
     const { action, matchId, ...data } = parsed.data;
 
-    if (
-      user.role === "referee" &&
-      ["START_MATCH", "RECORD_GOAL", "END_MATCH", "START_SECOND_HALF"].includes(action)
-    ) {
-      const [match] = await sql`SELECT referee_id FROM matches WHERE id = ${matchId}`;
-      if (!match || match.referee_id !== user.id) {
-        return Response.json({ error: "Not assigned to this match" }, { status: 403 });
-      }
-    }
-
     if (action === "START_MATCH") {
-      const [match] = await sql`
-        SELECT m.status, l.venue_id
-        FROM matches m
-        JOIN leagues l ON m.league_id = l.id
-        WHERE m.id = ${matchId}
-      `;
-      if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
-      if (!canAccessVenue(user, match.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
-      if (match.status !== "scheduled") {
-        return Response.json({ error: `Cannot start a match with status '${match.status}'` }, { status: 409 });
-      }
-      await sql`UPDATE matches SET status = 'live', start_time = CURRENT_TIMESTAMP WHERE id = ${matchId}`;
-      await sql`INSERT INTO match_events (match_id, type) VALUES (${matchId}, 'start_first_half')`;
-      return Response.json({ success: true });
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match);
+        if (authorization.response) return authorization.response;
+        if (match.status !== "scheduled") {
+          return Response.json({ error: `Cannot start a match with status '${match.status}'` }, { status: 409 });
+        }
+
+        await txSql`
+          UPDATE matches
+          SET status = 'live', start_time = CURRENT_TIMESTAMP
+          WHERE id = ${matchId}
+        `;
+        await txSql`
+          INSERT INTO match_events (match_id, type)
+          VALUES (${matchId}, 'start_first_half')
+        `;
+        return Response.json({ success: true });
+      });
     }
 
     if (action === "RECORD_GOAL") {
-      const { type, playerId } = data;
-      const [matchRow] = await sql`
-        SELECT m.status, m.home_slot_id, m.away_slot_id, l.venue_id
-        FROM matches m
-        JOIN leagues l ON m.league_id = l.id
-        WHERE m.id = ${matchId}
-      `;
-      if (!matchRow) return Response.json({ error: "Match not found" }, { status: 404 });
-      if (!canAccessVenue(user, matchRow.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
-      if (matchRow.status !== "live") {
-        return Response.json({ error: `Cannot record goals for a match with status '${matchRow.status}'` }, { status: 409 });
-      }
-      const slotId = type === "goal_home" ? matchRow.home_slot_id : matchRow.away_slot_id;
-      const [team] = await sql`SELECT id FROM teams WHERE slot_id = ${slotId} AND status = 'active' LIMIT 1`;
-      await sql`INSERT INTO match_events (match_id, type, player_id, team_id) VALUES (${matchId}, ${type}, ${playerId ?? null}, ${team?.id ?? null})`;
-      if (type === "goal_home") {
-        await sql`UPDATE matches SET home_score = home_score + 1 WHERE id = ${matchId}`;
-      } else {
-        await sql`UPDATE matches SET away_score = away_score + 1 WHERE id = ${matchId}`;
-      }
-      return Response.json({ success: true });
+      const { type, playerId, opId } = data;
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match);
+        if (authorization.response) return authorization.response;
+        if (match.status !== "live") {
+          return Response.json({ error: `Cannot record goals for a match with status '${match.status}'` }, { status: 409 });
+        }
+
+        const slotId = type === "goal_home" ? match.home_slot_id : match.away_slot_id;
+        const [team] = await txSql`
+          SELECT id
+          FROM teams
+          WHERE league_id = ${match.league_id}
+            AND slot_id = ${slotId}
+            AND status = 'active'
+          LIMIT 1
+          FOR SHARE
+        `;
+        if (!team) {
+          return Response.json({ error: "No active scoring team is assigned to this slot" }, { status: 409 });
+        }
+
+        if (playerId != null) {
+          const [player] = await txSql`SELECT id, team_id FROM players WHERE id = ${playerId} FOR SHARE`;
+          if (!player) return Response.json({ error: "Player not found" }, { status: 404 });
+          if (player.team_id !== team.id) {
+            return Response.json({ error: "Player does not belong to the scoring team" }, { status: 409 });
+          }
+        }
+
+        if (opId == null) {
+          console.warn("[matches] Legacy RECORD_GOAL received without opId; request is atomic but not retry-idempotent.");
+          await txSql`
+            INSERT INTO match_events (match_id, type, player_id, team_id, operation_id)
+            VALUES (${matchId}, ${type}, ${playerId ?? null}, ${team.id}, NULL)
+          `;
+        } else {
+          const [inserted] = await txSql`
+            INSERT INTO match_events (match_id, type, player_id, team_id, operation_id)
+            VALUES (${matchId}, ${type}, ${playerId ?? null}, ${team.id}, ${opId})
+            ON CONFLICT (match_id, operation_id) WHERE operation_id IS NOT NULL
+            DO NOTHING
+            RETURNING id
+          `;
+
+          if (!inserted) {
+            const [existing] = await txSql`
+              SELECT type, player_id, team_id
+              FROM match_events
+              WHERE match_id = ${matchId} AND operation_id = ${opId}
+            `;
+            const sameCommand = existing
+              && existing.type === type
+              && (existing.player_id ?? null) === (playerId ?? null)
+              && existing.team_id === team.id;
+            if (!sameCommand) {
+              return Response.json({ error: "opId was already used for a different goal command" }, { status: 409 });
+            }
+            return Response.json({ success: true, idempotent: true });
+          }
+        }
+
+        if (type === "goal_home") {
+          await txSql`UPDATE matches SET home_score = home_score + 1 WHERE id = ${matchId}`;
+        } else {
+          await txSql`UPDATE matches SET away_score = away_score + 1 WHERE id = ${matchId}`;
+        }
+        return Response.json({ success: true, idempotent: false, legacy: opId == null });
+      });
     }
 
     if (action === "DELETE_EVENT") {
       const { eventId } = data;
       // Lock the same match as finalisation before checking state or touching its event.
       const result = await withTransaction(async (txSql) => {
-        const [match] = await txSql`
-          SELECT m.status, m.referee_id, l.venue_id
-          FROM matches m JOIN leagues l ON m.league_id = l.id
-          WHERE m.id = ${matchId} FOR UPDATE OF m
-        `;
+        const match = await lockMatch(txSql, matchId);
         if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
-        if (!canAccessVenue(user, match.venue_id) || (user.role === "referee" && match.referee_id !== user.id)) {
-          return Response.json({ error: "Access denied" }, { status: 403 });
-        }
+        const authorization = await authorizeLockedMatch(txSql, user.id, match);
+        if (authorization.response) return authorization.response;
         if (match.status !== "live") return Response.json({ error: "Only live match goals can be corrected here" }, { status: 409 });
         const [event] = await txSql`SELECT * FROM match_events WHERE id = ${eventId} AND match_id = ${matchId} FOR UPDATE`;
         if (!event || event.match_id !== matchId) return Response.json({ error: "Event not found in this match" }, { status: 404 });
@@ -133,234 +207,124 @@ export async function POST(request) {
           await txSql`UPDATE matches SET away_score = GREATEST(0, away_score - 1) WHERE id = ${matchId}`;
         }
         await txSql`DELETE FROM match_events WHERE id = ${eventId} AND match_id = ${matchId}`;
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value)
+          VALUES (
+            ${authorization.actor.id},
+            ${event.id},
+            'DELETE_MATCH_GOAL',
+            ${JSON.stringify(event)},
+            NULL
+          )
+        `;
         return Response.json({ success: true });
       });
       return result;
     }
 
     if (action === "END_MATCH") {
-      let invalidEndState = null;
-      let matchNotFound = false;
-      let accessDenied = false;
-      await withTransaction(async (txSql) => {
-        const [matchRow] = await txSql`
-          SELECT m.status, m.league_id, m.home_slot_id, m.away_slot_id, m.home_score, m.away_score, l.venue_id
-          FROM matches m
-          JOIN leagues l ON m.league_id = l.id
-          WHERE m.id = ${matchId}
-          FOR UPDATE OF m
-        `;
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match);
+        if (authorization.response) return authorization.response;
 
-        if (!matchRow) { matchNotFound = true; return; }
-        if (!canAccessVenue(user, matchRow.venue_id)) { accessDenied = true; return; }
-        // Idempotency guard: if a previous call already finalised the match, do nothing.
-        if (matchRow.status === "final") return;
-        if (matchRow.status !== "live") { invalidEndState = matchRow.status; return; }
+        if (match.status === "final") {
+          await recomputeLeagueStandings(txSql, match.league_id);
+          return Response.json({ success: true, idempotent: true });
+        }
+        if (match.status !== "live") {
+          return Response.json({ error: `Cannot end a match with status '${match.status}'` }, { status: 409 });
+        }
 
         await txSql`UPDATE matches SET status = 'final', end_time = CURRENT_TIMESTAMP WHERE id = ${matchId}`;
         await txSql`INSERT INTO match_events (match_id, type) VALUES (${matchId}, 'end_match')`;
-
-        const [homeTeam] = await txSql`SELECT id FROM teams WHERE slot_id = ${matchRow.home_slot_id} AND status = 'active' LIMIT 1`;
-        const [awayTeam] = await txSql`SELECT id FROM teams WHERE slot_id = ${matchRow.away_slot_id} AND status = 'active' LIMIT 1`;
-
-        const h = matchRow.home_score;
-        const a = matchRow.away_score;
-        const homeWon = h > a ? 1 : 0;
-        const awayWon = a > h ? 1 : 0;
-        const drawn = h === a ? 1 : 0;
-
-        if (homeTeam) {
-          await txSql`
-            UPDATE standings SET
-              played = played + 1,
-              won = won + ${homeWon},
-              drawn = drawn + ${drawn},
-              lost = lost + ${awayWon},
-              goals_for = goals_for + ${h},
-              goals_against = goals_against + ${a},
-              goal_difference = goal_difference + ${h - a},
-              points = points + ${homeWon * 3 + drawn}
-            WHERE league_id = ${matchRow.league_id} AND team_id = ${homeTeam.id}
-          `;
-        }
-
-        if (awayTeam) {
-          await txSql`
-            UPDATE standings SET
-              played = played + 1,
-              won = won + ${awayWon},
-              drawn = drawn + ${drawn},
-              lost = lost + ${homeWon},
-              goals_for = goals_for + ${a},
-              goals_against = goals_against + ${h},
-              goal_difference = goal_difference + ${a - h},
-              points = points + ${awayWon * 3 + drawn}
-            WHERE league_id = ${matchRow.league_id} AND team_id = ${awayTeam.id}
-          `;
-        }
+        await recomputeLeagueStandings(txSql, match.league_id);
+        return Response.json({ success: true, idempotent: false });
       });
-
-      if (matchNotFound) return Response.json({ error: "Match not found" }, { status: 404 });
-      if (accessDenied) return Response.json({ error: "Access denied" }, { status: 403 });
-      if (invalidEndState !== null) {
-        return Response.json({ error: `Cannot end a match with status '${invalidEndState}'` }, { status: 409 });
-      }
-      return Response.json({ success: true });
     }
 
     if (action === "START_SECOND_HALF") {
-      const [match] = await sql`
-        SELECT m.status, l.venue_id
-        FROM matches m
-        JOIN leagues l ON m.league_id = l.id
-        WHERE m.id = ${matchId}
-      `;
-      if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
-      if (!canAccessVenue(user, match.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
-      if (match.status !== "live") {
-        return Response.json({ error: `Cannot start second half for a match with status '${match.status}'` }, { status: 409 });
-      }
-      await sql`UPDATE matches SET half2_start_time = CURRENT_TIMESTAMP WHERE id = ${matchId}`;
-      await sql`INSERT INTO match_events (match_id, type) VALUES (${matchId}, 'start_second_half')`;
-      return Response.json({ success: true });
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match);
+        if (authorization.response) return authorization.response;
+        if (match.status !== "live") {
+          return Response.json({ error: `Cannot start second half for a match with status '${match.status}'` }, { status: 409 });
+        }
+
+        const [phaseState] = await txSql`
+          SELECT
+            EXISTS (
+              SELECT 1 FROM match_events
+              WHERE match_id = ${matchId} AND type = 'start_first_half'
+            ) AS first_half_event,
+            EXISTS (
+              SELECT 1 FROM match_events
+              WHERE match_id = ${matchId} AND type = 'start_second_half'
+            ) AS second_half_event
+        `;
+        if (!match.start_time || !phaseState.first_half_event) {
+          return Response.json({ error: "First half has not been started consistently" }, { status: 409 });
+        }
+        if (match.half2_start_time || phaseState.second_half_event) {
+          if (match.half2_start_time && phaseState.second_half_event) {
+            return Response.json({ success: true, idempotent: true });
+          }
+          return Response.json({ error: "Second-half state is inconsistent" }, { status: 409 });
+        }
+
+        await txSql`UPDATE matches SET half2_start_time = CURRENT_TIMESTAMP WHERE id = ${matchId}`;
+        await txSql`INSERT INTO match_events (match_id, type) VALUES (${matchId}, 'start_second_half')`;
+        return Response.json({ success: true, idempotent: false });
+      });
     }
 
     if (action === "ADMIN_OVERRIDE") {
-      if (!ADMIN_ROLES.includes(user.role)) {
-        return Response.json(
-          { error: "Admin access required" },
-          { status: 403 },
-        );
-      }
       const { homeScore, awayScore, status: newStatus, reason } = data;
-
-      let notFound = false;
-      let accessDenied = false;
-
-      await withTransaction(async (txSql) => {
-        const [oldMatch] = await txSql`
-          SELECT m.*, l.venue_id AS league_venue_id
-          FROM matches m
-          JOIN leagues l ON m.league_id = l.id
-          WHERE m.id = ${matchId}
-          FOR UPDATE OF m
-        `;
-        if (!oldMatch) { notFound = true; return; }
-        if (!canAccessVenue(user, oldMatch.league_venue_id)) { accessDenied = true; return; }
-
-        await txSql`UPDATE matches SET home_score = ${homeScore}, away_score = ${awayScore}, status = ${newStatus} WHERE id = ${matchId}`;
-
-        const [homeTeam] = await txSql`SELECT id FROM teams WHERE slot_id = ${oldMatch.home_slot_id} AND status = 'active' LIMIT 1`;
-        const [awayTeam] = await txSql`SELECT id FROM teams WHERE slot_id = ${oldMatch.away_slot_id} AND status = 'active' LIMIT 1`;
-
-        if (oldMatch.status === "final") {
-          const h = oldMatch.home_score;
-          const a = oldMatch.away_score;
-          const homeWon = h > a ? 1 : 0;
-          const awayWon = a > h ? 1 : 0;
-          const drawn = h === a ? 1 : 0;
-          if (homeTeam) {
-            await txSql`
-              UPDATE standings SET
-                played = played - 1,
-                won = won - ${homeWon},
-                drawn = drawn - ${drawn},
-                lost = lost - ${awayWon},
-                goals_for = goals_for - ${h},
-                goals_against = goals_against - ${a},
-                goal_difference = goal_difference - ${h - a},
-                points = points - ${homeWon * 3 + drawn}
-              WHERE league_id = ${oldMatch.league_id} AND team_id = ${homeTeam.id}
-            `;
-          }
-          if (awayTeam) {
-            await txSql`
-              UPDATE standings SET
-                played = played - 1,
-                won = won - ${awayWon},
-                drawn = drawn - ${drawn},
-                lost = lost - ${homeWon},
-                goals_for = goals_for - ${a},
-                goals_against = goals_against - ${h},
-                goal_difference = goal_difference - ${a - h},
-                points = points - ${awayWon * 3 + drawn}
-              WHERE league_id = ${oldMatch.league_id} AND team_id = ${awayTeam.id}
-            `;
-          }
-        }
-
-        if (newStatus === "final") {
-          const h = homeScore;
-          const a = awayScore;
-          const homeWon = h > a ? 1 : 0;
-          const awayWon = a > h ? 1 : 0;
-          const drawn = h === a ? 1 : 0;
-          if (homeTeam) {
-            await txSql`
-              UPDATE standings SET
-                played = played + 1,
-                won = won + ${homeWon},
-                drawn = drawn + ${drawn},
-                lost = lost + ${awayWon},
-                goals_for = goals_for + ${h},
-                goals_against = goals_against + ${a},
-                goal_difference = goal_difference + ${h - a},
-                points = points + ${homeWon * 3 + drawn}
-              WHERE league_id = ${oldMatch.league_id} AND team_id = ${homeTeam.id}
-            `;
-          }
-          if (awayTeam) {
-            await txSql`
-              UPDATE standings SET
-                played = played + 1,
-                won = won + ${awayWon},
-                drawn = drawn + ${drawn},
-                lost = lost + ${homeWon},
-                goals_for = goals_for + ${a},
-                goals_against = goals_against + ${h},
-                goal_difference = goal_difference + ${a - h},
-                points = points + ${awayWon * 3 + drawn}
-              WHERE league_id = ${oldMatch.league_id} AND team_id = ${awayTeam.id}
-            `;
-          }
-        }
+      return await withTransaction(async (txSql) => {
+        const oldMatch = await lockMatch(txSql, matchId);
+        if (!oldMatch) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, oldMatch, ADMIN_ROLES);
+        if (authorization.response) return authorization.response;
 
         await txSql`
-          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value, reason)
-          VALUES (${user.id}, ${matchId}, 'ADMIN_OVERRIDE', ${JSON.stringify(oldMatch)}, ${JSON.stringify({ homeScore, awayScore, status: newStatus })}, ${reason})
+          UPDATE matches
+          SET home_score = ${homeScore}, away_score = ${awayScore}, status = ${newStatus}
+          WHERE id = ${matchId}
         `;
+        if (oldMatch.status === "final" || newStatus === "final") {
+          await recomputeLeagueStandings(txSql, oldMatch.league_id);
+        }
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value, reason)
+          VALUES (${authorization.actor.id}, ${matchId}, 'ADMIN_OVERRIDE', ${JSON.stringify(oldMatch)}, ${JSON.stringify({ homeScore, awayScore, status: newStatus })}, ${reason})
+        `;
+        return Response.json({ success: true });
       });
-
-      if (notFound) return Response.json({ error: "Match not found" }, { status: 404 });
-      if (accessDenied) return Response.json({ error: "Access denied" }, { status: 403 });
-      return Response.json({ success: true });
     }
 
     if (action === "ASSIGN_REFEREE") {
-      if (!ADMIN_ROLES.includes(user.role)) {
-        return Response.json({ error: "Admin access required" }, { status: 403 });
-      }
       const { refereeId } = data;
-      const [matchRow] = await sql`
-        SELECT l.venue_id AS league_venue_id
-        FROM matches m
-        JOIN leagues l ON m.league_id = l.id
-        WHERE m.id = ${matchId}
-      `;
-      if (!matchRow || !canAccessVenue(user, matchRow.league_venue_id)) {
-        return Response.json({ error: "Access denied" }, { status: 403 });
-      }
-      if (refereeId != null) {
-        const [referee] = await sql`SELECT venue_id, role FROM auth_users WHERE id = ${refereeId}`;
-        if (!referee || referee.role !== "referee") {
-          return Response.json({ error: "Referee not found" }, { status: 404 });
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match, ADMIN_ROLES);
+        if (authorization.response) return authorization.response;
+
+        if (refereeId != null) {
+          const [referee] = await txSql`SELECT venue_id, role FROM auth_users WHERE id = ${refereeId} FOR SHARE`;
+          if (!referee || referee.role !== "referee") {
+            return Response.json({ error: "Referee not found" }, { status: 404 });
+          }
+          if (authorization.actor.role !== "super_admin" && referee.venue_id !== match.league_venue_id) {
+            return Response.json({ error: "Referee does not belong to this venue" }, { status: 403 });
+          }
         }
-        if (user.role !== "super_admin" && String(referee.venue_id) !== String(matchRow.league_venue_id)) {
-          return Response.json({ error: "Referee does not belong to this venue" }, { status: 403 });
-        }
-      }
-      await sql`UPDATE matches SET referee_id = ${refereeId ?? null} WHERE id = ${matchId}`;
-      return Response.json({ success: true });
+        await txSql`UPDATE matches SET referee_id = ${refereeId ?? null} WHERE id = ${matchId}`;
+        return Response.json({ success: true });
+      });
     }
 
     return Response.json({ error: "Invalid action" }, { status: 400 });
