@@ -14,6 +14,7 @@ $freshDb = "${DatabasePrefix}_fresh"
 $productionDb = "${DatabasePrefix}_production"
 $holdDb = "${DatabasePrefix}_hold"
 $preflightDb = "${DatabasePrefix}_preconditions"
+$gate4GuardDb = "${DatabasePrefix}_gate4_guard"
 
 function Invoke-PsqlFile([string]$Database, [string]$File) {
   & $psql -X -v ON_ERROR_STOP=1 -1 -h $HostName -p $Port -U $AdminUser -d $Database -f $File
@@ -50,6 +51,30 @@ function Assert-PsqlValue([string]$Database, [string]$Query, [string]$Expected, 
   }
 }
 
+function Assert-MigrationStatus([string]$Database, [bool]$ShouldSucceed, [string]$ExpectedMessage = "") {
+  $previousUrl = $env:DATABASE_URL
+  $previousDriver = $env:DATABASE_DRIVER
+  try {
+    $env:DATABASE_URL = "postgresql://${AdminUser}@${HostName}:$Port/$Database"
+    $env:DATABASE_DRIVER = "pg"
+    $output = & node (Join-Path $root "scripts\migrate.js") --status 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $env:DATABASE_URL = $previousUrl
+    $env:DATABASE_DRIVER = $previousDriver
+  }
+
+  if ($ShouldSucceed -and $exitCode -ne 0) {
+    throw "Migration status unexpectedly failed for ${Database}: $output"
+  }
+  if (-not $ShouldSucceed -and $exitCode -eq 0) {
+    throw "Migration status unexpectedly accepted an incomplete 0008 ledger in $Database"
+  }
+  if (-not $ShouldSucceed -and $output -notmatch [regex]::Escape($ExpectedMessage)) {
+    throw "Migration status failed without the expected compatibility message: $ExpectedMessage"
+  }
+}
+
 $historical = @("0001_initial.sql", "0002_add_unique_league_slots.sql")
 $gate2 = @(
   "0003_auth_identity_integrity.sql",
@@ -58,9 +83,10 @@ $gate2 = @(
   "0006_remove_redundant_match_index.sql"
 )
 $gate3 = @("0007_match_goal_idempotency.sql")
+$gate4 = @("0008_gate4a_league_operations.sql")
 
 New-TestDatabase $freshDb
-foreach ($migration in ($historical + $gate2 + $gate3)) {
+foreach ($migration in ($historical + $gate2 + $gate3 + $gate4)) {
   Invoke-PsqlFile $freshDb (Join-Path $root "migrations\$migration")
 }
 
@@ -77,6 +103,9 @@ if ($LASTEXITCODE -ne 0) { throw "Failed reproducing the production-nullable mat
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO match_events (match_id, type) VALUES ('70000000-0000-4000-8000-000000000001', 'start_first_half')"
 if ($LASTEXITCODE -ne 0) { throw "Failed seeding a historical match event before Gate 3 migration" }
 foreach ($migration in $gate3) {
+  Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
+}
+foreach ($migration in $gate4) {
   Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
 }
 
@@ -98,6 +127,8 @@ Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid = to_reg
 Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.matches_league_idx')" "0" "The redundant matches league index must be removed"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM match_events WHERE match_id = '70000000-0000-4000-8000-000000000001' AND type = 'start_first_half' AND operation_id IS NULL" "1" "Historical match events must survive Gate 3 migration"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.match_events_match_goal_operation_unique')" "1" "Goal idempotency index must exist"
+Assert-PsqlValue $productionDb "SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'matches' AND column_name = 'match_date'" "timestamp with time zone" "Production-shaped match dates must remain TIMESTAMPTZ"
+Assert-PsqlValue $productionDb "SELECT nova_planned_date(match_date)::text FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'" "2030-01-01" "Gate 4A must expose the production timestamp as its intended Nova date"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO match_events (match_id, type) VALUES ('70000000-0000-4000-8000-000000000001', NULL)"
 if ($LASTEXITCODE -ne 0) { throw "Historical NULL type/NULL operation fixture must remain valid" }
 Assert-PsqlCommandFails $productionDb "INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000001', NULL, '90000000-0000-4000-8000-000000000090')" "match_events_goal_operation_check"
@@ -105,8 +136,26 @@ Assert-PsqlCommandFails $productionDb "INSERT INTO match_events (match_id, type,
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000001', 'goal_home', '90000000-0000-4000-8000-000000000092')"
 if ($LASTEXITCODE -ne 0) { throw "Goal operation ID fixture must be accepted" }
 Assert-PsqlCommandFails $productionDb "INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000001', 'goal_home', '90000000-0000-4000-8000-000000000092')" "match_events_match_goal_operation_unique"
-& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO matches (id, league_id, round_number, match_date, time_slot, field_number, home_slot_id) SELECT '70000000-0000-4000-8000-000000000002', league_id, 2, match_date + 7, time_slot, field_number, home_slot_id FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'; INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000002', 'goal_home', '90000000-0000-4000-8000-000000000092')"
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO matches (id, league_id, round_number, match_date, time_slot, field_number, home_slot_id) SELECT '70000000-0000-4000-8000-000000000002', league_id, 2, match_date + INTERVAL '7 days', time_slot, field_number, home_slot_id FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'; INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000002', 'goal_home', '90000000-0000-4000-8000-000000000092')"
 if ($LASTEXITCODE -ne 0) { throw "The same operation ID must remain valid for another match" }
+Assert-PsqlValue $productionDb "SELECT column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'matches' AND column_name = 'result_type'" "'played'::text" "Gate 4A result metadata must default to played"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_constraint WHERE conrelid = 'matches'::regclass AND conname = 'matches_result_type_check' AND convalidated" "1" "Gate 4A result type constraint must be validated"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid IN (to_regclass('public.matches_active_schedule_lookup'), to_regclass('public.matches_active_referee_schedule_lookup'))" "2" "Gate 4A conflict lookup indexes must exist"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM matches WHERE result_type <> 'played' OR result_type IS NULL" "0" "Historical matches must backfill safely as played"
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "CREATE TABLE schema_migrations (id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); INSERT INTO schema_migrations (name) VALUES ('0008_gate4a_league_operations.sql')"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the valid Gate 4A ledger guard rehearsal" }
+Assert-MigrationStatus $productionDb $true
+
+New-TestDatabase $gate4GuardDb
+foreach ($migration in ($historical + $gate2 + $gate3)) {
+  Invoke-PsqlFile $gate4GuardDb (Join-Path $root "migrations\$migration")
+}
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $gate4GuardDb -c "CREATE TABLE schema_migrations (id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); INSERT INTO schema_migrations (name) VALUES ('0007_match_goal_idempotency.sql')"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the pre-0008 ledger guard rehearsal" }
+Assert-MigrationStatus $gate4GuardDb $true
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $gate4GuardDb -c "INSERT INTO schema_migrations (name) VALUES ('0008_gate4a_league_operations.sql')"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the incomplete 0008 ledger guard rehearsal" }
+Assert-MigrationStatus $gate4GuardDb $false "old/incomplete 0008 detected; forward repair migration required"
 
 New-TestDatabase $holdDb
 foreach ($migration in $historical) {
@@ -149,4 +198,4 @@ Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_
 Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_schema_integrity.sql") "duplicate availability match/team rows exist"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c "DELETE FROM availability_responses WHERE token = 'duplicate-availability'"
 
-Write-Output "Gate 2/3 migration verification passed: fresh, production-shaped, historical-event preservation, strict goal operation checks, match-scoped uniqueness, NULL-role hold, and anomaly fail-closed paths."
+Write-Output "Gate 2/3/4A migration verification passed: fresh, production-shaped, historical preservation, Gate 3 goal idempotency, Gate 4A result metadata, lookup indexes, amended-0008 ledger compatibility guard, NULL-role hold, and anomaly fail-closed paths."

@@ -1,6 +1,7 @@
 import { Calendar } from "lucide-react";
+import { formatLocalFixtureDate } from "@/utils/scheduling";
 
-export function FixturesTab({ matches, referees = [], onAssignReferee }) {
+export function FixturesTab({ matches, referees = [], onAssignReferee, onOperate, pending }) {
   const rounds = [...new Set(matches.map((m) => m.round_number))];
 
   if (matches.length === 0) {
@@ -42,12 +43,13 @@ export function FixturesTab({ matches, referees = [], onAssignReferee }) {
                     </div>
                     <p className="ld-match-team">{match.away_team_name || "TBD"}</p>
                   </div>
-                  <p className="ld-match-date">{new Date(match.match_date).toLocaleDateString()}</p>
+                  <p className="ld-match-date">{formatLocalFixtureDate(match.match_date)} · AFRICA/JOHANNESBURG</p>
                   <div style={{ marginTop: 10 }}>
                     <select
                       className="ld-ref-select"
                       value={match.referee_id || ""}
                       onChange={(e) => onAssignReferee?.(match.id, e.target.value || null)}
+                      disabled={pending || !["scheduled", "postponed"].includes(match.status)}
                     >
                       <option value="">Assign referee...</option>
                       {referees.map((r) => (
@@ -55,7 +57,13 @@ export function FixturesTab({ matches, referees = [], onAssignReferee }) {
                       ))}
                     </select>
                   </div>
-
+                  <div className="fx-card-actions">
+                    <button disabled={pending || !["scheduled", "postponed"].includes(match.status)} onClick={() => onOperate?.("edit", match)}>EDIT</button>
+                    <button disabled={pending || match.status !== "scheduled"} onClick={() => onOperate?.("postpone", match)}>POSTPONE</button>
+                    <button disabled={pending || !["scheduled", "postponed"].includes(match.status)} onClick={() => onOperate?.("cancel", match)}>CANCEL</button>
+                    <button disabled={pending || !["scheduled", "final"].includes(match.status)} onClick={() => onOperate?.("correction", match)}>CORRECT</button>
+                    <button disabled={pending || match.status !== "scheduled"} onClick={() => onOperate?.("forfeit", match)}>FORFEIT</button>
+                  </div>
                 </div>
               ))}
           </div>

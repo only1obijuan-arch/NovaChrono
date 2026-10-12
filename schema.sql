@@ -212,6 +212,8 @@ CREATE TABLE matches (
   away_score        INT     NOT NULL DEFAULT 0,
   status            TEXT    NOT NULL DEFAULT 'scheduled'
                       CHECK (status IN ('scheduled','live','final','postponed','cancelled')),
+  result_type       TEXT    NOT NULL DEFAULT 'played'
+                      CHECK (result_type IN ('played','forfeit_home_win','forfeit_away_win')),
   referee_id        UUID    REFERENCES auth_users(id),     -- NULL until assigned
   start_time        TIMESTAMPTZ,                           -- set on START_MATCH
   half2_start_time  TIMESTAMPTZ,                           -- set on START_SECOND_HALF
@@ -220,6 +222,27 @@ CREATE TABLE matches (
 
 CREATE INDEX idx_matches_league_id  ON matches (league_id);
 CREATE INDEX idx_matches_match_date ON matches (match_date);
+
+CREATE OR REPLACE FUNCTION nova_planned_date(value DATE)
+RETURNS DATE
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+AS $$ SELECT value $$;
+
+CREATE OR REPLACE FUNCTION nova_planned_date(value TIMESTAMPTZ)
+RETURNS DATE
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+AS $$ SELECT (value AT TIME ZONE 'Africa/Johannesburg')::date $$;
+
+CREATE INDEX matches_active_schedule_lookup
+  ON matches (nova_planned_date(match_date), time_slot, field_number, league_id)
+  WHERE status IN ('scheduled', 'live');
+CREATE INDEX matches_active_referee_schedule_lookup
+  ON matches (referee_id, nova_planned_date(match_date), time_slot)
+  WHERE referee_id IS NOT NULL AND status IN ('scheduled', 'live');
 
 -- Append-only log of in-match events (goals, half/full-time markers).
 -- Deleting a goal event decrements the corresponding score counter.

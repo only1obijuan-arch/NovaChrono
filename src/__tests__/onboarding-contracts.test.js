@@ -33,7 +33,7 @@ beforeEach(() => {
     else if (q.includes("SELECT * FROM auth_users")) rows = liveUser ? [liveUser] : [];
     else if (q.includes("SELECT id FROM auth_users")) rows = [];
     else if (q.includes("SELECT id, name FROM leagues")) rows = [{ id: A, name: "League" }];
-    else if (q.includes("SELECT * FROM leagues")) rows = [privateLeague];
+    else if (q.includes("FROM leagues WHERE id")) rows = [privateLeague];
     else if (q.includes("SELECT l.id, l.name")) rows = [publicLeague];
     else if (q.includes("INSERT INTO auth_users")) rows = [{ id: A, name: "Admin" }];
     else if (/^\s*(INSERT|UPDATE)/.test(q)) rows = [];
@@ -91,6 +91,12 @@ describe("D10 numeric weekday contract", () => {
     expect(response.status).toBe(200); const result = await response.json(); expect(result.day_of_week).toBe(value); expect(weekdayLabel(value)).toBe(day); expect(result.join_code).toMatch(/^[A-F0-9]{8}$/);
   });
   it("rejects an unknown weekday", () => { expect(() => weekdayNumber("Someday")).toThrow("Invalid weekday"); });
+  it("rejects duplicate normalized time slots before creating any league rows", async () => {
+    mocks.session = { user: { id: A } }; liveUser = { id: A, role: "venue_admin", venue_id: A };
+    const response = await createLeague(request("/api/leagues", "POST", { action: "CREATE_LEAGUE", venueId: A, name: "League", dayOfWeek: 1, seasonStartDate: "2099-01-01", matchFormat: "2x20", matchDuration: 40, fieldsCount: 1, timeSlots: ["18:00", "18:00"], maxTeams: 2 }));
+    expect(response.status).toBe(400);
+    expect(mocks.tx).not.toHaveBeenCalled();
+  });
 });
 describe("D11 safe audience projection", () => {
   it.each([null, "captain", "referee"])("returns safe competition/rules data for %s", async role => {

@@ -150,6 +150,52 @@ test("league detail renders numeric day and primary tabs", async ({ context, pag
   expect(errors).toEqual([]);
 });
 
+test("Gate 4A fixture controls require confirmation and surface server conflicts", async ({ context, page }) => {
+  const errors = watchRuntimeErrors(page);
+  await authenticate(context, page, "venue_admin");
+  const activeLeague = { ...league, status: "active", time_slots: ["18:30", "19:30"] };
+  const fixture = {
+    id: "97000000-0000-4000-8000-000000000001",
+    league_id: leagueId,
+    round_number: 1,
+    match_date: "2030-01-01",
+    time_slot: "18:30",
+    field_number: 1,
+    home_score: 0,
+    away_score: 0,
+    status: "scheduled",
+    result_type: "played",
+    referee_id: null,
+    home_team_name: "Nova United",
+    away_team_name: "Orion City",
+  };
+  await mockJson(page, `**/api/leagues?leagueId=${leagueId}`, activeLeague);
+  await mockJson(page, `**/api/stats?leagueId=${leagueId}`, { standings: [], topScorers: [] });
+  await mockJson(page, `**/api/matches?leagueId=${leagueId}`, [fixture]);
+  await mockJson(page, `**/api/teams?leagueId=${leagueId}`, []);
+  await mockJson(page, `**/api/admin/referees?venueId=${venueId}`, { referees: [] });
+  await page.route("**/api/matches", (route) => route.fulfill({
+    status: 409,
+    json: { error: "Another active fixture already occupies this field and kickoff" },
+  }));
+
+  await page.goto(`/admin/league/${leagueId}`);
+  await page.getByRole("button", { name: /fixtures/i }).click();
+  await expect(page.getByText(/Tue, 0?1 Jan 2030/i)).toBeVisible();
+  await page.getByRole("button", { name: "EDIT" }).click();
+  await expect(page.getByText("EDIT FIXTURE", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "CONFIRM EDIT FIXTURE" }).click();
+  await expect(page.getByText("Another active fixture already occupies this field and kickoff")).toBeVisible();
+  await page.getByRole("button", { name: "BACK" }).click();
+
+  await page.getByRole("button", { name: "CORRECT" }).click();
+  const correctionSubmit = page.getByRole("button", { name: "CONFIRM CORRECT RESULT" });
+  await expect(correctionSubmit).toBeDisabled();
+  await page.getByLabel("CORRECTION REASON").fill("Official score sheet");
+  await expect(correctionSubmit).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
 test("captain area renders team operations shell", async ({ context, page }) => {
   const errors = watchRuntimeErrors(page);
   await authenticate(context, page, "captain");

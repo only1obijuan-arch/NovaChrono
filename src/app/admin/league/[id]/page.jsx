@@ -10,10 +10,25 @@ import { LeagueHeader } from "@/components/LeagueDetail/LeagueHeader";
 import { OverviewTab } from "@/components/LeagueDetail/OverviewTab";
 import { TeamsTab } from "@/components/LeagueDetail/TeamsTab";
 import { FixturesTab } from "@/components/LeagueDetail/FixturesTab";
+import { FixtureOperationModal } from "@/components/LeagueDetail/FixtureOperationModal";
 import { StandingsTab } from "@/components/LeagueDetail/StandingsTab";
 import { AddTeamModal } from "@/components/LeagueDetail/AddTeamModal";
 import { ManageTeamModal } from "@/components/LeagueDetail/ManageTeamModal";
 import { NewSeasonModal } from "@/components/LeagueDetail/NewSeasonModal";
+
+async function sendMatchCommand(body) {
+  const response = await fetch("/api/matches", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = typeof payload.error === "string" ? payload.error : "The fixture operation was rejected";
+    throw new Error(message);
+  }
+  return payload;
+}
 
 export default function LeagueDetail({ params }) {
   const { id } = React.use(params);
@@ -28,6 +43,7 @@ export default function LeagueDetail({ params }) {
   const [teamForm, setTeamForm] = useState({ name: "" });
   const [newSeasonName, setNewSeasonName] = useState("");
   const [newSeasonStartDate, setNewSeasonStartDate] = useState("");
+  const [fixtureOperation, setFixtureOperation] = useState(null);
 
   // Postpone round state
   const [showPostponeModal, setShowPostponeModal] = useState(false);
@@ -202,12 +218,24 @@ export default function LeagueDetail({ params }) {
   });
 
   const assignRefereeMutation = useMutation({
-    mutationFn: async ({ matchId, refereeId }) => {
-      const res = await fetch('/api/matches', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'ASSIGN_REFEREE', matchId, refereeId }) });
-      if (!res.ok) throw new Error('Failed to assign referee');
-      return res.json();
+    mutationFn: ({ matchId, refereeId }) => sendMatchCommand({ action: "ASSIGN_REFEREE", matchId, refereeId }),
+    onSuccess: async () => {
+      toast.success("Referee updated");
+      await queryClient.invalidateQueries({ queryKey: ["league-matches", id] });
     },
-    onSuccess: () => { toast.success('Referee updated'); queryClient.invalidateQueries({ queryKey:["league-matches", id] }); },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const fixtureOperationMutation = useMutation({
+    mutationFn: sendMatchCommand,
+    onSuccess: async () => {
+      toast.success("Fixture updated");
+      setFixtureOperation(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["league-matches", id] }),
+        queryClient.invalidateQueries({ queryKey: ["league-stats", id] }),
+      ]);
+    },
     onError: (err) => toast.error(err.message),
   });
 
@@ -317,6 +345,25 @@ export default function LeagueDetail({ params }) {
         .pr-success { background:rgba(0,245,212,0.06); border:1px solid rgba(0,245,212,0.3); border-radius:6px; padding:16px; margin-bottom:20px; font-family:var(--font-code); font-size:11px; color:#00F5D4; letter-spacing:1px; line-height:1.7; }
         .pr-postpone-btn { display:inline-flex; align-items:center; gap:8px; background:rgba(255,0,204,0.08); border:1px solid rgba(255,0,204,0.3); color:rgba(255,0,204,0.8); font-family:var(--font-display); font-size:10px; font-weight:700; letter-spacing:2px; padding:10px 16px; border-radius:4px; cursor:pointer; transition:all 0.2s; }
         .pr-postpone-btn:hover { background:rgba(255,0,204,0.14); color:#FF00CC; border-color:#FF00CC; box-shadow:0 0 15px rgba(255,0,204,0.2); }
+        .fx-card-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+        .fx-card-actions button { background:rgba(0,245,212,0.05); border:1px solid rgba(0,245,212,0.2); color:rgba(0,245,212,0.75); font-family:var(--font-code); font-size:9px; letter-spacing:1px; padding:6px 8px; border-radius:3px; cursor:pointer; }
+        .fx-card-actions button:disabled { opacity:0.3; cursor:not-allowed; }
+        .fx-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.88); backdrop-filter:blur(8px); display:flex; align-items:center; justify-content:center; z-index:250; padding:16px; }
+        .fx-modal { background:#0D1B2E; border:1px solid rgba(0,245,212,0.3); border-radius:8px; padding:28px; width:min(520px, 100%); box-shadow:0 0 60px rgba(0,245,212,0.08); }
+        .fx-modal-title { font-family:var(--font-display); font-weight:700; letter-spacing:2px; color:#F4F4F9; margin:0 0 6px; }
+        .fx-modal-sub { font-family:var(--font-code); color:rgba(180,200,220,0.55); font-size:11px; margin:0 0 22px; }
+        .fx-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+        .fx-form-grid label { display:flex; flex-direction:column; gap:7px; font-family:var(--font-code); font-size:9px; letter-spacing:2px; color:rgba(0,245,212,0.65); }
+        .fx-form-grid input, .fx-form-grid select, .fx-form-grid textarea { background:rgba(0,245,212,0.04); border:1px solid rgba(0,245,212,0.2); color:#F4F4F9; border-radius:4px; min-height:42px; padding:9px 11px; font:13px var(--font-code); color-scheme:dark; }
+        .fx-form-grid textarea { min-height:82px; resize:vertical; }
+        .fx-full { grid-column:1 / -1; }
+        .fx-warning { margin:18px 0 0; padding:14px; border:1px solid rgba(255,0,204,0.25); background:rgba(255,0,204,0.06); color:rgba(244,244,249,0.75); font:11px/1.6 var(--font-code); }
+        .fx-modal-actions { display:flex; gap:12px; margin-top:22px; }
+        .fx-modal-actions button { flex:1; padding:11px; border-radius:4px; font:700 10px var(--font-display); letter-spacing:1px; cursor:pointer; }
+        .fx-secondary { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); color:rgba(244,244,249,0.6); }
+        .fx-primary { background:rgba(0,245,212,0.08); border:1px solid rgba(0,245,212,0.35); color:#00F5D4; }
+        .fx-modal-actions button:disabled { opacity:0.35; cursor:not-allowed; }
+        @media (max-width:560px) { .fx-form-grid { grid-template-columns:1fr; } .fx-full { grid-column:auto; } }
       `}</style>
 
       <div className="ld-page">
@@ -369,7 +416,13 @@ export default function LeagueDetail({ params }) {
                   </button>
                 </div>
               )}
-              <FixturesTab matches={matches} referees={referees} onAssignReferee={(matchId, refereeId) => assignRefereeMutation.mutate({ matchId, refereeId })} />
+              <FixturesTab
+                matches={matches}
+                referees={referees}
+                onAssignReferee={(matchId, refereeId) => assignRefereeMutation.mutate({ matchId, refereeId })}
+                onOperate={(mode, match) => setFixtureOperation({ mode, match })}
+                pending={assignRefereeMutation.isPending || fixtureOperationMutation.isPending}
+              />
             </>
           )}
 
@@ -408,6 +461,19 @@ export default function LeagueDetail({ params }) {
         setSeasonStartDate={setNewSeasonStartDate}
         isPending={createNewSeasonMutation.isPending}
       />
+
+      {fixtureOperation && (
+        <FixtureOperationModal
+          key={`${fixtureOperation.match.id}:${fixtureOperation.mode}`}
+          mode={fixtureOperation.mode}
+          match={fixtureOperation.match}
+          league={league}
+          referees={referees}
+          pending={fixtureOperationMutation.isPending}
+          onClose={() => setFixtureOperation(null)}
+          onSubmit={(body) => fixtureOperationMutation.mutate(body)}
+        />
+      )}
 
       {/* Postpone Round Modal */}
       {showPostponeModal && (
