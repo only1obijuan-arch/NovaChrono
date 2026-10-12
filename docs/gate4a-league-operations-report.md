@@ -192,3 +192,88 @@ All database validation used an isolated PostgreSQL 18 cluster under the Windows
 - **P2:** The legacy forfeit columns are named home/away even though product rules describe winner/loser scoring. Gate 4A preserves their canonical configured values and deterministically swaps them for an away win; a later schema clarification may rename semantics only through a forward migration.
 - **P2:** Round-postpone notifications are external side effects after the atomic schedule/audit commit. Delivery failures are reported per captain and do not reverse a valid schedule change.
 - **P2:** The existing Next.js middleware convention emits a deprecation warning; migration to `proxy` remains outside this Gate.
+
+## Final narrow remediation — CI, lock order, authorization, and timezone closure
+
+### Source-control and scope
+
+- Final-remediation starting HEAD: `3e72bbac8630b15ead79762436037d7ea5030615`.
+- Final-remediation implementation SHA: `f8aa610b966a810a9e641e2892ff768f8d70c189`.
+- Work remained local on `gate4/league-operations`; nothing was pushed, merged, deployed, or run against Neon.
+- `0008_gate4a_league_operations.sql`, `schema.sql`, and historical migrations remain unchanged by this final remediation. Production remains pending `0008`.
+
+### CI command closure
+
+The production-shaped CI proof previously invoked the Gate 4A route file through the default Vitest configuration, which excludes `tests/integration/**`. The workflow now executes the smallest valid specific command:
+
+`npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js`
+
+The production-shaped workflow sequence remains `0001` through `0007`, the TIMESTAMPTZ production fixture, `0008`, and the Gate 4A route suite. The exact command discovered the intended integration file, executed all 120 tests, and exited 0 on both supported database shapes.
+
+### Canonical lock order and deterministic race proofs
+
+Existing-match result commands now use `match row → league row → sorted resource/referee advisory claims → conflict reads → mutation → standings → audit`. `ADMIN_OVERRIDE` reauthorizes from the locked league scope before a final-to-scheduled reactivation; `FORFEIT_MATCH` reads the live locked league scoring configuration. Ordinary corrections and forfeits take no advisory claims they do not need.
+
+Real PostgreSQL tests prove:
+
+- final-to-scheduled reactivation versus `CREATE_FIXTURE` for the same slot returns one 200 and one 409, leaves exactly one active occupant, one audit, no 500, and no partial write;
+- final-to-scheduled reactivation versus `POSTPONE_ROUND` for the same destination queues on the original victim scope, returns a valid reactivation plus a 409 stale-scope result, and leaves exactly one active occupant and one audit;
+- fixture and retained-referee advisory waits remain observable through `pg_stat_activity`;
+- correction and forfeit remain compatible with round postpone's match-before-league ordering, with no deadlock or retry loop.
+
+### Round-postpone authorization and mutation-sensitive locking
+
+`POSTPONE_ROUND` now validates its UUID/round input and performs a cheap, non-enumerating league/actor scope check before acquiring victim match locks. Missing and inaccessible leagues both return the same 403 response. The existing transaction still locks each candidate match in stable order, locks/re-reads the league, re-reads the actor, repeats role and tenant authorization, verifies the authoritative scope, acquires sorted claims, and only then mutates.
+
+Mutation-sensitive proofs now cover both previously surviving mutants:
+
+- **R6:** a separate connection holds the target row; the request is observed waiting in `pg_stat_activity`; the blocker changes the target to cancelled and releases it; the route re-evaluates the locked row, returns 404, and writes no schedule or audit state. Removing the per-row lock would fail this proof.
+- **R12:** the caller passes early authorization, queues behind a victim row, and is then separately demoted or moved to another tenant. The authoritative transaction recheck returns 403 with the date unchanged and zero `POSTPONE_ROUND` audit rows. Removing the authoritative recheck would fail these proofs.
+- Wrong-venue venue administrators and captain/referee identities return before the held victim row is released, proving that obvious unauthorized calls do not queue on match locks.
+
+### Database-session-independent writes
+
+Gate 4A date-writing transactions now issue transaction-local `SET LOCAL TIME ZONE 'UTC'`. This preserves the accepted production representation—midnight UTC for planned TIMESTAMPTZ values—without changing the server setting, database schema, v1 Johannesburg calendar interpretation, or DATE deployments. It applies narrowly to fixture creation, fixture editing, fixture generation, round postponement, league creation, and new-season creation. League date projections changed by Gate 4A now use `nova_planned_date` before formatting.
+
+The integration suite runs the full Cartesian matrix of process and PostgreSQL session zones:
+
+| Dimension | Values |
+| --- | --- |
+| Process `TZ` | `UTC`, `Africa/Johannesburg`, `America/New_York`, `Pacific/Auckland` |
+| PostgreSQL session `TimeZone` | `UTC`, `Africa/Johannesburg`, `America/New_York`, `Pacific/Auckland` |
+
+All 16 combinations pass on both DATE and TIMESTAMPTZ shapes. Each cell proves create, changed and unchanged edit round trips, generator output, round postpone, and league formatting. It checks stored values as well as normalized reads, with identical kickoffs and ISO weekdays across the 2031 year boundary, 2032 leap day, month transitions, and the 2032 US DST boundary (`2032-03-07` → `2032-03-14`).
+
+### Amended-0008 compatibility guard
+
+The migration runner now performs a read-only compatibility assertion whenever the ledger contains `0008_gate4a_league_operations.sql`. It checks both `nova_planned_date` overloads, the non-null/defaulted `matches.result_type`, the validated result vocabulary constraint, and both active schedule/referee expression indexes including their required keys and predicates.
+
+Observed outcomes:
+
+- ledger through `0007`: normal pending-0008 state; no Gate 4A object requirement;
+- ledger contains current `0008` and all required objects: accepted;
+- ledger claims `0008` but objects are missing: fails closed with `old/incomplete 0008 detected; forward repair migration required`.
+
+The rehearsal does not rerun amended `0008`, and no speculative `0009` was created. A future persistent environment found in the invalid state requires a forward repair migration.
+
+### Final validation evidence
+
+| Validation | Final result |
+| --- | --- |
+| `npm ci` | Passed from the lockfile |
+| `npm test` | 18 files, **265 passed** |
+| `npm run test:integration` — fresh DATE | 1 file, **120 passed** |
+| Exact CI command — fresh DATE | 1 file, **120 passed**, exit 0 |
+| Exact CI command — production-shaped TIMESTAMPTZ | 1 file, **120 passed**, exit 0 |
+| Focused process/PG timezone matrix | **16/16** combinations passed on each database shape; date, kickoff, weekday, and stored round trip asserted |
+| Focused lock/authorization proof set | **21 passed** in the focused run, including both reactivation races, R6, R12 role/scope changes, and preauthorization |
+| Migration rehearsal script | Fresh `0001`→`0008` and production-shaped `0001`→`0007`→`0008` passed |
+| Amended-0008 guard rehearsal | ≤`0007` accepted; current `0008` accepted; incomplete `0008` rejected with the required diagnostic |
+| `npm run lint` | Passed |
+| `npm run build` | Passed; 69 routes/pages generated; pre-existing middleware warning only |
+| `npm run test:e2e` | Chromium, **9 passed** |
+| `npm audit --omit=dev --audit-level=high` | **0 vulnerabilities** |
+| `git diff --check` | Passed |
+| Secret/private-key scan | No committed secret environment files and no private-key markers |
+
+During validation, the first production-shaped exact-command run correctly exposed two remaining test assertions that compared TIMESTAMPTZ directly with DATE under the ambient session zone. Those assertions were changed to the same canonical `nova_planned_date` boundary used by the application; the focused rerun and the complete 120-test production-shaped rerun then passed. This preserves the audit trail for the session-timezone defect rather than concealing it.
