@@ -5,6 +5,8 @@ const authState = vi.hoisted(() => ({ actorId: null }));
 vi.mock("@/auth", () => ({
   auth: vi.fn(async () => authState.actorId ? { user: { id: authState.actorId } } : null),
 }));
+vi.mock("@/app/api/utils/send-email", () => ({ sendEmail: vi.fn(async () => ({ id: "test-mail" })) }));
+vi.mock("@/app/api/utils/send-push", () => ({ sendPush: vi.fn(async () => ({ success: true })) }));
 
 import { pool } from "@/app/api/utils/db";
 import { withTransaction } from "@/app/api/utils/sql";
@@ -13,7 +15,10 @@ import { DELETE as deleteUser } from "@/app/api/super-admin/users/route";
 import { GET as getTeams } from "@/app/api/teams/route";
 import { POST as refreshMobile } from "@/app/api/auth/mobile-refresh/route";
 import { POST as matchCommand } from "@/app/api/matches/route";
+import { POST as leagueCommand } from "@/app/api/leagues/route";
+import { POST as postponeRoundCommand } from "@/app/api/leagues/postpone-round/route";
 import { recomputeLeagueStandings } from "@/app/api/matches/standings";
+import { fixtureScheduleKey, refereeScheduleKey } from "@/app/api/matches/scheduling";
 
 const IDS = {
   orgA: "10000000-0000-4000-8000-000000000001",
@@ -57,7 +62,7 @@ const request = (url, method = "GET", body) => new Request(`https://example.test
 });
 
 const resetDatabase = () => pool.query(`TRUNCATE TABLE
-    auth_rate_limits, audit_logs, notifications, availability_responses, match_events,
+    auth_rate_limits, api_rate_limits, audit_logs, notifications, availability_responses, match_events,
     matches, standings, players, teams, league_slots, leagues, invite_tokens,
     mobile_sessions, password_reset_tokens, auth_accounts,
     auth_verification_token, auth_users, venues, organizations RESTART IDENTITY CASCADE`);
@@ -253,6 +258,8 @@ describe("mobile refresh rotation", () => {
 
 const opId = (suffix) => `90000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
 const postMatch = (body) => matchCommand(request("/api/matches", "POST", body));
+const postLeague = (body) => leagueCommand(request("/api/leagues", "POST", body));
+const postPostponeRound = (body) => postponeRoundCommand(request("/api/leagues/postpone-round", "POST", body));
 const eventCount = async (matchId, type) => Number((await pool.query(
   "SELECT count(*) FROM match_events WHERE match_id = $1 AND type = $2",
   [matchId, type],
@@ -275,6 +282,34 @@ async function waitForMatchRowLockQueue() {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error("Route request never queued on the locked match row");
+  } finally {
+    observer.release();
+  }
+}
+
+async function waitForLockQueue(queryFragment, failureMessage) {
+  const observer = await pool.connect();
+  try {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      const { rows: [state] } = await observer.query(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND query LIKE $1
+        ) AS waiting
+      `, [`%${queryFragment}%`]);
+      if (state.waiting) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const { rows } = await observer.query(`
+      SELECT pid, state, wait_event_type, wait_event, query, pg_blocking_pids(pid) AS blockers
+      FROM pg_stat_activity
+      WHERE datname = current_database() AND pid <> pg_backend_pid()
+      ORDER BY pid
+    `);
+    throw new Error(`${failureMessage}: ${JSON.stringify(rows)}`);
   } finally {
     observer.release();
   }
@@ -929,4 +964,216 @@ describe("Gate 4A fixture and result operations", () => {
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
     expect(["cancelled", "final"]).toContain((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match4])).rows[0].status);
   });
+
+  it.each([
+    ["scheduled", "scheduled", 200], ["scheduled", "final", 200],
+    ["final", "scheduled", 200], ["final", "final", 200],
+    ["live", "scheduled", 409], ["live", "final", 409],
+    ["postponed", "scheduled", 409], ["postponed", "final", 409],
+    ["cancelled", "scheduled", 409], ["cancelled", "final", 409],
+  ])("enforces ADMIN_OVERRIDE current %s to target %s", async (current, target, expectedStatus) => {
+    await pool.query("UPDATE matches SET status = $1, home_score = 1, away_score = 0 WHERE id = $2", [current, IDS.match4]);
+    if (current === "final") await withTransaction((txSql) => recomputeLeagueStandings(txSql, IDS.league));
+    const beforeMatch = (await pool.query("SELECT home_score, away_score, status, result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0];
+    const beforeStandings = (await pool.query("SELECT * FROM standings WHERE league_id = $1 ORDER BY team_id", [IDS.league])).rows;
+    const response = await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 1, status: target, reason: "Matrix check" });
+    expect(response.status).toBe(expectedStatus);
+    if (expectedStatus !== 200) {
+      expect((await pool.query("SELECT home_score, away_score, status, result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0]).toEqual(beforeMatch);
+      expect((await pool.query("SELECT * FROM standings WHERE league_id = $1 ORDER BY team_id", [IDS.league])).rows).toEqual(beforeStandings);
+      expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0].count)).toBe(0);
+    }
+  });
+
+  it("rejects final-to-scheduled reactivation when its resource is occupied", async () => {
+    await pool.query("UPDATE matches SET status = 'final', home_score = 2 WHERE id = $1", [IDS.match4]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-19', time_slot = '18:30', field_number = 1 WHERE id = $1", [IDS.match2]);
+    await withTransaction((txSql) => recomputeLeagueStandings(txSql, IDS.league));
+    const standingsBefore = (await pool.query("SELECT * FROM standings WHERE league_id = $1 ORDER BY team_id", [IDS.league])).rows;
+    expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 0, status: "scheduled", reason: "Reopen" })).status).toBe(409);
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match4])).rows[0].status).toBe("final");
+    expect((await pool.query("SELECT * FROM standings WHERE league_id = $1 ORDER BY team_id", [IDS.league])).rows).toEqual(standingsBefore);
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0].count)).toBe(0);
+  });
+
+  it("rejects final-to-scheduled reactivation when its retained referee is occupied", async () => {
+    await pool.query("UPDATE matches SET status = 'final', referee_id = $1 WHERE id = $2", [IDS.referee, IDS.match4]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-19', time_slot = '18:30', field_number = 2, referee_id = $1 WHERE id = $2", [IDS.referee, IDS.match2]);
+    expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 0, awayScore: 0, status: "scheduled", reason: "Reopen" })).status).toBe(409);
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match4])).rows[0].status).toBe("final");
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0].count)).toBe(0);
+  });
+
+  it("queues final-to-scheduled reactivation on the fixture advisory claim", async () => {
+    await pool.query("UPDATE matches SET status = 'final', referee_id = NULL WHERE id = $1", [IDS.match4]);
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [fixtureScheduleKey({ venueId: IDS.venueA, fieldNumber: 1, matchDate: "2030-02-19", timeSlot: "18:30" })]);
+      queued = postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 0, awayScore: 0, status: "scheduled", reason: "Reopen" });
+      await waitForLockQueue("pg_advisory_xact_lock", "ADMIN_OVERRIDE never queued on the fixture claim lock");
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(200);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  });
+
+  it("queues final-to-scheduled reactivation on the retained-referee advisory claim", async () => {
+    await pool.query("UPDATE matches SET status = 'final', referee_id = $1 WHERE id = $2", [IDS.referee, IDS.match4]);
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [refereeScheduleKey({ refereeId: IDS.referee, matchDate: "2030-02-19", timeSlot: "18:30" })]);
+      queued = postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 0, awayScore: 0, status: "scheduled", reason: "Reopen" });
+      await waitForLockQueue("pg_advisory_xact_lock", "ADMIN_OVERRIDE never queued on the referee claim lock");
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(200);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  });
+
+  it("rechecks the actor role after queueing on the locked match", async () => {
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match4]);
+      queued = postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 0, status: "final", reason: "Queued correction" });
+      await waitForMatchRowLockQueue();
+      await pool.query("UPDATE auth_users SET role = 'captain' WHERE id = $1", [IDS.venueAdminA]);
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(403);
+      expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match4])).rows[0].status).toBe("scheduled");
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  });
+
+  it.each([[3, 0, 200], [2, 0, 200], [0, 3, 409], [1, 1, 409]])(
+    "validates configured forfeit winner/loser scores %i-%i",
+    async (winnerScore, loserScore, status) => {
+      await pool.query("UPDATE leagues SET forfeit_score_home = $1, forfeit_score_away = $2 WHERE id = $3", [winnerScore, loserScore, IDS.league]);
+      const response = await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match4, winnerSide: "home" });
+      expect(response.status).toBe(status);
+      if (status === 409) {
+        expect((await pool.query("SELECT status, home_score, away_score FROM matches WHERE id = $1", [IDS.match4])).rows[0]).toMatchObject({ status: "scheduled", home_score: 0, away_score: 0 });
+        expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0].count)).toBe(0);
+      }
+    },
+  );
+
+  it("normalizes result_type through correction, reopening, and opposite forfeit", async () => {
+    await pool.query("UPDATE matches SET status = 'final', home_score = 1, result_type = 'played' WHERE id = $1", [IDS.match4]);
+    expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 1, status: "final", reason: "Played correction" })).status).toBe(200);
+    expect((await pool.query("SELECT result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0].result_type).toBe("played");
+    expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 1, status: "scheduled", reason: "Reopen" })).status).toBe(200);
+    expect((await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match4, winnerSide: "away" })).status).toBe(200);
+    expect((await pool.query("SELECT result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0].result_type).toBe("forfeit_away_win");
+    expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 0, awayScore: 5, status: "scheduled", reason: "Reopen forfeit" })).status).toBe(200);
+    expect((await pool.query("SELECT result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0].result_type).toBe("played");
+    expect((await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match4, winnerSide: "home" })).status).toBe(200);
+    expect((await pool.query("SELECT result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0].result_type).toBe("forfeit_home_win");
+    expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 1, awayScore: 0, status: "final", reason: "Correct forfeit" })).status).toBe(200);
+    expect((await pool.query("SELECT result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0].result_type).toBe("played");
+  });
+
+  it("rejects duplicate time slots without a partial league write", async () => {
+    const before = Number((await pool.query("SELECT count(*) FROM leagues")).rows[0].count);
+    const response = await postLeague({
+      action: "CREATE_LEAGUE",
+      venueId: IDS.venueA,
+      name: "Duplicate Slots",
+      dayOfWeek: 2,
+      seasonStartDate: "2099-01-01",
+      matchFormat: "2x20",
+      matchDuration: 40,
+      fieldsCount: 1,
+      timeSlots: ["18:00", "18:00"],
+      maxTeams: 2,
+    });
+    expect(response.status).toBe(400);
+    expect(Number((await pool.query("SELECT count(*) FROM leagues")).rows[0].count)).toBe(before);
+  });
+
+  it("rejects duplicate legacy time slots before fixture generation writes anything", async () => {
+    await pool.query("UPDATE leagues SET status = 'registration', time_slots = '[\"18:00\",\"18:00\"]' WHERE id = $1", [IDS.leagueB]);
+    await pool.query("DELETE FROM matches WHERE league_id = $1", [IDS.leagueB]);
+    expect((await postLeague({ action: "GENERATE_FIXTURES", leagueId: IDS.leagueB })).status).toBe(409);
+    expect(Number((await pool.query("SELECT count(*) FROM matches WHERE league_id = $1", [IDS.leagueB])).rows[0].count)).toBe(0);
+    expect((await pool.query("SELECT status FROM leagues WHERE id = $1", [IDS.leagueB])).rows[0].status).toBe("registration");
+  });
+
+  it("postpones a scheduled round by seven calendar days", async () => {
+    const response = await postPostponeRound({ league_id: IDS.league, round_number: 5 });
+    expect(response.status).toBe(200);
+    expect((await pool.query("SELECT nova_planned_date(match_date)::text AS match_date FROM matches WHERE id = $1", [IDS.match4])).rows[0].match_date).toBe("2030-02-26");
+  });
+
+  it.each(["referee", "mixed resource and referee"])("rejects a round shift with a %s conflict atomically", async (kind) => {
+    await pool.query("UPDATE matches SET referee_id = $1 WHERE id = $2", [IDS.referee, IDS.match4]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-26', time_slot = '18:30', field_number = $1, referee_id = $2 WHERE id = $3", [kind === "referee" ? 2 : 1, IDS.referee, IDS.match2]);
+    const before = (await pool.query("SELECT id, nova_planned_date(match_date)::text AS match_date FROM matches WHERE league_id = $1 ORDER BY id", [IDS.league])).rows;
+    expect((await postPostponeRound({ league_id: IDS.league, round_number: 5 })).status).toBe(409);
+    expect((await pool.query("SELECT id, nova_planned_date(match_date)::text AS match_date FROM matches WHERE league_id = $1 ORDER BY id", [IDS.league])).rows).toEqual(before);
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'POSTPONE_ROUND'", [])).rows[0].count)).toBe(0);
+    expect(Number((await pool.query("SELECT count(*) FROM notifications", [])).rows[0].count)).toBe(0);
+  });
+
+  it("serializes a round referee claim against concurrent referee assignment", async () => {
+    await pool.query("UPDATE matches SET referee_id = $1 WHERE id = $2", [IDS.referee, IDS.match4]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-26', field_number = 2, referee_id = NULL WHERE id = $1", [IDS.match2]);
+    const blocker = await pool.connect();
+    let roundRequest;
+    let assignmentRequest;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [refereeScheduleKey({ refereeId: IDS.referee, matchDate: "2030-02-26", timeSlot: "18:30" })]);
+      roundRequest = postPostponeRound({ league_id: IDS.league, round_number: 5 });
+      await waitForLockQueue("pg_advisory_xact_lock", "Round postpone never queued on the referee claim lock");
+      assignmentRequest = postMatch({ action: "ASSIGN_REFEREE", matchId: IDS.match2, refereeId: IDS.referee });
+      await blocker.query("COMMIT");
+      expect((await roundRequest).status).toBe(200);
+      expect((await assignmentRequest).status).toBe(409);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (roundRequest) await roundRequest.catch(() => {});
+      if (assignmentRequest) await assignmentRequest.catch(() => {});
+    }
+  }, 20_000);
+
+  it.each(["ADMIN_OVERRIDE", "FORFEIT_MATCH"])("uses match-before-league ordering against %s without deadlock", async (action) => {
+    const blocker = await pool.connect();
+    let resultRequest;
+    let roundRequest;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM leagues WHERE id = $1 FOR UPDATE", [IDS.league]);
+      resultRequest = action === "FORFEIT_MATCH"
+        ? postMatch({ action, matchId: IDS.match4, winnerSide: "home" })
+        : postMatch({ action, matchId: IDS.match4, homeScore: 2, awayScore: 0, status: "final", reason: "Lock order" });
+      await waitForLockQueue("SELECT id, win_points, draw_points", `${action} never queued on the league lock`);
+      roundRequest = postPostponeRound({ league_id: IDS.league, round_number: 5 });
+      await waitForLockQueue("nova_planned_date(match_date)", "Round postpone never queued on the match row");
+      await blocker.query("COMMIT");
+      expect((await resultRequest).status).toBe(200);
+      expect([404, 409]).toContain((await roundRequest).status);
+      expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match4])).rows[0].status).toBe("final");
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (resultRequest) await resultRequest.catch(() => {});
+      if (roundRequest) await roundRequest.catch(() => {});
+    }
+  }, 20_000);
 });

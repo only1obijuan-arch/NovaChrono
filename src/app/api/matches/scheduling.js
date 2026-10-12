@@ -33,7 +33,7 @@ export async function findFixtureConflict(txSql, schedule, excludeMatchId = null
     JOIN leagues l ON l.id = m.league_id
     WHERE l.venue_id = ${schedule.venueId}
       AND m.field_number = ${schedule.fieldNumber}
-      AND m.match_date = ${schedule.matchDate}::date
+      AND nova_planned_date(m.match_date) = ${schedule.matchDate}::date
       AND m.time_slot = ${schedule.timeSlot}
       AND m.status IN ('scheduled', 'live')
       AND (${excludeMatchId}::uuid IS NULL OR m.id <> ${excludeMatchId}::uuid)
@@ -52,7 +52,7 @@ export async function findRefereeConflict(txSql, schedule, excludeMatchId = null
     SELECT id
     FROM matches
     WHERE referee_id = ${schedule.refereeId}
-      AND match_date = ${schedule.matchDate}::date
+      AND nova_planned_date(match_date) = ${schedule.matchDate}::date
       AND time_slot = ${schedule.timeSlot}
       AND status IN ('scheduled', 'live')
       AND (${excludeMatchId}::uuid IS NULL OR id <> ${excludeMatchId}::uuid)
@@ -60,4 +60,3 @@ export async function findRefereeConflict(txSql, schedule, excludeMatchId = null
   `;
   return conflict ?? null;
 }
-

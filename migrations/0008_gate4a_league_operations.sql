@@ -24,11 +24,24 @@ $$;
 ALTER TABLE matches
   VALIDATE CONSTRAINT matches_result_type_check;
 
+CREATE OR REPLACE FUNCTION nova_planned_date(value DATE)
+RETURNS DATE
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+AS $$ SELECT value $$;
+
+CREATE OR REPLACE FUNCTION nova_planned_date(value TIMESTAMPTZ)
+RETURNS DATE
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+AS $$ SELECT (value AT TIME ZONE 'Africa/Johannesburg')::date $$;
+
 CREATE INDEX IF NOT EXISTS matches_active_schedule_lookup
-  ON matches (match_date, time_slot, field_number, league_id)
+  ON matches (nova_planned_date(match_date), time_slot, field_number, league_id)
   WHERE status IN ('scheduled', 'live');
 
 CREATE INDEX IF NOT EXISTS matches_active_referee_schedule_lookup
-  ON matches (referee_id, match_date, time_slot)
+  ON matches (referee_id, nova_planned_date(match_date), time_slot)
   WHERE referee_id IS NOT NULL AND status IN ('scheduled', 'live');
-

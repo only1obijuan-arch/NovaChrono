@@ -32,6 +32,9 @@ ALTER TABLE teams DROP CONSTRAINT teams_captain_user_id_fkey;
 ALTER TABLE teams ALTER COLUMN captain_user_id TYPE TEXT USING captain_user_id::text;
 ALTER TABLE matches DROP CONSTRAINT matches_referee_id_fkey;
 ALTER TABLE matches ALTER COLUMN referee_id TYPE TEXT USING referee_id::text;
+ALTER TABLE matches
+  ALTER COLUMN match_date TYPE TIMESTAMPTZ
+  USING match_date::timestamp AT TIME ZONE 'UTC';
 ALTER TABLE notifications DROP CONSTRAINT notifications_user_id_fkey;
 ALTER TABLE notifications DROP CONSTRAINT notifications_type_check;
 ALTER TABLE notifications ALTER COLUMN user_id TYPE TEXT USING user_id::text;
@@ -114,7 +117,7 @@ INSERT INTO matches (
 )
 VALUES (
   '70000000-0000-4000-8000-000000000001',
-  '40000000-0000-4000-8000-000000000001', 1, DATE '2030-01-01', '18:30', 1,
+  '40000000-0000-4000-8000-000000000001', 1, TIMESTAMPTZ '2030-01-01 00:00:00+00', '18:30', 1,
   '50000000-0000-4000-8000-000000000001',
   '30000000-0000-4000-8000-000000000003'
 );

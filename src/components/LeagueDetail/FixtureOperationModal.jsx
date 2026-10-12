@@ -18,7 +18,7 @@ export function FixtureOperationModal({ mode, match, league, referees, pending, 
   const [awayScore, setAwayScore] = useState(match.away_score ?? 0);
   const [status, setStatus] = useState(match.status === "final" ? "final" : "scheduled");
   const [reason, setReason] = useState("");
-  const [winnerSide, setWinnerSide] = useState("home");
+  const [winnerSide, setWinnerSide] = useState("");
 
   function submit(event) {
     event.preventDefault();
@@ -84,7 +84,8 @@ export function FixtureOperationModal({ mode, match, league, referees, pending, 
 
         {mode === "forfeit" && (
           <div className="fx-form-grid">
-            <label className="fx-full">WINNING TEAM<select value={winnerSide} onChange={(event) => setWinnerSide(event.target.value)}>
+            <label className="fx-full">WINNING TEAM<select value={winnerSide} onChange={(event) => setWinnerSide(event.target.value)} required>
+              <option value="">Select the winning team...</option>
               <option value="home">{match.home_team_name || "Home team"}</option>
               <option value="away">{match.away_team_name || "Away team"}</option>
             </select></label>
@@ -103,7 +104,7 @@ export function FixtureOperationModal({ mode, match, league, referees, pending, 
 
         <div className="fx-modal-actions">
           <button type="button" className="fx-secondary" onClick={onClose} disabled={pending}>BACK</button>
-          <button type="submit" className="fx-primary" disabled={pending || (mode === "correction" && !reason.trim())}>
+          <button type="submit" className="fx-primary" disabled={pending || (mode === "correction" && !reason.trim()) || (mode === "forfeit" && !winnerSide)}>
             {pending ? "SAVING..." : `CONFIRM ${TITLES[mode]}`}
           </button>
         </div>

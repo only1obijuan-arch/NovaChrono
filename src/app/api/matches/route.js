@@ -85,7 +85,7 @@ function canAccessVenue(user, venueId) {
 async function lockMatch(txSql, matchId) {
   const [match] = await txSql`
     SELECT m.*,
-           to_char(m.match_date, 'YYYY-MM-DD') AS schedule_date,
+           to_char(nova_planned_date(m.match_date), 'YYYY-MM-DD') AS schedule_date,
            l.venue_id AS league_venue_id,
            l.status AS league_status,
            l.fields_count,
@@ -557,6 +557,28 @@ export async function POST(request) {
         if (!oldMatch) return Response.json({ error: "Match not found" }, { status: 404 });
         const authorization = await authorizeLockedMatch(txSql, user.id, oldMatch, ADMIN_ROLES);
         if (authorization.response) return authorization.response;
+        if (!RESULT_OVERRIDE_STATUSES.includes(oldMatch.status)) {
+          return Response.json({ error: `Cannot correct a match with status '${oldMatch.status}'` }, { status: 409 });
+        }
+
+        if (oldMatch.status === "final" && newStatus === "scheduled") {
+          const schedule = {
+            venueId: oldMatch.league_venue_id,
+            fieldNumber: oldMatch.field_number,
+            matchDate: oldMatch.schedule_date,
+            timeSlot: oldMatch.time_slot,
+          };
+          if (await claimFixtureSchedule(txSql, schedule, matchId)) {
+            return Response.json({ error: "Another active fixture already occupies this field and kickoff" }, { status: 409 });
+          }
+          if (await claimRefereeSchedule(txSql, {
+            refereeId: oldMatch.referee_id,
+            matchDate: oldMatch.schedule_date,
+            timeSlot: oldMatch.time_slot,
+          }, matchId)) {
+            return Response.json({ error: "Referee is already assigned to another active fixture at this kickoff" }, { status: 409 });
+          }
+        }
 
         const before = matchSnapshot(oldMatch);
         const after = {
@@ -627,8 +649,14 @@ export async function POST(request) {
         if (authorization.response) return authorization.response;
 
         const resultType = winnerSide === "home" ? "forfeit_home_win" : "forfeit_away_win";
-        const homeScore = winnerSide === "home" ? match.forfeit_score_home : match.forfeit_score_away;
-        const awayScore = winnerSide === "away" ? match.forfeit_score_home : match.forfeit_score_away;
+        const winnerScore = Number(match.forfeit_score_home);
+        const loserScore = Number(match.forfeit_score_away);
+        if (!Number.isInteger(winnerScore) || !Number.isInteger(loserScore)
+          || winnerScore < 0 || loserScore < 0 || winnerScore <= loserScore) {
+          return Response.json({ error: "League forfeit score configuration is invalid" }, { status: 409 });
+        }
+        const homeScore = winnerSide === "home" ? winnerScore : loserScore;
+        const awayScore = winnerSide === "away" ? winnerScore : loserScore;
         if (match.status === "final" && match.result_type === resultType
           && match.home_score === homeScore && match.away_score === awayScore) {
           return Response.json({ success: true, idempotent: true });
@@ -697,6 +725,7 @@ export async function GET(request) {
   if (matchId) {
     const [match] = await sql`
       SELECT m.*,
+             to_char(nova_planned_date(m.match_date), 'YYYY-MM-DD') AS match_date,
              th.name as home_team_name,
              ta.name as away_team_name,
              th.id as home_team_id,
@@ -725,6 +754,7 @@ export async function GET(request) {
   if (leagueId) {
     const matches = await sql`
       SELECT m.*,
+             to_char(nova_planned_date(m.match_date), 'YYYY-MM-DD') AS match_date,
              th.name as home_team_name,
              ta.name as away_team_name,
              ref.name as referee_name
@@ -745,6 +775,7 @@ export async function GET(request) {
     const fieldNumber = searchParams.get("fieldNumber");
     const matches = await sql`
       SELECT m.*, l.name as league_name,
+             to_char(nova_planned_date(m.match_date), 'YYYY-MM-DD') AS match_date,
              th.name as home_team_name,
              ta.name as away_team_name,
              ref.name as referee_name
@@ -755,7 +786,7 @@ export async function GET(request) {
       LEFT JOIN league_slots lsa ON m.away_slot_id = lsa.id
       LEFT JOIN teams ta ON ta.slot_id = lsa.id AND ta.status = 'active'
       LEFT JOIN auth_users ref ON ref.id = m.referee_id
-      WHERE m.match_date = ${date}
+      WHERE nova_planned_date(m.match_date) = ${date}::date
       AND (${venueId}::uuid IS NULL OR l.venue_id = ${venueId}::uuid)
       AND (${fieldNumber}::int IS NULL OR m.field_number = ${fieldNumber}::int)
       ORDER BY m.time_slot, m.field_number

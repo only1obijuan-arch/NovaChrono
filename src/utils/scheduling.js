@@ -9,7 +9,14 @@ export function localDateString(value) {
     if (match) return match[1];
   }
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: LEAGUE_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(value);
+    const part = (type) => parts.find((entry) => entry.type === type)?.value;
+    return `${part("year")}-${part("month")}-${part("day")}`;
   }
   return "";
 }
@@ -68,4 +75,3 @@ export function formatLocalFixtureDate(value, locale = "en-ZA") {
     day: "numeric",
   }).format(date);
 }
-

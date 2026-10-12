@@ -61,7 +61,7 @@ export function FixturesTab({ matches, referees = [], onAssignReferee, onOperate
                     <button disabled={pending || !["scheduled", "postponed"].includes(match.status)} onClick={() => onOperate?.("edit", match)}>EDIT</button>
                     <button disabled={pending || match.status !== "scheduled"} onClick={() => onOperate?.("postpone", match)}>POSTPONE</button>
                     <button disabled={pending || !["scheduled", "postponed"].includes(match.status)} onClick={() => onOperate?.("cancel", match)}>CANCEL</button>
-                    <button disabled={pending || match.status === "live"} onClick={() => onOperate?.("correction", match)}>CORRECT</button>
+                    <button disabled={pending || !["scheduled", "final"].includes(match.status)} onClick={() => onOperate?.("correction", match)}>CORRECT</button>
                     <button disabled={pending || match.status !== "scheduled"} onClick={() => onOperate?.("forfeit", match)}>FORFEIT</button>
                   </div>
                 </div>

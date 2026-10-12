@@ -57,6 +57,8 @@ export default function CreateLeague() {
   });
 
   const [selectedVenueId, setSelectedVenueId] = useState("");
+  const normalizedTimeSlots = formData.timeSlots.map((slot) => slot.trim());
+  const hasDuplicateTimeSlots = new Set(normalizedTimeSlots).size !== normalizedTimeSlots.length;
 
   const mutation = useMutation({
     mutationFn: async (data) => {
@@ -85,7 +87,11 @@ export default function CreateLeague() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    mutation.mutate(formData);
+    if (hasDuplicateTimeSlots) {
+      toast.error("Each time slot must be unique");
+      return;
+    }
+    mutation.mutate({ ...formData, timeSlots: normalizedTimeSlots });
   };
   const handleTimeSlotChange = (index, value) => {
     const newSlots = [...formData.timeSlots];
@@ -445,6 +451,11 @@ export default function CreateLeague() {
                     </div>
                   ))}
                 </div>
+                {hasDuplicateTimeSlots && (
+                  <p role="alert" style={{ color: "#ff6b9d", marginTop: 12 }}>
+                    Each time slot must be unique.
+                  </p>
+                )}
               </div>
 
               <div className="cl-submit-wrap">
@@ -452,7 +463,7 @@ export default function CreateLeague() {
                   type="submit"
                   className="cl-submit"
                   disabled={
-                    mutation.isPending || (needsVenueSelect && !selectedVenueId)
+                    mutation.isPending || hasDuplicateTimeSlots || (needsVenueSelect && !selectedVenueId)
                   }
                 >
                   {mutation.isPending

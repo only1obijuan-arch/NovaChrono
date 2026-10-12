@@ -6,6 +6,18 @@ import { addDaysToLocalDate, addMonthsToLocalDate, localDateString } from "@/uti
 import { z } from "zod";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const canonicalTimeSlot = z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const uniqueTimeSlots = z.array(canonicalTimeSlot).min(1).max(20).superRefine((slots, context) => {
+  const seen = new Set();
+  slots.forEach((slot, index) => {
+    if (seen.has(slot)) context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Duplicate time slots are not allowed",
+      path: [index],
+    });
+    seen.add(slot);
+  });
+});
 
 const leagueActionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -26,7 +38,7 @@ const leagueActionSchema = z.discriminatedUnion("action", [
     matchFormat: z.string().min(1).max(50),
     matchDuration: z.number().int().min(1).max(240),
     fieldsCount: z.number().int().min(1).max(50),
-    timeSlots: z.array(z.string().min(1).max(10)).min(1).max(20),
+    timeSlots: uniqueTimeSlots,
     maxTeams: z.number().int().min(2).max(100),
   }),
   z.object({
@@ -94,7 +106,9 @@ export async function POST(request) {
           VALUES (${venueId}, ${name}, ${dayOfWeek}, ${seasonStartDate}, ${seasonEndDate}, ${matchFormat}, ${matchDuration}, ${fieldsCount}, ${JSON.stringify(
             timeSlots,
           )}, ${maxTeams}, ${joinCode}, 'registration')
-          RETURNING *
+          RETURNING *,
+                    to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
+                    to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
         `;
         const slotNumbers = Array.from({ length: maxTeams }, (_, i) => i + 1);
         await txSql`
@@ -167,7 +181,9 @@ export async function POST(request) {
               parentLeague.max_teams
             }, ${joinCode}, 'registration', ${seasonName}, ${parentLeagueId}
           )
-          RETURNING *
+          RETURNING *,
+                    to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
+                    to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
         `;
         const slotNumbers = Array.from({ length: parentLeague.max_teams }, (_, i) => i + 1);
         await txSql`
@@ -183,7 +199,10 @@ export async function POST(request) {
     if (action === "GENERATE_FIXTURES") {
       const { leagueId } = data;
       return await withTransaction(async (txSql) => {
-        const [league] = await txSql`SELECT * FROM leagues WHERE id = ${leagueId} FOR UPDATE`;
+        const [league] = await txSql`
+          SELECT *, to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date
+          FROM leagues WHERE id = ${leagueId} FOR UPDATE
+        `;
         if (!league) return Response.json({ error: "League not found" }, { status: 404 });
         const [actor] = await txSql`
           SELECT id, role, venue_id
@@ -199,6 +218,15 @@ export async function POST(request) {
         }
         if (league.status !== "registration") {
           return Response.json({ error: "Fixtures can only be generated for leagues in registration status" }, { status: 409 });
+        }
+        const configuredTimeSlots = Array.isArray(league.time_slots)
+          ? league.time_slots.map((slot) => typeof slot === "string" ? slot.trim() : slot)
+          : [];
+        const configuredSlotsValid = configuredTimeSlots.length > 0
+          && configuredTimeSlots.every((slot) => typeof slot === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(slot))
+          && new Set(configuredTimeSlots).size === configuredTimeSlots.length;
+        if (!configuredSlotsValid) {
+          return Response.json({ error: "League time slots must be valid and unique before generating fixtures" }, { status: 409 });
         }
         const [existingMatch] = await txSql`SELECT id FROM matches WHERE league_id = ${leagueId} LIMIT 1`;
         if (existingMatch) {
@@ -237,7 +265,7 @@ export async function POST(request) {
         }
 
         const slotFieldCombos = [];
-        for (const timeSlot of league.time_slots) {
+        for (const timeSlot of configuredTimeSlots) {
           for (let fieldNumber = 1; fieldNumber <= league.fields_count; fieldNumber += 1) {
             slotFieldCombos.push({ timeSlot, fieldNumber });
           }
@@ -347,7 +375,12 @@ export async function GET(request) {
     if (!UUID_RE.test(leagueId))
       return Response.json({ error: "Invalid leagueId" }, { status: 400 });
     if (user) {
-      const [league] = await sql`SELECT * FROM leagues WHERE id = ${leagueId}`;
+      const [league] = await sql`
+        SELECT *,
+               to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
+               to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
+        FROM leagues WHERE id = ${leagueId}
+      `;
       if (!league) return Response.json({ error: "League not found" }, { status: 404 });
       if (!canAccessVenue(user, league.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
       return Response.json(league);
@@ -356,7 +389,8 @@ export async function GET(request) {
     // internal time-slot configuration or account/administrator data.
     const [league] = await sql`
       SELECT l.id, l.name, l.status, l.day_of_week, l.season_name,
-             l.season_start_date, l.season_end_date, l.match_format,
+             to_char(l.season_start_date, 'YYYY-MM-DD') AS season_start_date,
+             to_char(l.season_end_date, 'YYYY-MM-DD') AS season_end_date, l.match_format,
              l.match_duration_minutes, l.fields_count, l.max_teams, v.name AS venue_name
       FROM leagues l JOIN venues v ON v.id = l.venue_id WHERE l.id = ${leagueId}
     `;
@@ -372,15 +406,23 @@ export async function GET(request) {
     if (!canAccessVenue(user, venueId)) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
-    const leagues =
-      await sql`SELECT * FROM leagues WHERE venue_id = ${venueId} ORDER BY season_start_date DESC`;
+    const leagues = await sql`
+      SELECT *,
+             to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
+             to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
+      FROM leagues WHERE venue_id = ${venueId} ORDER BY leagues.season_start_date DESC
+    `;
     return Response.json(leagues);
   }
 
   if (user.role !== "super_admin") {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
-  const leagues =
-    await sql`SELECT * FROM leagues ORDER BY season_start_date DESC`;
+  const leagues = await sql`
+    SELECT *,
+           to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
+           to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
+    FROM leagues ORDER BY leagues.season_start_date DESC
+  `;
   return Response.json(leagues);
 }

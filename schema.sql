@@ -222,11 +222,26 @@ CREATE TABLE matches (
 
 CREATE INDEX idx_matches_league_id  ON matches (league_id);
 CREATE INDEX idx_matches_match_date ON matches (match_date);
+
+CREATE OR REPLACE FUNCTION nova_planned_date(value DATE)
+RETURNS DATE
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+AS $$ SELECT value $$;
+
+CREATE OR REPLACE FUNCTION nova_planned_date(value TIMESTAMPTZ)
+RETURNS DATE
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+AS $$ SELECT (value AT TIME ZONE 'Africa/Johannesburg')::date $$;
+
 CREATE INDEX matches_active_schedule_lookup
-  ON matches (match_date, time_slot, field_number, league_id)
+  ON matches (nova_planned_date(match_date), time_slot, field_number, league_id)
   WHERE status IN ('scheduled', 'live');
 CREATE INDEX matches_active_referee_schedule_lookup
-  ON matches (referee_id, match_date, time_slot)
+  ON matches (referee_id, nova_planned_date(match_date), time_slot)
   WHERE referee_id IS NOT NULL AND status IN ('scheduled', 'live');
 
 -- Append-only log of in-match events (goals, half/full-time markers).

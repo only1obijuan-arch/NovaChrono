@@ -2,8 +2,13 @@ import { escapeHtml } from "@/utils/escape-html";
 import sql, { withTransaction } from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
 import { canAdministerVenue } from "@/app/api/utils/ownership";
-import { fixtureScheduleKey, lockFixtureSchedule } from "@/app/api/matches/scheduling";
-import { addDaysToLocalDate, formatLocalFixtureDate, localDateString } from "@/utils/scheduling";
+import {
+  fixtureScheduleKey,
+  lockFixtureSchedule,
+  lockRefereeSchedule,
+  refereeScheduleKey,
+} from "@/app/api/matches/scheduling";
+import { addDaysToLocalDate, formatLocalFixtureDate } from "@/utils/scheduling";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { sendPush } from "@/app/api/utils/send-push";
 import { rateLimit } from "@/app/api/utils/rate-limit";
@@ -30,12 +35,39 @@ export async function POST(request) {
     }
 
     const operation = await withTransaction(async (txSql) => {
+      const candidateIds = await txSql`
+        SELECT id
+        FROM matches
+        WHERE league_id = ${league_id}
+          AND round_number >= ${round_number}
+          AND status = 'scheduled'
+        ORDER BY id
+      `;
+      const matches = [];
+      for (const candidate of candidateIds) {
+        const [match] = await txSql`
+          SELECT id,
+                 to_char(nova_planned_date(match_date), 'YYYY-MM-DD') AS match_date,
+                 time_slot, field_number, referee_id
+          FROM matches
+          WHERE id = ${candidate.id}
+            AND league_id = ${league_id}
+            AND round_number >= ${round_number}
+            AND status = 'scheduled'
+          FOR UPDATE
+        `;
+        if (match) matches.push(match);
+      }
+      if (matches.length === 0) {
+        return { response: Response.json({ error: "No scheduled matches found for this round" }, { status: 404 }) };
+      }
+
       const [league] = await txSql`
         SELECT l.*, v.organization_id
         FROM leagues l
         JOIN venues v ON v.id = l.venue_id
         WHERE l.id = ${league_id}
-        FOR UPDATE OF l
+        FOR SHARE OF l
       `;
       const [actor] = await txSql`
         SELECT id, role, venue_id, organization_id
@@ -48,17 +80,17 @@ export async function POST(request) {
         return { response: Response.json({ error: "Forbidden" }, { status: 403 }) };
       }
 
-      const matches = await txSql`
-        SELECT id, to_char(match_date, 'YYYY-MM-DD') AS match_date, time_slot, field_number
+      const currentScope = await txSql`
+        SELECT id
         FROM matches
         WHERE league_id = ${league_id}
           AND round_number >= ${round_number}
           AND status = 'scheduled'
-        ORDER BY match_date, time_slot, field_number, id
-        FOR UPDATE
+        ORDER BY id
       `;
-      if (matches.length === 0) {
-        return { response: Response.json({ error: "No scheduled matches found for this round" }, { status: 404 }) };
+      if (currentScope.length !== matches.length
+        || currentScope.some((match, index) => match.id !== matches[index].id)) {
+        return { response: Response.json({ error: "Round schedule changed during rescheduling; retry the operation" }, { status: 409 }) };
       }
 
       const movingIds = matches.map((match) => match.id);
@@ -68,17 +100,37 @@ export async function POST(request) {
         fieldNumber: match.field_number,
         matchDate: addDaysToLocalDate(match.match_date, 7),
         timeSlot: match.time_slot,
-      })).sort((left, right) => fixtureScheduleKey(left).localeCompare(fixtureScheduleKey(right)));
+      }));
+      const fixtureClaims = planned.map((schedule) => ({
+        key: fixtureScheduleKey(schedule),
+        schedule,
+      }));
+      const refereeClaims = planned.filter((schedule) => schedule.referee_id).map((schedule) => ({
+        key: refereeScheduleKey({ refereeId: schedule.referee_id, matchDate: schedule.matchDate, timeSlot: schedule.timeSlot }),
+        schedule: { refereeId: schedule.referee_id, matchDate: schedule.matchDate, timeSlot: schedule.timeSlot },
+      }));
+      if (new Set(fixtureClaims.map((claim) => claim.key)).size !== fixtureClaims.length
+        || new Set(refereeClaims.map((claim) => claim.key)).size !== refereeClaims.length) {
+        return { response: Response.json({ error: "The postponed round contains duplicate active schedule claims" }, { status: 409 }) };
+      }
 
-      for (const schedule of planned) {
-        await lockFixtureSchedule(txSql, schedule);
+      const allClaims = [
+        ...fixtureClaims.map((claim) => ({ ...claim, kind: "fixture" })),
+        ...refereeClaims.map((claim) => ({ ...claim, kind: "referee" })),
+      ].sort((left, right) => left.key.localeCompare(right.key));
+      for (const claim of allClaims) {
+        if (claim.kind === "fixture") await lockFixtureSchedule(txSql, claim.schedule);
+        else await lockRefereeSchedule(txSql, claim.schedule);
+      }
+
+      for (const { schedule } of fixtureClaims) {
         const [conflict] = await txSql`
           SELECT m.id
           FROM matches m
           JOIN leagues l ON l.id = m.league_id
           WHERE l.venue_id = ${league.venue_id}
             AND m.field_number = ${schedule.fieldNumber}
-            AND m.match_date = ${schedule.matchDate}::date
+            AND nova_planned_date(m.match_date) = ${schedule.matchDate}::date
             AND m.time_slot = ${schedule.timeSlot}
             AND m.status IN ('scheduled', 'live')
             AND m.id <> ALL(${movingIds}::uuid[])
@@ -88,12 +140,29 @@ export async function POST(request) {
           return { response: Response.json({ error: "A postponed round would collide with an existing active fixture" }, { status: 409 }) };
         }
       }
+      for (const { schedule } of refereeClaims) {
+        const [conflict] = await txSql`
+          SELECT id
+          FROM matches
+          WHERE referee_id = ${schedule.refereeId}
+            AND nova_planned_date(match_date) = ${schedule.matchDate}::date
+            AND time_slot = ${schedule.timeSlot}
+            AND status IN ('scheduled', 'live')
+            AND id <> ALL(${movingIds}::uuid[])
+          LIMIT 1
+        `;
+        if (conflict) {
+          return { response: Response.json({ error: "A postponed round would double-book a retained referee" }, { status: 409 }) };
+        }
+      }
 
       const updatedMatches = await txSql`
         UPDATE matches
-        SET match_date = match_date + 7
+        SET match_date = match_date + INTERVAL '7 days'
         WHERE id = ANY(${movingIds}::uuid[])
-        RETURNING id, match_date, time_slot, field_number
+        RETURNING id,
+                  to_char(nova_planned_date(match_date), 'YYYY-MM-DD') AS match_date,
+                  time_slot, field_number
       `;
       await txSql`
         INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value)
@@ -119,7 +188,7 @@ export async function POST(request) {
       WHERE ls.league_id = ${league_id} AND t.status = 'active'
     `;
 
-    const newDate = formatLocalFixtureDate(localDateString(updatedMatches[0].match_date), "en-GB");
+    const newDate = formatLocalFixtureDate(updatedMatches[0].match_date, "en-GB");
 
     const notifTitle = `📅 Round ${round_number}+ Postponed — ${league.name}`;
     const notifMessage = `Round ${round_number} and all following rounds of ${league.name} have been postponed by 7 days. Please check the fixtures for updated times.`;
