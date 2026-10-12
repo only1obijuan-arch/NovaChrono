@@ -2,10 +2,20 @@ import sql, { withTransaction } from "@/app/api/utils/sql";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 import { resolveCurrentUser } from "@/app/api/utils/auth";
 import { recomputeLeagueStandings } from "@/app/api/matches/standings";
+import {
+  findFixtureConflict,
+  findRefereeConflict,
+  lockFixtureSchedule,
+  lockRefereeSchedule,
+  scheduleValidationError,
+} from "@/app/api/matches/scheduling";
 import { z } from "zod";
 
-const MATCH_STATUSES = ["scheduled", "live", "final", "postponed", "cancelled"];
+const RESULT_OVERRIDE_STATUSES = ["scheduled", "final"];
 const uuid = () => z.string().uuid();
+const correctionReason = z.string().trim().min(1).max(500);
+const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const localTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
 const matchActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("START_MATCH"), matchId: uuid() }),
@@ -24,17 +34,44 @@ const matchActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("END_MATCH"), matchId: uuid() }),
   z.object({ action: z.literal("START_SECOND_HALF"), matchId: uuid() }),
   z.object({
+    action: z.literal("CREATE_FIXTURE"),
+    leagueId: uuid(),
+    roundNumber: z.number().int().min(1).max(999),
+    matchDate: localDate,
+    timeSlot: localTime,
+    fieldNumber: z.number().int().min(1).max(999),
+    homeSlotId: uuid(),
+    awaySlotId: uuid(),
+    refereeId: uuid().nullable().optional(),
+  }),
+  z.object({
+    action: z.literal("EDIT_FIXTURE"),
+    matchId: uuid(),
+    matchDate: localDate,
+    timeSlot: localTime,
+    fieldNumber: z.number().int().min(1).max(999),
+    refereeId: uuid().nullable().optional(),
+  }),
+  z.object({ action: z.literal("POSTPONE_FIXTURE"), matchId: uuid() }),
+  z.object({ action: z.literal("CANCEL_FIXTURE"), matchId: uuid() }),
+  z.object({
     action: z.literal("ADMIN_OVERRIDE"),
     matchId: uuid(),
     homeScore: z.number().int().min(0).max(99),
     awayScore: z.number().int().min(0).max(99),
-    status: z.enum(MATCH_STATUSES),
-    reason: z.string().max(500).optional(),
+    status: z.enum(RESULT_OVERRIDE_STATUSES),
+    reason: correctionReason,
   }),
   z.object({
     action: z.literal("ASSIGN_REFEREE"),
     matchId: uuid(),
     refereeId: uuid().nullable(),
+  }),
+  z.object({
+    action: z.literal("FORFEIT_MATCH"),
+    matchId: uuid(),
+    winnerSide: z.enum(["home", "away"]),
+    reason: z.string().trim().min(1).max(500).optional(),
   }),
 ]);
 
@@ -47,13 +84,30 @@ function canAccessVenue(user, venueId) {
 
 async function lockMatch(txSql, matchId) {
   const [match] = await txSql`
-    SELECT m.*, l.venue_id AS league_venue_id
+    SELECT m.*,
+           to_char(m.match_date, 'YYYY-MM-DD') AS schedule_date,
+           l.venue_id AS league_venue_id,
+           l.status AS league_status,
+           l.fields_count,
+           l.time_slots,
+           l.forfeit_score_home,
+           l.forfeit_score_away
     FROM matches m
     JOIN leagues l ON l.id = m.league_id
     WHERE m.id = ${matchId}
     FOR UPDATE OF m
   `;
   return match ?? null;
+}
+
+async function lockLeague(txSql, leagueId) {
+  const [league] = await txSql`
+    SELECT id, venue_id, status, fields_count, time_slots
+    FROM leagues
+    WHERE id = ${leagueId}
+    FOR UPDATE
+  `;
+  return league ?? null;
 }
 
 async function authorizeLockedMatch(txSql, identityId, match, roles = WRITE_ROLES) {
@@ -76,6 +130,73 @@ async function authorizeLockedMatch(txSql, identityId, match, roles = WRITE_ROLE
   return { actor };
 }
 
+async function authorizeLockedLeague(txSql, identityId, league) {
+  const [actor] = await txSql`
+    SELECT id, role, venue_id, organization_id
+    FROM auth_users
+    WHERE id = ${identityId}
+    FOR SHARE
+  `;
+  if (!actor) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
+  if (!ADMIN_ROLES.includes(actor.role)) {
+    return { response: Response.json({ error: "Insufficient permissions" }, { status: 403 }) };
+  }
+  if (!canAccessVenue(actor, league.venue_id)) {
+    return { response: Response.json({ error: "Access denied" }, { status: 403 }) };
+  }
+  return { actor };
+}
+
+function matchSnapshot(match) {
+  return {
+    match_date: match.schedule_date,
+    time_slot: match.time_slot,
+    field_number: match.field_number,
+    referee_id: match.referee_id,
+    home_score: match.home_score,
+    away_score: match.away_score,
+    status: match.status,
+    result_type: match.result_type,
+  };
+}
+
+async function validateParticipantSlots(txSql, leagueId, homeSlotId, awaySlotId) {
+  if (homeSlotId === awaySlotId) return "Home and away slots must be different";
+  const slots = await txSql`
+    SELECT id
+    FROM league_slots
+    WHERE league_id = ${leagueId}
+      AND id IN (${homeSlotId}, ${awaySlotId})
+    ORDER BY id
+    FOR SHARE
+  `;
+  return slots.length === 2 ? null : "Both participant slots must belong to this league";
+}
+
+async function validateReferee(txSql, refereeId, venueId) {
+  if (refereeId == null) return null;
+  const [referee] = await txSql`
+    SELECT id, venue_id, role
+    FROM auth_users
+    WHERE id = ${refereeId}
+    FOR SHARE
+  `;
+  if (!referee || referee.role !== "referee") return { error: "Referee not found", status: 404 };
+  if (referee.venue_id !== venueId) return { error: "Referee does not belong to this venue", status: 403 };
+  return null;
+}
+
+async function claimFixtureSchedule(txSql, schedule, excludeMatchId = null) {
+  await lockFixtureSchedule(txSql, schedule);
+  return findFixtureConflict(txSql, schedule, excludeMatchId);
+}
+
+async function claimRefereeSchedule(txSql, schedule, excludeMatchId = null) {
+  if (schedule.refereeId == null) return null;
+  await lockRefereeSchedule(txSql, schedule);
+  return findRefereeConflict(txSql, schedule, excludeMatchId);
+}
+
 export async function POST(request) {
   try {
     const user = await resolveCurrentUser(request);
@@ -91,6 +212,154 @@ export async function POST(request) {
       return Response.json({ error: parsed.error.format() }, { status: 400 });
     }
     const { action, matchId, ...data } = parsed.data;
+
+    if (action === "CREATE_FIXTURE") {
+      const {
+        leagueId, roundNumber, matchDate, timeSlot, fieldNumber,
+        homeSlotId, awaySlotId, refereeId = null,
+      } = data;
+      return await withTransaction(async (txSql) => {
+        const league = await lockLeague(txSql, leagueId);
+        if (!league) return Response.json({ error: "League not found" }, { status: 404 });
+        const authorization = await authorizeLockedLeague(txSql, user.id, league);
+        if (authorization.response) return authorization.response;
+        if (league.status !== "active") {
+          return Response.json({ error: "Fixtures can only be added to an active league" }, { status: 409 });
+        }
+        const scheduleError = scheduleValidationError({ matchDate, timeSlot, fieldNumber }, league);
+        if (scheduleError) return Response.json({ error: scheduleError }, { status: 400 });
+        const slotError = await validateParticipantSlots(txSql, leagueId, homeSlotId, awaySlotId);
+        if (slotError) return Response.json({ error: slotError }, { status: 409 });
+        const refereeError = await validateReferee(txSql, refereeId, league.venue_id);
+        if (refereeError) return Response.json({ error: refereeError.error }, { status: refereeError.status });
+
+        const schedule = { venueId: league.venue_id, fieldNumber, matchDate, timeSlot };
+        if (await claimFixtureSchedule(txSql, schedule)) {
+          return Response.json({ error: "Another active fixture already occupies this field and kickoff" }, { status: 409 });
+        }
+        if (await claimRefereeSchedule(txSql, { refereeId, matchDate, timeSlot })) {
+          return Response.json({ error: "Referee is already assigned to another active fixture at this kickoff" }, { status: 409 });
+        }
+
+        const [fixture] = await txSql`
+          INSERT INTO matches (
+            league_id, round_number, match_date, time_slot, field_number,
+            home_slot_id, away_slot_id, referee_id
+          )
+          VALUES (
+            ${leagueId}, ${roundNumber}, ${matchDate}::date, ${timeSlot}, ${fieldNumber},
+            ${homeSlotId}, ${awaySlotId}, ${refereeId}
+          )
+          RETURNING id
+        `;
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, new_value)
+          VALUES (
+            ${authorization.actor.id},
+            ${fixture.id},
+            'CREATE_FIXTURE',
+            ${JSON.stringify({ league_id: leagueId, round_number: roundNumber, match_date: matchDate, time_slot: timeSlot, field_number: fieldNumber, home_slot_id: homeSlotId, away_slot_id: awaySlotId, referee_id: refereeId, status: "scheduled" })}
+          )
+        `;
+        return Response.json({ success: true, matchId: fixture.id });
+      });
+    }
+
+    if (action === "EDIT_FIXTURE") {
+      const { matchDate, timeSlot, fieldNumber } = data;
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match, ADMIN_ROLES);
+        if (authorization.response) return authorization.response;
+        if (!['scheduled', 'postponed'].includes(match.status)) {
+          return Response.json({ error: `Cannot edit a fixture with status '${match.status}'` }, { status: 409 });
+        }
+        if (match.league_status !== "active") {
+          return Response.json({ error: "Fixtures can only be edited in an active league" }, { status: 409 });
+        }
+        const league = { fields_count: match.fields_count, time_slots: match.time_slots };
+        const scheduleError = scheduleValidationError({ matchDate, timeSlot, fieldNumber }, league);
+        if (scheduleError) return Response.json({ error: scheduleError }, { status: 400 });
+
+        const refereeId = Object.hasOwn(data, "refereeId") ? data.refereeId : match.referee_id;
+        const refereeError = await validateReferee(txSql, refereeId, match.league_venue_id);
+        if (refereeError) return Response.json({ error: refereeError.error }, { status: refereeError.status });
+        const schedule = { venueId: match.league_venue_id, fieldNumber, matchDate, timeSlot };
+        if (await claimFixtureSchedule(txSql, schedule, matchId)) {
+          return Response.json({ error: "Another active fixture already occupies this field and kickoff" }, { status: 409 });
+        }
+        if (await claimRefereeSchedule(txSql, { refereeId, matchDate, timeSlot }, matchId)) {
+          return Response.json({ error: "Referee is already assigned to another active fixture at this kickoff" }, { status: 409 });
+        }
+
+        const before = matchSnapshot(match);
+        const after = {
+          ...before,
+          match_date: matchDate,
+          time_slot: timeSlot,
+          field_number: fieldNumber,
+          referee_id: refereeId,
+          status: "scheduled",
+        };
+        await txSql`
+          UPDATE matches
+          SET match_date = ${matchDate}::date,
+              time_slot = ${timeSlot},
+              field_number = ${fieldNumber},
+              referee_id = ${refereeId},
+              status = 'scheduled'
+          WHERE id = ${matchId}
+        `;
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value)
+          VALUES (${authorization.actor.id}, ${matchId}, 'EDIT_FIXTURE', ${JSON.stringify(before)}, ${JSON.stringify(after)})
+        `;
+        return Response.json({ success: true });
+      });
+    }
+
+    if (action === "POSTPONE_FIXTURE") {
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match, ADMIN_ROLES);
+        if (authorization.response) return authorization.response;
+        if (match.status === "postponed") return Response.json({ success: true, idempotent: true });
+        if (match.status !== "scheduled") {
+          return Response.json({ error: `Cannot postpone a fixture with status '${match.status}'` }, { status: 409 });
+        }
+        const before = matchSnapshot(match);
+        const after = { ...before, status: "postponed" };
+        await txSql`UPDATE matches SET status = 'postponed' WHERE id = ${matchId}`;
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value)
+          VALUES (${authorization.actor.id}, ${matchId}, 'POSTPONE_FIXTURE', ${JSON.stringify(before)}, ${JSON.stringify(after)})
+        `;
+        return Response.json({ success: true, idempotent: false });
+      });
+    }
+
+    if (action === "CANCEL_FIXTURE") {
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match, ADMIN_ROLES);
+        if (authorization.response) return authorization.response;
+        if (match.status === "cancelled") return Response.json({ success: true, idempotent: true });
+        if (!['scheduled', 'postponed'].includes(match.status)) {
+          return Response.json({ error: `Cannot cancel a fixture with status '${match.status}'` }, { status: 409 });
+        }
+        const before = matchSnapshot(match);
+        const after = { ...before, status: "cancelled" };
+        await txSql`UPDATE matches SET status = 'cancelled' WHERE id = ${matchId}`;
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value)
+          VALUES (${authorization.actor.id}, ${matchId}, 'CANCEL_FIXTURE', ${JSON.stringify(before)}, ${JSON.stringify(after)})
+        `;
+        return Response.json({ success: true, idempotent: false });
+      });
+    }
 
     if (action === "START_MATCH") {
       return await withTransaction(async (txSql) => {
@@ -289,9 +558,26 @@ export async function POST(request) {
         const authorization = await authorizeLockedMatch(txSql, user.id, oldMatch, ADMIN_ROLES);
         if (authorization.response) return authorization.response;
 
+        const before = matchSnapshot(oldMatch);
+        const after = {
+          ...before,
+          home_score: homeScore,
+          away_score: awayScore,
+          status: newStatus,
+          result_type: "played",
+        };
+        const unchanged = before.home_score === homeScore
+          && before.away_score === awayScore
+          && before.status === newStatus
+          && before.result_type === "played";
+        if (unchanged) return Response.json({ success: true, idempotent: true });
+
         await txSql`
           UPDATE matches
-          SET home_score = ${homeScore}, away_score = ${awayScore}, status = ${newStatus}
+          SET home_score = ${homeScore},
+              away_score = ${awayScore},
+              status = ${newStatus},
+              result_type = 'played'
           WHERE id = ${matchId}
         `;
         if (oldMatch.status === "final" || newStatus === "final") {
@@ -299,9 +585,9 @@ export async function POST(request) {
         }
         await txSql`
           INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value, reason)
-          VALUES (${authorization.actor.id}, ${matchId}, 'ADMIN_OVERRIDE', ${JSON.stringify(oldMatch)}, ${JSON.stringify({ homeScore, awayScore, status: newStatus })}, ${reason})
+          VALUES (${authorization.actor.id}, ${matchId}, 'ADMIN_OVERRIDE', ${JSON.stringify(before)}, ${JSON.stringify(after)}, ${reason})
         `;
-        return Response.json({ success: true });
+        return Response.json({ success: true, idempotent: false });
       });
     }
 
@@ -312,18 +598,80 @@ export async function POST(request) {
         if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
         const authorization = await authorizeLockedMatch(txSql, user.id, match, ADMIN_ROLES);
         if (authorization.response) return authorization.response;
+        if (!["scheduled", "postponed"].includes(match.status)) {
+          return Response.json({ error: `Cannot assign a referee to a fixture with status '${match.status}'` }, { status: 409 });
+        }
 
-        if (refereeId != null) {
-          const [referee] = await txSql`SELECT venue_id, role FROM auth_users WHERE id = ${refereeId} FOR SHARE`;
-          if (!referee || referee.role !== "referee") {
-            return Response.json({ error: "Referee not found" }, { status: 404 });
-          }
-          if (authorization.actor.role !== "super_admin" && referee.venue_id !== match.league_venue_id) {
-            return Response.json({ error: "Referee does not belong to this venue" }, { status: 403 });
-          }
+        const refereeError = await validateReferee(txSql, refereeId, match.league_venue_id);
+        if (refereeError) {
+          return Response.json({ error: refereeError.error }, { status: refereeError.status });
+        }
+        if (match.status === "scheduled" && await claimRefereeSchedule(txSql, {
+          refereeId,
+          matchDate: match.schedule_date,
+          timeSlot: match.time_slot,
+        }, matchId)) {
+          return Response.json({ error: "Referee is already assigned to another active fixture at this kickoff" }, { status: 409 });
         }
         await txSql`UPDATE matches SET referee_id = ${refereeId ?? null} WHERE id = ${matchId}`;
         return Response.json({ success: true });
+      });
+    }
+
+    if (action === "FORFEIT_MATCH") {
+      const { winnerSide, reason = null } = data;
+      return await withTransaction(async (txSql) => {
+        const match = await lockMatch(txSql, matchId);
+        if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
+        const authorization = await authorizeLockedMatch(txSql, user.id, match, ADMIN_ROLES);
+        if (authorization.response) return authorization.response;
+
+        const resultType = winnerSide === "home" ? "forfeit_home_win" : "forfeit_away_win";
+        const homeScore = winnerSide === "home" ? match.forfeit_score_home : match.forfeit_score_away;
+        const awayScore = winnerSide === "away" ? match.forfeit_score_home : match.forfeit_score_away;
+        if (match.status === "final" && match.result_type === resultType
+          && match.home_score === homeScore && match.away_score === awayScore) {
+          return Response.json({ success: true, idempotent: true });
+        }
+        if (match.status !== "scheduled") {
+          return Response.json({ error: `Cannot record a forfeit for a fixture with status '${match.status}'` }, { status: 409 });
+        }
+        if (!match.home_slot_id || !match.away_slot_id || match.home_slot_id === match.away_slot_id) {
+          return Response.json({ error: "Match participants are not valid for a forfeit" }, { status: 409 });
+        }
+        const slotError = await validateParticipantSlots(
+          txSql,
+          match.league_id,
+          match.home_slot_id,
+          match.away_slot_id,
+        );
+        if (slotError) return Response.json({ error: slotError }, { status: 409 });
+
+        const before = matchSnapshot(match);
+        const after = {
+          ...before,
+          home_score: homeScore,
+          away_score: awayScore,
+          status: "final",
+          result_type: resultType,
+          winner_side: winnerSide,
+          loser_side: winnerSide === "home" ? "away" : "home",
+        };
+        await txSql`
+          UPDATE matches
+          SET home_score = ${homeScore},
+              away_score = ${awayScore},
+              status = 'final',
+              result_type = ${resultType},
+              end_time = CURRENT_TIMESTAMP
+          WHERE id = ${matchId}
+        `;
+        await recomputeLeagueStandings(txSql, match.league_id);
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value, reason)
+          VALUES (${authorization.actor.id}, ${matchId}, 'FORFEIT_MATCH', ${JSON.stringify(before)}, ${JSON.stringify(after)}, ${reason})
+        `;
+        return Response.json({ success: true, idempotent: false });
       });
     }
 
@@ -378,7 +726,8 @@ export async function GET(request) {
     const matches = await sql`
       SELECT m.*,
              th.name as home_team_name,
-             ta.name as away_team_name
+             ta.name as away_team_name,
+             ref.name as referee_name
       FROM matches m
       LEFT JOIN league_slots lsh ON m.home_slot_id = lsh.id
       LEFT JOIN teams th ON th.slot_id = lsh.id AND th.status = 'active'

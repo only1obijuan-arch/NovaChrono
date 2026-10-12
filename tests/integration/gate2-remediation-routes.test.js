@@ -30,10 +30,15 @@ const IDS = {
   mobile: "30000000-0000-4000-8000-000000000008",
   foreignReferee: "30000000-0000-4000-8000-000000000009",
   league: "40000000-0000-4000-8000-000000000001",
+  leagueB: "40000000-0000-4000-8000-000000000002",
   slotA: "50000000-0000-4000-8000-000000000001",
   slotB: "50000000-0000-4000-8000-000000000002",
+  slotC: "50000000-0000-4000-8000-000000000003",
+  slotD: "50000000-0000-4000-8000-000000000004",
   team: "60000000-0000-4000-8000-000000000001",
   teamB: "60000000-0000-4000-8000-000000000002",
+  teamC: "60000000-0000-4000-8000-000000000003",
+  teamD: "60000000-0000-4000-8000-000000000004",
   playerA: "61000000-0000-4000-8000-000000000001",
   playerB: "61000000-0000-4000-8000-000000000002",
   match: "70000000-0000-4000-8000-000000000001",
@@ -92,9 +97,19 @@ async function seed() {
        fields_count, time_slots, max_teams, join_code)
     VALUES ($1, $2, 'League', 2, '2x20', 40, 1, '["18:30"]', 2, 'G2ROUTE1')
   `, [IDS.league, IDS.venueA]);
+  await pool.query(`
+    INSERT INTO leagues
+      (id, venue_id, name, day_of_week, match_format, match_duration_minutes,
+       fields_count, time_slots, max_teams, join_code, status, forfeit_score_home, forfeit_score_away)
+    VALUES ($1, $2, 'League B', 2, '2x20', 40, 2, '["18:30","19:30"]', 2, 'G4ROUTE2', 'active', 5, 0)
+  `, [IDS.leagueB, IDS.venueA]);
   await pool.query(
     "INSERT INTO league_slots (id, league_id, slot_number) VALUES ($1, $3, 1), ($2, $3, 2)",
     [IDS.slotA, IDS.slotB, IDS.league],
+  );
+  await pool.query(
+    "INSERT INTO league_slots (id, league_id, slot_number) VALUES ($1, $3, 1), ($2, $3, 2)",
+    [IDS.slotC, IDS.slotD, IDS.leagueB],
   );
   await pool.query(`
     INSERT INTO teams (id, league_id, slot_id, name, captain_user_id, created_at)
@@ -102,6 +117,10 @@ async function seed() {
       ($1, $3, $4, 'Nova United', $6, TIMESTAMPTZ '2026-10-01 00:00:00+00'),
       ($2, $3, $5, 'Orion City', NULL, TIMESTAMPTZ '2026-10-02 00:00:00+00')
   `, [IDS.team, IDS.teamB, IDS.league, IDS.slotA, IDS.slotB, IDS.captain]);
+  await pool.query(`
+    INSERT INTO teams (id, league_id, slot_id, name)
+    VALUES ($1, $3, $4, 'Cosmos FC'), ($2, $3, $5, 'Meteor FC')
+  `, [IDS.teamC, IDS.teamD, IDS.leagueB, IDS.slotC, IDS.slotD]);
   await pool.query(
     "INSERT INTO players (id, team_id, name) VALUES ($1, $2, 'Home Player'), ($3, $4, 'Away Player')",
     [IDS.playerA, IDS.team, IDS.playerB, IDS.teamB],
@@ -109,6 +128,10 @@ async function seed() {
   await pool.query(
     "INSERT INTO standings (league_id, team_id) VALUES ($1, $2), ($1, $3)",
     [IDS.league, IDS.team, IDS.teamB],
+  );
+  await pool.query(
+    "INSERT INTO standings (league_id, team_id) VALUES ($1, $2), ($1, $3)",
+    [IDS.leagueB, IDS.teamC, IDS.teamD],
   );
   await pool.query(`
     INSERT INTO matches
@@ -681,5 +704,229 @@ describe("Gate 3 deterministic standings", () => {
     authState.actorId = IDS.protectedReferee;
     expect((await postMatch({ action: "END_MATCH", matchId: IDS.match })).status).toBe(403);
     expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match])).rows[0].status).toBe("live");
+  });
+});
+
+describe("Gate 4A fixture and result operations", () => {
+  beforeEach(async () => {
+    authState.actorId = IDS.venueAdminA;
+    await pool.query(`
+      UPDATE leagues
+      SET status = 'active', fields_count = 2, time_slots = '["18:30","19:30"]',
+          forfeit_score_home = 5, forfeit_score_away = 0
+      WHERE id = $1
+    `, [IDS.league]);
+    await pool.query(`
+      UPDATE matches
+      SET status = 'scheduled', result_type = 'played', home_score = 0, away_score = 0,
+          start_time = NULL, half2_start_time = NULL, end_time = NULL, referee_id = NULL
+      WHERE league_id = $1
+    `, [IDS.league]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-05', time_slot = '18:30', field_number = 1 WHERE id = $1", [IDS.match]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-12', time_slot = '18:30', field_number = 1 WHERE id = $1", [IDS.match2]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-12', time_slot = '18:30', field_number = 2 WHERE id = $1", [IDS.match3]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-19', time_slot = '18:30', field_number = 1 WHERE id = $1", [IDS.match4]);
+  });
+
+  const createFixture = (overrides = {}) => postMatch({
+    action: "CREATE_FIXTURE",
+    leagueId: IDS.leagueB,
+    roundNumber: 10,
+    matchDate: "2030-03-05",
+    timeSlot: "18:30",
+    fieldNumber: 1,
+    homeSlotId: IDS.slotC,
+    awaySlotId: IDS.slotD,
+    refereeId: null,
+    ...overrides,
+  });
+
+  const editFixture = (matchId = IDS.match2, overrides = {}) => postMatch({
+    action: "EDIT_FIXTURE",
+    matchId,
+    matchDate: "2030-02-26",
+    timeSlot: "19:30",
+    fieldNumber: 2,
+    refereeId: null,
+    ...overrides,
+  });
+
+  it("creates a valid fixture and audits it", async () => {
+    const response = await createFixture();
+    expect(response.status).toBe(200);
+    const { matchId } = await response.json();
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [matchId])).rows[0].status).toBe("scheduled");
+    expect((await pool.query("SELECT action_type FROM audit_logs WHERE target_id = $1", [matchId])).rows[0].action_type).toBe("CREATE_FIXTURE");
+  });
+
+  it("returns 409 for an occupied venue field and kickoff", async () => {
+    expect((await createFixture({ matchDate: "2030-02-05" })).status).toBe(409);
+  });
+
+  it("serializes concurrent fixture claims into one winner", async () => {
+    const responses = await Promise.all([createFixture(), createFixture({ roundNumber: 11 })]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(Number((await pool.query(`
+      SELECT count(*) FROM matches m JOIN leagues l ON l.id = m.league_id
+      WHERE l.venue_id = $1 AND m.match_date = DATE '2030-03-05'
+        AND m.time_slot = '18:30' AND m.field_number = 1 AND m.status = 'scheduled'
+    `, [IDS.venueA])).rows[0].count)).toBe(1);
+  });
+
+  it("reschedules normally, rejects a collision, and rejects live/final edits", async () => {
+    expect((await editFixture()).status).toBe(200);
+    expect((await editFixture(IDS.match3, { matchDate: "2030-02-05", timeSlot: "18:30", fieldNumber: 1 })).status).toBe(409);
+    for (const status of ["live", "final"]) {
+      await pool.query("UPDATE matches SET status = $1 WHERE id = $2", [status, IDS.match3]);
+      expect((await editFixture(IDS.match3)).status).toBe(409);
+    }
+  });
+
+  it("allows only one winner when a reschedule races fixture creation", async () => {
+    const target = { matchDate: "2030-03-05", timeSlot: "18:30", fieldNumber: 1 };
+    const responses = await Promise.all([
+      editFixture(IDS.match2, target),
+      createFixture(target),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+  });
+
+  it("assigns a valid referee and rejects wrong role or venue", async () => {
+    expect((await postMatch({ action: "ASSIGN_REFEREE", matchId: IDS.match, refereeId: IDS.referee })).status).toBe(200);
+    expect((await postMatch({ action: "ASSIGN_REFEREE", matchId: IDS.match, refereeId: IDS.captain })).status).toBe(404);
+    expect((await postMatch({ action: "ASSIGN_REFEREE", matchId: IDS.match, refereeId: IDS.foreignReferee })).status).toBe(403);
+  });
+
+  it("serializes simultaneous referee assignments", async () => {
+    const responses = await Promise.all([
+      postMatch({ action: "ASSIGN_REFEREE", matchId: IDS.match2, refereeId: IDS.referee }),
+      postMatch({ action: "ASSIGN_REFEREE", matchId: IDS.match3, refereeId: IDS.referee }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(Number((await pool.query(
+      "SELECT count(*) FROM matches WHERE referee_id = $1 AND match_date = DATE '2030-02-12' AND time_slot = '18:30'",
+      [IDS.referee],
+    )).rows[0].count)).toBe(1);
+  });
+
+  it("postpones one scheduled fixture, audits it, releases capacity, and reschedules it", async () => {
+    expect((await postMatch({ action: "POSTPONE_FIXTURE", matchId: IDS.match })).status).toBe(200);
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match])).rows[0].status).toBe("postponed");
+    expect((await pool.query("SELECT action_type FROM audit_logs WHERE target_id = $1", [IDS.match])).rows[0].action_type).toBe("POSTPONE_FIXTURE");
+    expect((await createFixture({ matchDate: "2030-02-05" })).status).toBe(200);
+    expect((await editFixture(IDS.match)).status).toBe(200);
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match])).rows[0].status).toBe("scheduled");
+  });
+
+  it("rejects postponing a final fixture", async () => {
+    await pool.query("UPDATE matches SET status = 'final' WHERE id = $1", [IDS.match]);
+    expect((await postMatch({ action: "POSTPONE_FIXTURE", matchId: IDS.match })).status).toBe(409);
+  });
+
+  it("cancels one fixture without changing standings and releases capacity", async () => {
+    await pool.query("UPDATE matches SET status = 'final', home_score = 2 WHERE id = $1", [IDS.match4]);
+    await withTransaction((txSql) => recomputeLeagueStandings(txSql, IDS.league));
+    const before = (await pool.query("SELECT team_id, played, points FROM standings WHERE league_id = $1 ORDER BY team_id", [IDS.league])).rows;
+    expect((await postMatch({ action: "CANCEL_FIXTURE", matchId: IDS.match })).status).toBe(200);
+    const after = (await pool.query("SELECT team_id, played, points FROM standings WHERE league_id = $1 ORDER BY team_id", [IDS.league])).rows;
+    expect(after).toEqual(before);
+    expect((await createFixture({ matchDate: "2030-02-05" })).status).toBe(200);
+    expect((await pool.query("SELECT action_type FROM audit_logs WHERE target_id = $1", [IDS.match])).rows[0].action_type).toBe("CANCEL_FIXTURE");
+  });
+
+  it.each(["live", "final"])("rejects cancelling a %s fixture", async (status) => {
+    await pool.query("UPDATE matches SET status = $1 WHERE id = $2", [status, IDS.match]);
+    expect((await postMatch({ action: "CANCEL_FIXTURE", matchId: IDS.match })).status).toBe(409);
+  });
+
+  it("requires a nonblank correction reason", async () => {
+    const base = { action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 1, status: "final" };
+    expect((await postMatch(base)).status).toBe(400);
+    expect((await postMatch({ ...base, reason: "   " })).status).toBe(400);
+  });
+
+  it("records correction before/after state and rebuilds standings", async () => {
+    const response = await postMatch({
+      action: "ADMIN_OVERRIDE",
+      matchId: IDS.match4,
+      homeScore: 0,
+      awayScore: 2,
+      status: "final",
+      reason: "Score sheet correction",
+    });
+    expect(response.status).toBe(200);
+    const audit = (await pool.query("SELECT old_value, new_value, reason FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0];
+    expect(audit.reason).toBe("Score sheet correction");
+    expect(audit.old_value).toMatchObject({ home_score: 0, away_score: 0, status: "scheduled" });
+    expect(audit.new_value).toMatchObject({ home_score: 0, away_score: 2, status: "final", result_type: "played" });
+    expect((await pool.query("SELECT played, won FROM standings WHERE team_id = $1", [IDS.teamB])).rows[0]).toMatchObject({ played: 1, won: 1 });
+  });
+
+  it("rolls a correction back when its audit fails", async () => {
+    await installFailureTrigger({ name: "gate4_fail_override_audit", table: "audit_logs", event: "INSERT", body: "RAISE EXCEPTION 'forced audit failure';" });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 3, awayScore: 1, status: "final", reason: "Correction" })).status).toBe(500);
+    } finally {
+      log.mockRestore();
+      await removeFailureTrigger("gate4_fail_override_audit", "audit_logs");
+    }
+    expect((await pool.query("SELECT home_score, away_score, status FROM matches WHERE id = $1", [IDS.match4])).rows[0])
+      .toMatchObject({ home_score: 0, away_score: 0, status: "scheduled" });
+  });
+
+  it.each([
+    ["home", 5, 0, "forfeit_home_win", IDS.team],
+    ["away", 0, 5, "forfeit_away_win", IDS.teamB],
+  ])("records a configured %s-side forfeit atomically", async (winnerSide, homeScore, awayScore, resultType, winningTeam) => {
+    const response = await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match4, winnerSide, reason: "No-show" });
+    expect(response.status).toBe(200);
+    expect((await pool.query("SELECT home_score, away_score, status, result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0])
+      .toMatchObject({ home_score: homeScore, away_score: awayScore, status: "final", result_type: resultType });
+    expect((await pool.query("SELECT won, points FROM standings WHERE team_id = $1", [winningTeam])).rows[0])
+      .toMatchObject({ won: 1, points: 3 });
+    expect((await pool.query("SELECT action_type FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0].action_type).toBe("FORFEIT_MATCH");
+  });
+
+  it("treats concurrent repeated forfeits as one audited result", async () => {
+    const command = () => postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match4, winnerSide: "home", reason: "No-show" });
+    const responses = await Promise.all([command(), command()]);
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE target_id = $1 AND action_type = 'FORFEIT_MATCH'", [IDS.match4])).rows[0].count)).toBe(1);
+  });
+
+  it("rolls a forfeit back on downstream standings failure", async () => {
+    await installFailureTrigger({ name: "gate4_fail_forfeit_standings", table: "standings", event: "UPDATE", body: "RAISE EXCEPTION 'forced standings failure';" });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect((await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match4, winnerSide: "home" })).status).toBe(500);
+    } finally {
+      log.mockRestore();
+      await removeFailureTrigger("gate4_fail_forfeit_standings", "standings");
+    }
+    expect((await pool.query("SELECT home_score, away_score, status, result_type FROM matches WHERE id = $1", [IDS.match4])).rows[0])
+      .toMatchObject({ home_score: 0, away_score: 0, status: "scheduled", result_type: "played" });
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0].count)).toBe(0);
+  });
+
+  it("serializes correction racing finalisation and preserves final truth", async () => {
+    authState.actorId = IDS.super;
+    await pool.query("UPDATE matches SET status = 'live', home_score = 1 WHERE id = $1", [IDS.match4]);
+    const responses = await Promise.all([
+      postMatch({ action: "END_MATCH", matchId: IDS.match4 }),
+      postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 0, status: "final", reason: "Official correction" }),
+    ]);
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect((await pool.query("SELECT status, home_score, away_score FROM matches WHERE id = $1", [IDS.match4])).rows[0])
+      .toMatchObject({ status: "final", home_score: 2, away_score: 0 });
+  });
+
+  it("serializes cancellation racing a forfeit", async () => {
+    const responses = await Promise.all([
+      postMatch({ action: "CANCEL_FIXTURE", matchId: IDS.match4 }),
+      postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match4, winnerSide: "home" }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(["cancelled", "final"]).toContain((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match4])).rows[0].status);
   });
 });

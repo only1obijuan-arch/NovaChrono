@@ -58,9 +58,10 @@ $gate2 = @(
   "0006_remove_redundant_match_index.sql"
 )
 $gate3 = @("0007_match_goal_idempotency.sql")
+$gate4 = @("0008_gate4a_league_operations.sql")
 
 New-TestDatabase $freshDb
-foreach ($migration in ($historical + $gate2 + $gate3)) {
+foreach ($migration in ($historical + $gate2 + $gate3 + $gate4)) {
   Invoke-PsqlFile $freshDb (Join-Path $root "migrations\$migration")
 }
 
@@ -77,6 +78,9 @@ if ($LASTEXITCODE -ne 0) { throw "Failed reproducing the production-nullable mat
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO match_events (match_id, type) VALUES ('70000000-0000-4000-8000-000000000001', 'start_first_half')"
 if ($LASTEXITCODE -ne 0) { throw "Failed seeding a historical match event before Gate 3 migration" }
 foreach ($migration in $gate3) {
+  Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
+}
+foreach ($migration in $gate4) {
   Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
 }
 
@@ -107,6 +111,10 @@ if ($LASTEXITCODE -ne 0) { throw "Goal operation ID fixture must be accepted" }
 Assert-PsqlCommandFails $productionDb "INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000001', 'goal_home', '90000000-0000-4000-8000-000000000092')" "match_events_match_goal_operation_unique"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO matches (id, league_id, round_number, match_date, time_slot, field_number, home_slot_id) SELECT '70000000-0000-4000-8000-000000000002', league_id, 2, match_date + 7, time_slot, field_number, home_slot_id FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'; INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000002', 'goal_home', '90000000-0000-4000-8000-000000000092')"
 if ($LASTEXITCODE -ne 0) { throw "The same operation ID must remain valid for another match" }
+Assert-PsqlValue $productionDb "SELECT column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'matches' AND column_name = 'result_type'" "'played'::text" "Gate 4A result metadata must default to played"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_constraint WHERE conrelid = 'matches'::regclass AND conname = 'matches_result_type_check' AND convalidated" "1" "Gate 4A result type constraint must be validated"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid IN (to_regclass('public.matches_active_schedule_lookup'), to_regclass('public.matches_active_referee_schedule_lookup'))" "2" "Gate 4A conflict lookup indexes must exist"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM matches WHERE result_type <> 'played' OR result_type IS NULL" "0" "Historical matches must backfill safely as played"
 
 New-TestDatabase $holdDb
 foreach ($migration in $historical) {
@@ -149,4 +157,4 @@ Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_
 Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_schema_integrity.sql") "duplicate availability match/team rows exist"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c "DELETE FROM availability_responses WHERE token = 'duplicate-availability'"
 
-Write-Output "Gate 2/3 migration verification passed: fresh, production-shaped, historical-event preservation, strict goal operation checks, match-scoped uniqueness, NULL-role hold, and anomaly fail-closed paths."
+Write-Output "Gate 2/3/4A migration verification passed: fresh, production-shaped, historical preservation, Gate 3 goal idempotency, Gate 4A result metadata, lookup indexes, NULL-role hold, and anomaly fail-closed paths."

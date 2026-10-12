@@ -1,6 +1,8 @@
 import { randomBytes, randomInt } from "crypto";
 import sql, { withTransaction } from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
+import { findFixtureConflict, fixtureScheduleKey, lockFixtureSchedule } from "@/app/api/matches/scheduling";
+import { addDaysToLocalDate, addMonthsToLocalDate, localDateString } from "@/utils/scheduling";
 import { z } from "zod";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -81,9 +83,7 @@ export async function POST(request) {
       }
 
       if (!seasonEndDate && seasonStartDate) {
-        const start = new Date(seasonStartDate);
-        start.setMonth(start.getMonth() + 3);
-        seasonEndDate = start.toISOString().split("T")[0];
+        seasonEndDate = addMonthsToLocalDate(seasonStartDate, 3);
       }
 
       const joinCode = randomBytes(4).toString("hex").toUpperCase();
@@ -141,9 +141,7 @@ export async function POST(request) {
 
       let seasonEndDate = null;
       if (seasonStartDate) {
-        const start = new Date(seasonStartDate);
-        start.setMonth(start.getMonth() + 3);
-        seasonEndDate = start.toISOString().split("T")[0];
+        seasonEndDate = addMonthsToLocalDate(seasonStartDate, 3);
       }
 
       const joinCode = randomBytes(4).toString("hex").toUpperCase();
@@ -184,132 +182,131 @@ export async function POST(request) {
 
     if (action === "GENERATE_FIXTURES") {
       const { leagueId } = data;
-      const [league] = await sql`SELECT * FROM leagues WHERE id = ${leagueId}`;
-      if (!league || !canAccessVenue(user, league.venue_id)) {
-        return Response.json({ error: "Forbidden" }, { status: 403 });
-      }
+      return await withTransaction(async (txSql) => {
+        const [league] = await txSql`SELECT * FROM leagues WHERE id = ${leagueId} FOR UPDATE`;
+        if (!league) return Response.json({ error: "League not found" }, { status: 404 });
+        const [actor] = await txSql`
+          SELECT id, role, venue_id
+          FROM auth_users
+          WHERE id = ${user.id}
+          FOR SHARE
+        `;
+        if (!actor || !["venue_admin", "super_admin"].includes(actor.role)) {
+          return Response.json({ error: "Insufficient permissions" }, { status: 403 });
+        }
+        if (!canAccessVenue(actor, league.venue_id)) {
+          return Response.json({ error: "Forbidden" }, { status: 403 });
+        }
+        if (league.status !== "registration") {
+          return Response.json({ error: "Fixtures can only be generated for leagues in registration status" }, { status: 409 });
+        }
+        const [existingMatch] = await txSql`SELECT id FROM matches WHERE league_id = ${leagueId} LIMIT 1`;
+        if (existingMatch) {
+          return Response.json({ error: "Fixtures have already been generated for this league" }, { status: 409 });
+        }
 
-      if (league.status !== "registration") {
-        return Response.json(
-          { error: "Fixtures can only be generated for leagues in registration status" },
-          { status: 400 },
-        );
-      }
+        const occupiedSlots = await txSql`
+          SELECT ls.id, ls.slot_number
+          FROM league_slots ls
+          INNER JOIN teams t ON t.slot_id = ls.id AND t.status = 'active'
+          WHERE ls.league_id = ${leagueId}
+          ORDER BY ls.slot_number
+          FOR SHARE OF ls, t
+        `;
+        const numSlots = occupiedSlots.length;
+        if (numSlots < 2) {
+          return Response.json({ error: "At least two active teams are required" }, { status: 409 });
+        }
 
-      const [existingMatch] = await sql`
-        SELECT id FROM matches WHERE league_id = ${leagueId} LIMIT 1
-      `;
-      if (existingMatch) {
-        return Response.json({ error: "Fixtures have already been generated for this league" }, { status: 400 });
-      }
+        const rounds = numSlots % 2 === 0 ? numSlots - 1 : numSlots;
+        const slotIds = occupiedSlots.map((slot) => slot.id);
+        if (numSlots % 2 !== 0) slotIds.push(null);
+        const matchesPerRound = slotIds.length / 2;
+        const fixtures = [];
+        const currentSlotIds = [...slotIds];
+        for (let round = 0; round < rounds; round += 1) {
+          const roundMatches = [];
+          for (let matchIndex = 0; matchIndex < matchesPerRound; matchIndex += 1) {
+            const home = currentSlotIds[matchIndex];
+            const away = currentSlotIds[currentSlotIds.length - 1 - matchIndex];
+            if (home && away) roundMatches.push({ home, away });
+          }
+          fixtures.push(roundMatches);
+          const last = currentSlotIds.pop();
+          currentSlotIds.splice(1, 0, last);
+        }
 
-      const occupiedSlots = await sql`
-        SELECT DISTINCT ls.id, ls.slot_number
-        FROM league_slots ls
-        INNER JOIN teams t ON t.slot_id = ls.id AND t.status = 'active'
-        WHERE ls.league_id = ${leagueId}
-        ORDER BY ls.slot_number
-      `;
-
-      const numSlots = occupiedSlots.length;
-      if (numSlots < 2) {
-        throw new Error("Need at least 2 teams to generate fixtures");
-      }
-
-      const rounds = numSlots % 2 === 0 ? numSlots - 1 : numSlots;
-
-      const slotIds = occupiedSlots.map((s) => s.id);
-      if (numSlots % 2 !== 0) slotIds.push(null);
-      // Must use slotIds.length (after null is appended) so odd team counts
-      // iterate over all pairs — using numSlots here leaves the middle pair unscheduled.
-      const matchesPerRound = slotIds.length / 2;
-
-      const fixtures = [];
-      const currentSlotIds = [...slotIds];
-
-      for (let r = 0; r < rounds; r++) {
-        const roundMatches = [];
-        for (let m = 0; m < matchesPerRound; m++) {
-          const home = currentSlotIds[m];
-          const away = currentSlotIds[currentSlotIds.length - 1 - m];
-          if (home && away) {
-            roundMatches.push({ home, away });
+        const slotFieldCombos = [];
+        for (const timeSlot of league.time_slots) {
+          for (let fieldNumber = 1; fieldNumber <= league.fields_count; fieldNumber += 1) {
+            slotFieldCombos.push({ timeSlot, fieldNumber });
           }
         }
-        fixtures.push(roundMatches);
+        if (fixtures.some((round) => round.length > slotFieldCombos.length)) {
+          return Response.json({ error: "League configuration does not have enough field/time capacity for a round" }, { status: 409 });
+        }
 
-        const last = currentSlotIds.pop();
-        currentSlotIds.splice(1, 0, last);
-      }
+        const startDate = localDateString(league.season_start_date);
+        const plannedMatches = [];
+        for (let round = 0; round < fixtures.length; round += 1) {
+          const roundDate = addDaysToLocalDate(startDate, round * 7);
+          const shuffled = [...fixtures[round]];
+          for (let index = shuffled.length - 1; index > 0; index -= 1) {
+            const swapIndex = randomInt(index + 1);
+            [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+          }
+          shuffled.forEach((fixture, index) => plannedMatches.push({
+            leagueId,
+            roundNumber: round + 1,
+            matchDate: roundDate,
+            timeSlot: slotFieldCombos[index].timeSlot,
+            fieldNumber: slotFieldCombos[index].fieldNumber,
+            homeSlotId: fixture.home,
+            awaySlotId: fixture.away,
+            venueId: league.venue_id,
+          }));
+        }
 
-      const timeSlots = league.time_slots;
-      const fieldsCount = league.fields_count;
-      const startDate = new Date(league.season_start_date);
+        const schedules = [...plannedMatches].sort((left, right) => (
+          fixtureScheduleKey(left).localeCompare(fixtureScheduleKey(right))
+        ));
+        for (const schedule of schedules) {
+          await lockFixtureSchedule(txSql, schedule);
+          if (await findFixtureConflict(txSql, schedule)) {
+            return Response.json({ error: "A generated fixture conflicts with an existing active fixture" }, { status: 409 });
+          }
+        }
 
-      const endDateStr = await withTransaction(async (txSql) => {
         await txSql`
           DELETE FROM league_slots
           WHERE league_id = ${leagueId}
-          AND id NOT IN (
-            SELECT slot_id FROM teams WHERE status = 'active' AND slot_id IS NOT NULL
-          )
+            AND id NOT IN (
+              SELECT slot_id FROM teams WHERE status = 'active' AND slot_id IS NOT NULL
+            )
         `;
-
-        let lastMatchDate = startDate;
-
-        for (let r = 0; r < fixtures.length; r++) {
-          const roundDate = new Date(startDate);
-          roundDate.setDate(startDate.getDate() + r * 7);
-          lastMatchDate = roundDate;
-
-          const roundFixtures = fixtures[r];
-
-          const slotFieldCombos = [];
-          for (const tSlot of timeSlots) {
-            for (let f = 1; f <= fieldsCount; f++) {
-              slotFieldCombos.push({ tSlot, f });
-            }
-          }
-
-          const shuffledFixtures = [...roundFixtures];
-          for (let i = shuffledFixtures.length - 1; i > 0; i--) {
-            const j = randomInt(i + 1);
-            [shuffledFixtures[i], shuffledFixtures[j]] = [
-              shuffledFixtures[j],
-              shuffledFixtures[i],
-            ];
-          }
-
-          if (shuffledFixtures.length > 0) {
-            const dateStr = roundDate.toISOString().split("T")[0];
-            const matchRows = shuffledFixtures.map((match, i) => {
-              const { tSlot, f } = slotFieldCombos[i % slotFieldCombos.length];
-              return { tSlot, f, home: match.home, away: match.away };
-            });
-            await txSql`
-              INSERT INTO matches (league_id, round_number, match_date, time_slot, field_number, home_slot_id, away_slot_id)
-              SELECT
-                ${leagueId},
-                ${r + 1},
-                ${dateStr}::date,
-                unnest(${matchRows.map((m) => m.tSlot)}::text[]),
-                unnest(${matchRows.map((m) => m.f)}::int[]),
-                unnest(${matchRows.map((m) => m.home)}::uuid[]),
-                unnest(${matchRows.map((m) => m.away)}::uuid[])
-            `;
-          }
+        for (const fixture of plannedMatches) {
+          await txSql`
+            INSERT INTO matches (
+              league_id, round_number, match_date, time_slot, field_number,
+              home_slot_id, away_slot_id
+            )
+            VALUES (
+              ${leagueId}, ${fixture.roundNumber}, ${fixture.matchDate}::date,
+              ${fixture.timeSlot}, ${fixture.fieldNumber}, ${fixture.homeSlotId}, ${fixture.awaySlotId}
+            )
+          `;
         }
 
-        const endDate = lastMatchDate.toISOString().split("T")[0];
+        const endDate = plannedMatches.length > 0
+          ? plannedMatches.at(-1).matchDate
+          : startDate;
         await txSql`
           UPDATE leagues
           SET status = 'active', season_end_date = ${endDate}
           WHERE id = ${leagueId}
         `;
-
-        // Seed standings rows for every active team, ordered alphabetically
         const activeTeams = await txSql`
-          SELECT t.id as team_id
+          SELECT t.id AS team_id
           FROM teams t
           INNER JOIN league_slots ls ON t.slot_id = ls.id
           WHERE ls.league_id = ${leagueId} AND t.status = 'active'
@@ -317,16 +314,20 @@ export async function POST(request) {
         `;
         if (activeTeams.length > 0) {
           await txSql`
-            INSERT INTO standings (league_id, team_id, played, won, drawn, lost, goals_for, goals_against, goal_difference, points)
-            SELECT ${leagueId}, unnest(${activeTeams.map((t) => t.team_id)}::uuid[]), 0, 0, 0, 0, 0, 0, 0, 0
+            INSERT INTO standings (
+              league_id, team_id, played, won, drawn, lost,
+              goals_for, goals_against, goal_difference, points
+            )
+            SELECT ${leagueId}, unnest(${activeTeams.map((team) => team.team_id)}::uuid[]), 0, 0, 0, 0, 0, 0, 0, 0
             ON CONFLICT DO NOTHING
           `;
         }
-
-        return endDate;
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, new_value)
+          VALUES (${actor.id}, ${leagueId}, 'GENERATE_FIXTURES', ${JSON.stringify({ fixture_count: plannedMatches.length, season_end_date: endDate })})
+        `;
+        return Response.json({ success: true, endDate });
       });
-
-      return Response.json({ success: true, endDate: endDateStr });
     }
 
     return Response.json({ error: "Invalid action" }, { status: 400 });

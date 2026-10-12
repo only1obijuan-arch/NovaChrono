@@ -1,7 +1,9 @@
 import { escapeHtml } from "@/utils/escape-html";
-import sql from "@/app/api/utils/sql";
+import sql, { withTransaction } from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
 import { canAdministerVenue } from "@/app/api/utils/ownership";
+import { fixtureScheduleKey, lockFixtureSchedule } from "@/app/api/matches/scheduling";
+import { addDaysToLocalDate, formatLocalFixtureDate, localDateString } from "@/utils/scheduling";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { sendPush } from "@/app/api/utils/send-push";
 import { rateLimit } from "@/app/api/utils/rate-limit";
@@ -27,28 +29,87 @@ export async function POST(request) {
       );
     }
 
-    const [league] = await sql`
-      SELECT l.*, v.organization_id
-      FROM leagues l JOIN venues v ON v.id = l.venue_id
-      WHERE l.id = ${league_id}
-    `;
-    if (!league || !canAdministerVenue(user, league.venue_id, league.organization_id)) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const operation = await withTransaction(async (txSql) => {
+      const [league] = await txSql`
+        SELECT l.*, v.organization_id
+        FROM leagues l
+        JOIN venues v ON v.id = l.venue_id
+        WHERE l.id = ${league_id}
+        FOR UPDATE OF l
+      `;
+      const [actor] = await txSql`
+        SELECT id, role, venue_id, organization_id
+        FROM auth_users
+        WHERE id = ${user.id}
+        FOR SHARE
+      `;
+      if (!league || !actor || !["venue_admin", "org_admin", "super_admin"].includes(actor.role)
+        || !canAdministerVenue(actor, league.venue_id, league.organization_id)) {
+        return { response: Response.json({ error: "Forbidden" }, { status: 403 }) };
+      }
 
-    const updatedMatches = await sql`
-      UPDATE matches
-      SET match_date = match_date + INTERVAL '7 days'
-      WHERE league_id = ${league_id} AND round_number >= ${round_number}
-      RETURNING id, match_date, time_slot, field_number
-    `;
+      const matches = await txSql`
+        SELECT id, to_char(match_date, 'YYYY-MM-DD') AS match_date, time_slot, field_number
+        FROM matches
+        WHERE league_id = ${league_id}
+          AND round_number >= ${round_number}
+          AND status = 'scheduled'
+        ORDER BY match_date, time_slot, field_number, id
+        FOR UPDATE
+      `;
+      if (matches.length === 0) {
+        return { response: Response.json({ error: "No scheduled matches found for this round" }, { status: 404 }) };
+      }
 
-    if (updatedMatches.length === 0) {
-      return Response.json(
-        { error: "No matches found for this round" },
-        { status: 404 }
-      );
-    }
+      const movingIds = matches.map((match) => match.id);
+      const planned = matches.map((match) => ({
+        ...match,
+        venueId: league.venue_id,
+        fieldNumber: match.field_number,
+        matchDate: addDaysToLocalDate(match.match_date, 7),
+        timeSlot: match.time_slot,
+      })).sort((left, right) => fixtureScheduleKey(left).localeCompare(fixtureScheduleKey(right)));
+
+      for (const schedule of planned) {
+        await lockFixtureSchedule(txSql, schedule);
+        const [conflict] = await txSql`
+          SELECT m.id
+          FROM matches m
+          JOIN leagues l ON l.id = m.league_id
+          WHERE l.venue_id = ${league.venue_id}
+            AND m.field_number = ${schedule.fieldNumber}
+            AND m.match_date = ${schedule.matchDate}::date
+            AND m.time_slot = ${schedule.timeSlot}
+            AND m.status IN ('scheduled', 'live')
+            AND m.id <> ALL(${movingIds}::uuid[])
+          LIMIT 1
+        `;
+        if (conflict) {
+          return { response: Response.json({ error: "A postponed round would collide with an existing active fixture" }, { status: 409 }) };
+        }
+      }
+
+      const updatedMatches = await txSql`
+        UPDATE matches
+        SET match_date = match_date + 7
+        WHERE id = ANY(${movingIds}::uuid[])
+        RETURNING id, match_date, time_slot, field_number
+      `;
+      await txSql`
+        INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value)
+        VALUES (
+          ${actor.id},
+          ${league_id},
+          'POSTPONE_ROUND',
+          ${JSON.stringify({ round_number, matches })},
+          ${JSON.stringify({ round_number, matches: planned.map(({ id, matchDate, timeSlot, fieldNumber }) => ({ id, match_date: matchDate, time_slot: timeSlot, field_number: fieldNumber })) })}
+        )
+      `;
+      return { league, updatedMatches };
+    });
+
+    if (operation.response) return operation.response;
+    const { league, updatedMatches } = operation;
 
     const captains = await sql`
       SELECT DISTINCT au.id, au.email, au.name, au.push_token
@@ -58,12 +119,7 @@ export async function POST(request) {
       WHERE ls.league_id = ${league_id} AND t.status = 'active'
     `;
 
-    const newDate = new Date(updatedMatches[0].match_date).toLocaleDateString("en-GB", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
+    const newDate = formatLocalFixtureDate(localDateString(updatedMatches[0].match_date), "en-GB");
 
     const notifTitle = `📅 Round ${round_number}+ Postponed — ${league.name}`;
     const notifMessage = `Round ${round_number} and all following rounds of ${league.name} have been postponed by 7 days. Please check the fixtures for updated times.`;
