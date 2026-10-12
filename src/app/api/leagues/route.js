@@ -1,7 +1,7 @@
 import { randomBytes, randomInt } from "crypto";
 import sql, { withTransaction } from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
-import { findFixtureConflict, fixtureScheduleKey, lockFixtureSchedule } from "@/app/api/matches/scheduling";
+import { findFixtureConflict, fixtureScheduleKey, lockFixtureSchedule, setCanonicalScheduleTimeZone } from "@/app/api/matches/scheduling";
 import { addDaysToLocalDate, addMonthsToLocalDate, localDateString } from "@/utils/scheduling";
 import { z } from "zod";
 
@@ -101,14 +101,15 @@ export async function POST(request) {
       const joinCode = randomBytes(4).toString("hex").toUpperCase();
 
       const league = await withTransaction(async (txSql) => {
+        await setCanonicalScheduleTimeZone(txSql);
         const [newLeague] = await txSql`
           INSERT INTO leagues (venue_id, name, day_of_week, season_start_date, season_end_date, match_format, match_duration_minutes, fields_count, time_slots, max_teams, join_code, status)
           VALUES (${venueId}, ${name}, ${dayOfWeek}, ${seasonStartDate}, ${seasonEndDate}, ${matchFormat}, ${matchDuration}, ${fieldsCount}, ${JSON.stringify(
             timeSlots,
           )}, ${maxTeams}, ${joinCode}, 'registration')
           RETURNING *,
-                    to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
-                    to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
+                    to_char(nova_planned_date(season_start_date), 'YYYY-MM-DD') AS season_start_date,
+                    to_char(nova_planned_date(season_end_date), 'YYYY-MM-DD') AS season_end_date
         `;
         const slotNumbers = Array.from({ length: maxTeams }, (_, i) => i + 1);
         await txSql`
@@ -161,6 +162,7 @@ export async function POST(request) {
       const joinCode = randomBytes(4).toString("hex").toUpperCase();
 
       const newLeague = await withTransaction(async (txSql) => {
+        await setCanonicalScheduleTimeZone(txSql);
         const [league] = await txSql`
           INSERT INTO leagues (
             venue_id, name, day_of_week, season_start_date, season_end_date,
@@ -182,8 +184,8 @@ export async function POST(request) {
             }, ${joinCode}, 'registration', ${seasonName}, ${parentLeagueId}
           )
           RETURNING *,
-                    to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
-                    to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
+                    to_char(nova_planned_date(season_start_date), 'YYYY-MM-DD') AS season_start_date,
+                    to_char(nova_planned_date(season_end_date), 'YYYY-MM-DD') AS season_end_date
         `;
         const slotNumbers = Array.from({ length: parentLeague.max_teams }, (_, i) => i + 1);
         await txSql`
@@ -199,8 +201,9 @@ export async function POST(request) {
     if (action === "GENERATE_FIXTURES") {
       const { leagueId } = data;
       return await withTransaction(async (txSql) => {
+        await setCanonicalScheduleTimeZone(txSql);
         const [league] = await txSql`
-          SELECT *, to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date
+          SELECT *, to_char(nova_planned_date(season_start_date), 'YYYY-MM-DD') AS season_start_date
           FROM leagues WHERE id = ${leagueId} FOR UPDATE
         `;
         if (!league) return Response.json({ error: "League not found" }, { status: 404 });
@@ -377,8 +380,8 @@ export async function GET(request) {
     if (user) {
       const [league] = await sql`
         SELECT *,
-               to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
-               to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
+               to_char(nova_planned_date(season_start_date), 'YYYY-MM-DD') AS season_start_date,
+               to_char(nova_planned_date(season_end_date), 'YYYY-MM-DD') AS season_end_date
         FROM leagues WHERE id = ${leagueId}
       `;
       if (!league) return Response.json({ error: "League not found" }, { status: 404 });
@@ -389,8 +392,8 @@ export async function GET(request) {
     // internal time-slot configuration or account/administrator data.
     const [league] = await sql`
       SELECT l.id, l.name, l.status, l.day_of_week, l.season_name,
-             to_char(l.season_start_date, 'YYYY-MM-DD') AS season_start_date,
-             to_char(l.season_end_date, 'YYYY-MM-DD') AS season_end_date, l.match_format,
+             to_char(nova_planned_date(l.season_start_date), 'YYYY-MM-DD') AS season_start_date,
+             to_char(nova_planned_date(l.season_end_date), 'YYYY-MM-DD') AS season_end_date, l.match_format,
              l.match_duration_minutes, l.fields_count, l.max_teams, v.name AS venue_name
       FROM leagues l JOIN venues v ON v.id = l.venue_id WHERE l.id = ${leagueId}
     `;
@@ -408,8 +411,8 @@ export async function GET(request) {
     }
     const leagues = await sql`
       SELECT *,
-             to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
-             to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
+             to_char(nova_planned_date(season_start_date), 'YYYY-MM-DD') AS season_start_date,
+             to_char(nova_planned_date(season_end_date), 'YYYY-MM-DD') AS season_end_date
       FROM leagues WHERE venue_id = ${venueId} ORDER BY leagues.season_start_date DESC
     `;
     return Response.json(leagues);
@@ -420,8 +423,8 @@ export async function GET(request) {
   }
   const leagues = await sql`
     SELECT *,
-           to_char(season_start_date, 'YYYY-MM-DD') AS season_start_date,
-           to_char(season_end_date, 'YYYY-MM-DD') AS season_end_date
+           to_char(nova_planned_date(season_start_date), 'YYYY-MM-DD') AS season_start_date,
+           to_char(nova_planned_date(season_end_date), 'YYYY-MM-DD') AS season_end_date
     FROM leagues ORDER BY leagues.season_start_date DESC
   `;
   return Response.json(leagues);

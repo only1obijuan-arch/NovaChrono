@@ -5,9 +5,12 @@ import { recomputeLeagueStandings } from "@/app/api/matches/standings";
 import {
   findFixtureConflict,
   findRefereeConflict,
+  fixtureScheduleKey,
   lockFixtureSchedule,
   lockRefereeSchedule,
+  refereeScheduleKey,
   scheduleValidationError,
+  setCanonicalScheduleTimeZone,
 } from "@/app/api/matches/scheduling";
 import { z } from "zod";
 
@@ -102,7 +105,8 @@ async function lockMatch(txSql, matchId) {
 
 async function lockLeague(txSql, leagueId) {
   const [league] = await txSql`
-    SELECT id, venue_id, status, fields_count, time_slots
+    SELECT id, venue_id, status, fields_count, time_slots,
+           forfeit_score_home, forfeit_score_away
     FROM leagues
     WHERE id = ${leagueId}
     FOR UPDATE
@@ -219,6 +223,7 @@ export async function POST(request) {
         homeSlotId, awaySlotId, refereeId = null,
       } = data;
       return await withTransaction(async (txSql) => {
+        await setCanonicalScheduleTimeZone(txSql);
         const league = await lockLeague(txSql, leagueId);
         if (!league) return Response.json({ error: "League not found" }, { status: 404 });
         const authorization = await authorizeLockedLeague(txSql, user.id, league);
@@ -268,6 +273,7 @@ export async function POST(request) {
     if (action === "EDIT_FIXTURE") {
       const { matchDate, timeSlot, fieldNumber } = data;
       return await withTransaction(async (txSql) => {
+        await setCanonicalScheduleTimeZone(txSql);
         const match = await lockMatch(txSql, matchId);
         if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
         const authorization = await authorizeLockedMatch(txSql, user.id, match, ADMIN_ROLES);
@@ -555,7 +561,10 @@ export async function POST(request) {
       return await withTransaction(async (txSql) => {
         const oldMatch = await lockMatch(txSql, matchId);
         if (!oldMatch) return Response.json({ error: "Match not found" }, { status: 404 });
-        const authorization = await authorizeLockedMatch(txSql, user.id, oldMatch, ADMIN_ROLES);
+        const league = await lockLeague(txSql, oldMatch.league_id);
+        if (!league) return Response.json({ error: "League not found" }, { status: 404 });
+        const lockedMatchScope = { ...oldMatch, league_venue_id: league.venue_id };
+        const authorization = await authorizeLockedMatch(txSql, user.id, lockedMatchScope, ADMIN_ROLES);
         if (authorization.response) return authorization.response;
         if (!RESULT_OVERRIDE_STATUSES.includes(oldMatch.status)) {
           return Response.json({ error: `Cannot correct a match with status '${oldMatch.status}'` }, { status: 409 });
@@ -563,19 +572,28 @@ export async function POST(request) {
 
         if (oldMatch.status === "final" && newStatus === "scheduled") {
           const schedule = {
-            venueId: oldMatch.league_venue_id,
+            venueId: league.venue_id,
             fieldNumber: oldMatch.field_number,
             matchDate: oldMatch.schedule_date,
             timeSlot: oldMatch.time_slot,
           };
-          if (await claimFixtureSchedule(txSql, schedule, matchId)) {
-            return Response.json({ error: "Another active fixture already occupies this field and kickoff" }, { status: 409 });
-          }
-          if (await claimRefereeSchedule(txSql, {
+          const refereeSchedule = oldMatch.referee_id == null ? null : {
             refereeId: oldMatch.referee_id,
             matchDate: oldMatch.schedule_date,
             timeSlot: oldMatch.time_slot,
-          }, matchId)) {
+          };
+          const claims = [
+            { key: fixtureScheduleKey(schedule), kind: "fixture", schedule },
+            ...(refereeSchedule ? [{ key: refereeScheduleKey(refereeSchedule), kind: "referee", schedule: refereeSchedule }] : []),
+          ].sort((left, right) => left.key.localeCompare(right.key));
+          for (const claim of claims) {
+            if (claim.kind === "fixture") await lockFixtureSchedule(txSql, claim.schedule);
+            else await lockRefereeSchedule(txSql, claim.schedule);
+          }
+          if (await findFixtureConflict(txSql, schedule, matchId)) {
+            return Response.json({ error: "Another active fixture already occupies this field and kickoff" }, { status: 409 });
+          }
+          if (refereeSchedule && await findRefereeConflict(txSql, refereeSchedule, matchId)) {
             return Response.json({ error: "Referee is already assigned to another active fixture at this kickoff" }, { status: 409 });
           }
         }
@@ -645,12 +663,15 @@ export async function POST(request) {
       return await withTransaction(async (txSql) => {
         const match = await lockMatch(txSql, matchId);
         if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
-        const authorization = await authorizeLockedMatch(txSql, user.id, match, ADMIN_ROLES);
+        const league = await lockLeague(txSql, match.league_id);
+        if (!league) return Response.json({ error: "League not found" }, { status: 404 });
+        const lockedMatchScope = { ...match, league_venue_id: league.venue_id };
+        const authorization = await authorizeLockedMatch(txSql, user.id, lockedMatchScope, ADMIN_ROLES);
         if (authorization.response) return authorization.response;
 
         const resultType = winnerSide === "home" ? "forfeit_home_win" : "forfeit_away_win";
-        const winnerScore = Number(match.forfeit_score_home);
-        const loserScore = Number(match.forfeit_score_away);
+        const winnerScore = Number(league.forfeit_score_home);
+        const loserScore = Number(league.forfeit_score_away);
         if (!Number.isInteger(winnerScore) || !Number.isInteger(loserScore)
           || winnerScore < 0 || loserScore < 0 || winnerScore <= loserScore) {
           return Response.json({ error: "League forfeit score configuration is invalid" }, { status: 409 });

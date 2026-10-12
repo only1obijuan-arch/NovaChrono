@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { getAppliedReadOnly, run } from "../../scripts/migrate.js";
+import {
+  assertGate4aCompatibility,
+  getAppliedReadOnly,
+  INCOMPLETE_GATE4A_MESSAGE,
+  run,
+} from "../../scripts/migrate.js";
 
 describe("read-only migration status", () => {
   it("uses only a catalogue lookup when the metadata table is absent", async () => {
@@ -43,5 +48,38 @@ describe("read-only migration status", () => {
     expect(statements).not.toMatch(/CREATE|INSERT|UPDATE|DELETE|ALTER|BEGIN|COMMIT/i);
     expect(release).toHaveBeenCalledOnce();
     expect(end).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Gate 4A migration ledger compatibility", () => {
+  it("does not require Gate 4A objects when the ledger stops at 0007", async () => {
+    const query = vi.fn();
+    await expect(assertGate4aCompatibility({ query }, new Set(["0007_match_goal_idempotency.sql"]))).resolves.toBeUndefined();
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("accepts a current 0008 ledger entry only when all amended objects exist", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{
+      date_function: true,
+      timestamptz_function: true,
+      result_type_column: true,
+      result_type_constraint: true,
+      schedule_index: true,
+      referee_index: true,
+    }] });
+    await expect(assertGate4aCompatibility({ query }, new Set(["0008_gate4a_league_operations.sql"]))).resolves.toBeUndefined();
+  });
+
+  it("fails closed when the ledger claims an old or incomplete 0008", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{
+      date_function: false,
+      timestamptz_function: false,
+      result_type_column: true,
+      result_type_constraint: true,
+      schedule_index: false,
+      referee_index: false,
+    }] });
+    await expect(assertGate4aCompatibility({ query }, new Set(["0008_gate4a_league_operations.sql"])))
+      .rejects.toThrow(INCOMPLETE_GATE4A_MESSAGE);
   });
 });

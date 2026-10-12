@@ -128,6 +128,57 @@ async function getApplied(client) {
   return new Set(rows.map((r) => r.name));
 }
 
+export const GATE4A_MIGRATION = "0008_gate4a_league_operations.sql";
+export const INCOMPLETE_GATE4A_MESSAGE = "old/incomplete 0008 detected; forward repair migration required";
+
+export async function assertGate4aCompatibility(client, applied) {
+  if (!applied.has(GATE4A_MIGRATION)) return;
+
+  const { rows } = await client.query(`
+    SELECT
+      to_regprocedure('public.nova_planned_date(date)') IS NOT NULL AS date_function,
+      to_regprocedure('public.nova_planned_date(timestamp with time zone)') IS NOT NULL AS timestamptz_function,
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'matches'
+          AND column_name = 'result_type'
+          AND is_nullable = 'NO'
+          AND column_default ILIKE '%played%'
+      ) AS result_type_column,
+      EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = to_regclass('public.matches')
+          AND conname = 'matches_result_type_check'
+          AND convalidated
+          AND pg_get_constraintdef(oid) ILIKE '%played%'
+          AND pg_get_constraintdef(oid) ILIKE '%forfeit_home_win%'
+          AND pg_get_constraintdef(oid) ILIKE '%forfeit_away_win%'
+      ) AS result_type_constraint,
+      to_regclass('public.matches_active_schedule_lookup') IS NOT NULL
+        AND pg_get_indexdef(to_regclass('public.matches_active_schedule_lookup')) ILIKE '%nova_planned_date%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_schedule_lookup')) ILIKE '%time_slot%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_schedule_lookup')) ILIKE '%field_number%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_schedule_lookup')) ILIKE '%league_id%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_schedule_lookup')) ILIKE '%scheduled%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_schedule_lookup')) ILIKE '%live%'
+        AS schedule_index,
+      to_regclass('public.matches_active_referee_schedule_lookup') IS NOT NULL
+        AND pg_get_indexdef(to_regclass('public.matches_active_referee_schedule_lookup')) ILIKE '%nova_planned_date%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_referee_schedule_lookup')) ILIKE '%referee_id%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_referee_schedule_lookup')) ILIKE '%time_slot%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_referee_schedule_lookup')) ILIKE '%scheduled%'
+        AND pg_get_indexdef(to_regclass('public.matches_active_referee_schedule_lookup')) ILIKE '%live%'
+        AS referee_index
+  `);
+  const state = rows[0] ?? {};
+  if (!Object.values(state).every(Boolean)) {
+    throw new Error(INCOMPLETE_GATE4A_MESSAGE);
+  }
+}
+
 export async function getAppliedReadOnly(client) {
   const { rows: relationRows } = await client.query(
     "SELECT to_regclass('public.schema_migrations') AS relation"
@@ -167,6 +218,7 @@ export async function run({
 
     if (showStatus) {
       const applied = await getAppliedReadOnly(client);
+      await assertGate4aCompatibility(client, applied);
       logger.log("\nMigration status:");
       for (const f of files) {
         const mark = applied.has(f) ? "✓" : "○";
@@ -178,6 +230,7 @@ export async function run({
 
     await ensureMigrationsTable(client);
     const applied = await getApplied(client);
+    await assertGate4aCompatibility(client, applied);
     const pending = files.filter((f) => !applied.has(f));
 
     if (pending.length === 0) {

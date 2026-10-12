@@ -14,6 +14,7 @@ $freshDb = "${DatabasePrefix}_fresh"
 $productionDb = "${DatabasePrefix}_production"
 $holdDb = "${DatabasePrefix}_hold"
 $preflightDb = "${DatabasePrefix}_preconditions"
+$gate4GuardDb = "${DatabasePrefix}_gate4_guard"
 
 function Invoke-PsqlFile([string]$Database, [string]$File) {
   & $psql -X -v ON_ERROR_STOP=1 -1 -h $HostName -p $Port -U $AdminUser -d $Database -f $File
@@ -47,6 +48,30 @@ function Assert-PsqlValue([string]$Database, [string]$Query, [string]$Expected, 
   if ($LASTEXITCODE -ne 0) { throw "Failed checking: $Description" }
   if ($actual -ne $Expected) {
     throw "$Description. Expected '$Expected', got '$actual'"
+  }
+}
+
+function Assert-MigrationStatus([string]$Database, [bool]$ShouldSucceed, [string]$ExpectedMessage = "") {
+  $previousUrl = $env:DATABASE_URL
+  $previousDriver = $env:DATABASE_DRIVER
+  try {
+    $env:DATABASE_URL = "postgresql://${AdminUser}@${HostName}:$Port/$Database"
+    $env:DATABASE_DRIVER = "pg"
+    $output = & node (Join-Path $root "scripts\migrate.js") --status 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $env:DATABASE_URL = $previousUrl
+    $env:DATABASE_DRIVER = $previousDriver
+  }
+
+  if ($ShouldSucceed -and $exitCode -ne 0) {
+    throw "Migration status unexpectedly failed for ${Database}: $output"
+  }
+  if (-not $ShouldSucceed -and $exitCode -eq 0) {
+    throw "Migration status unexpectedly accepted an incomplete 0008 ledger in $Database"
+  }
+  if (-not $ShouldSucceed -and $output -notmatch [regex]::Escape($ExpectedMessage)) {
+    throw "Migration status failed without the expected compatibility message: $ExpectedMessage"
   }
 }
 
@@ -117,6 +142,20 @@ Assert-PsqlValue $productionDb "SELECT column_default FROM information_schema.co
 Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_constraint WHERE conrelid = 'matches'::regclass AND conname = 'matches_result_type_check' AND convalidated" "1" "Gate 4A result type constraint must be validated"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid IN (to_regclass('public.matches_active_schedule_lookup'), to_regclass('public.matches_active_referee_schedule_lookup'))" "2" "Gate 4A conflict lookup indexes must exist"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM matches WHERE result_type <> 'played' OR result_type IS NULL" "0" "Historical matches must backfill safely as played"
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "CREATE TABLE schema_migrations (id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); INSERT INTO schema_migrations (name) VALUES ('0008_gate4a_league_operations.sql')"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the valid Gate 4A ledger guard rehearsal" }
+Assert-MigrationStatus $productionDb $true
+
+New-TestDatabase $gate4GuardDb
+foreach ($migration in ($historical + $gate2 + $gate3)) {
+  Invoke-PsqlFile $gate4GuardDb (Join-Path $root "migrations\$migration")
+}
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $gate4GuardDb -c "CREATE TABLE schema_migrations (id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); INSERT INTO schema_migrations (name) VALUES ('0007_match_goal_idempotency.sql')"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the pre-0008 ledger guard rehearsal" }
+Assert-MigrationStatus $gate4GuardDb $true
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $gate4GuardDb -c "INSERT INTO schema_migrations (name) VALUES ('0008_gate4a_league_operations.sql')"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the incomplete 0008 ledger guard rehearsal" }
+Assert-MigrationStatus $gate4GuardDb $false "old/incomplete 0008 detected; forward repair migration required"
 
 New-TestDatabase $holdDb
 foreach ($migration in $historical) {
@@ -159,4 +198,4 @@ Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_
 Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_schema_integrity.sql") "duplicate availability match/team rows exist"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c "DELETE FROM availability_responses WHERE token = 'duplicate-availability'"
 
-Write-Output "Gate 2/3/4A migration verification passed: fresh, production-shaped, historical preservation, Gate 3 goal idempotency, Gate 4A result metadata, lookup indexes, NULL-role hold, and anomaly fail-closed paths."
+Write-Output "Gate 2/3/4A migration verification passed: fresh, production-shaped, historical preservation, Gate 3 goal idempotency, Gate 4A result metadata, lookup indexes, amended-0008 ledger compatibility guard, NULL-role hold, and anomaly fail-closed paths."

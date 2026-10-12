@@ -15,7 +15,7 @@ import { DELETE as deleteUser } from "@/app/api/super-admin/users/route";
 import { GET as getTeams } from "@/app/api/teams/route";
 import { POST as refreshMobile } from "@/app/api/auth/mobile-refresh/route";
 import { POST as matchCommand } from "@/app/api/matches/route";
-import { POST as leagueCommand } from "@/app/api/leagues/route";
+import { GET as getLeague, POST as leagueCommand } from "@/app/api/leagues/route";
 import { POST as postponeRoundCommand } from "@/app/api/leagues/postpone-round/route";
 import { recomputeLeagueStandings } from "@/app/api/matches/standings";
 import { fixtureScheduleKey, refereeScheduleKey } from "@/app/api/matches/scheduling";
@@ -313,6 +313,13 @@ async function waitForLockQueue(queryFragment, failureMessage) {
   } finally {
     observer.release();
   }
+}
+
+async function setPoolSessionTimeZone(timeZone) {
+  pool.options.options = `-c timezone=${timeZone}`;
+  await Promise.all((pool._clients ?? []).map((client) => (
+    client.query("SELECT set_config('TimeZone', $1, false)", [timeZone])
+  )));
 }
 
 async function startMatch(matchId = IDS.match) {
@@ -803,7 +810,7 @@ describe("Gate 4A fixture and result operations", () => {
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
     expect(Number((await pool.query(`
       SELECT count(*) FROM matches m JOIN leagues l ON l.id = m.league_id
-      WHERE l.venue_id = $1 AND m.match_date = DATE '2030-03-05'
+      WHERE l.venue_id = $1 AND nova_planned_date(m.match_date) = DATE '2030-03-05'
         AND m.time_slot = '18:30' AND m.field_number = 1 AND m.status = 'scheduled'
     `, [IDS.venueA])).rows[0].count)).toBe(1);
   });
@@ -839,7 +846,7 @@ describe("Gate 4A fixture and result operations", () => {
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
     expect(Number((await pool.query(
-      "SELECT count(*) FROM matches WHERE referee_id = $1 AND match_date = DATE '2030-02-12' AND time_slot = '18:30'",
+      "SELECT count(*) FROM matches WHERE referee_id = $1 AND nova_planned_date(match_date) = DATE '2030-02-12' AND time_slot = '18:30'",
       [IDS.referee],
     )).rows[0].count)).toBe(1);
   });
@@ -1004,6 +1011,58 @@ describe("Gate 4A fixture and result operations", () => {
     expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0].count)).toBe(0);
   });
 
+  it("serializes final-to-scheduled reactivation against CREATE_FIXTURE for the same slot", async () => {
+    await pool.query("UPDATE matches SET status = 'final', referee_id = NULL WHERE id = $1", [IDS.match4]);
+    const responses = await Promise.all([
+      postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 0, awayScore: 0, status: "scheduled", reason: "Reopen" }),
+      createFixture({ matchDate: "2030-02-19", timeSlot: "18:30", fieldNumber: 1 }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(Number((await pool.query(`
+      SELECT count(*)
+      FROM matches m JOIN leagues l ON l.id = m.league_id
+      WHERE l.venue_id = $1
+        AND nova_planned_date(m.match_date) = DATE '2030-02-19'
+        AND m.time_slot = '18:30' AND m.field_number = 1
+        AND m.status IN ('scheduled', 'live')
+    `, [IDS.venueA])).rows[0].count)).toBe(1);
+    expect(Number((await pool.query(`
+      SELECT count(*) FROM audit_logs
+      WHERE action_type IN ('ADMIN_OVERRIDE', 'CREATE_FIXTURE')
+        AND target_id IN (SELECT id FROM matches WHERE nova_planned_date(match_date) = DATE '2030-02-19')
+    `)).rows[0].count)).toBe(1);
+  }, 20_000);
+
+  it("serializes final-to-scheduled reactivation against POSTPONE_ROUND for the same destination", async () => {
+    await pool.query("UPDATE matches SET status = 'final', referee_id = NULL WHERE id = $1", [IDS.match4]);
+    await pool.query("UPDATE matches SET match_date = DATE '2030-02-12', field_number = 1, referee_id = NULL WHERE id = $1", [IDS.match3]);
+    const blocker = await pool.connect();
+    let roundRequest;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match3]);
+      roundRequest = postPostponeRound({ league_id: IDS.league, round_number: 4 });
+      await waitForLockQueue("nova_planned_date(match_date)", "POSTPONE_ROUND never queued on its original scope");
+      expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 0, awayScore: 0, status: "scheduled", reason: "Reopen" })).status).toBe(200);
+      await blocker.query("COMMIT");
+      expect((await roundRequest).status).toBe(409);
+      expect(Number((await pool.query(`
+        SELECT count(*) FROM matches
+        WHERE nova_planned_date(match_date) = DATE '2030-02-19'
+          AND time_slot = '18:30' AND field_number = 1
+          AND status IN ('scheduled', 'live')
+      `)).rows[0].count)).toBe(1);
+      expect(Number((await pool.query(`
+        SELECT count(*) FROM audit_logs
+        WHERE action_type IN ('ADMIN_OVERRIDE', 'POSTPONE_ROUND')
+      `)).rows[0].count)).toBe(1);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (roundRequest) await roundRequest.catch(() => {});
+    }
+  }, 20_000);
+
   it("queues final-to-scheduled reactivation on the fixture advisory claim", async () => {
     await pool.query("UPDATE matches SET status = 'final', referee_id = NULL WHERE id = $1", [IDS.match4]);
     const blocker = await pool.connect();
@@ -1113,11 +1172,206 @@ describe("Gate 4A fixture and result operations", () => {
     expect((await pool.query("SELECT status FROM leagues WHERE id = $1", [IDS.leagueB])).rows[0].status).toBe("registration");
   });
 
+  it.each([
+    ...["UTC", "Africa/Johannesburg", "America/New_York", "Pacific/Auckland"].flatMap((processTimeZone) => (
+      ["UTC", "Africa/Johannesburg", "America/New_York", "Pacific/Auckland"].map((databaseTimeZone) => [processTimeZone, databaseTimeZone])
+    )),
+  ])("keeps stored and returned schedules stable with process TZ %s and PostgreSQL TZ %s", async (processTimeZone, databaseTimeZone) => {
+    const originalProcessTimeZone = process.env.TZ;
+    const originalPoolOptions = pool.options.options;
+    try {
+      process.env.TZ = processTimeZone;
+      await setPoolSessionTimeZone(databaseTimeZone);
+
+      const created = await createFixture({ matchDate: "2031-12-31", roundNumber: 90 });
+      expect(created.status).toBe(200);
+      const { matchId } = await created.json();
+      const yearBoundary = (await pool.query(`
+        SELECT pg_typeof(match_date)::text AS storage_type,
+               nova_planned_date(match_date)::text AS planned_date,
+               EXTRACT(ISODOW FROM nova_planned_date(match_date))::int AS weekday,
+               CASE WHEN pg_typeof(match_date)::text = 'date'
+                 THEN match_date::text
+                 ELSE to_char(match_date AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+               END AS stored_value,
+               time_slot
+        FROM matches WHERE id = $1
+      `, [matchId])).rows[0];
+      expect(yearBoundary.planned_date).toBe("2031-12-31");
+      expect(yearBoundary.weekday).toBe(3);
+      expect(yearBoundary.stored_value).toBe(yearBoundary.storage_type === "date" ? "2031-12-31" : "2031-12-31 00:00:00");
+      expect(yearBoundary.time_slot).toBe("18:30");
+
+      const leapEdit = { matchDate: "2032-02-29", timeSlot: "18:30", fieldNumber: 1, refereeId: null };
+      expect((await editFixture(matchId, leapEdit)).status).toBe(200);
+      expect((await editFixture(matchId, leapEdit)).status).toBe(200);
+      const leapRoundTrip = (await pool.query(`
+        SELECT nova_planned_date(match_date)::text AS planned_date,
+               EXTRACT(ISODOW FROM nova_planned_date(match_date))::int AS weekday,
+               CASE WHEN pg_typeof(match_date)::text = 'date'
+                 THEN match_date::text
+                 ELSE to_char(match_date AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+               END AS stored_value
+        FROM matches WHERE id = $1
+      `, [matchId])).rows[0];
+      expect(leapRoundTrip.planned_date).toBe("2032-02-29");
+      expect(leapRoundTrip.weekday).toBe(7);
+      expect(leapRoundTrip.stored_value).toBe(yearBoundary.storage_type === "date" ? "2032-02-29" : "2032-02-29 00:00:00");
+
+      await pool.query("DELETE FROM matches WHERE league_id = $1", [IDS.leagueB]);
+      await pool.query(`
+        UPDATE leagues
+        SET status = 'registration', season_start_date = '2032-03-07 00:00:00+00',
+            season_end_date = '2032-06-07 00:00:00+00', fields_count = 1,
+            time_slots = '["18:30"]'
+        WHERE id = $1
+      `, [IDS.leagueB]);
+      expect((await postLeague({ action: "GENERATE_FIXTURES", leagueId: IDS.leagueB })).status).toBe(200);
+      const generated = (await pool.query(`
+        SELECT id, nova_planned_date(match_date)::text AS match_date, time_slot,
+               EXTRACT(ISODOW FROM nova_planned_date(match_date))::int AS weekday,
+               CASE WHEN pg_typeof(match_date)::text = 'date'
+                 THEN match_date::text
+                 ELSE to_char(match_date AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+               END AS stored_value
+        FROM matches WHERE league_id = $1
+      `, [IDS.leagueB])).rows[0];
+      expect(generated).toMatchObject({ match_date: "2032-03-07", time_slot: "18:30", weekday: 7 });
+      expect(generated.stored_value).toBe(yearBoundary.storage_type === "date" ? "2032-03-07" : "2032-03-07 00:00:00");
+
+      const leagueResponse = await getLeague(request(`/api/leagues?leagueId=${IDS.leagueB}`));
+      expect(leagueResponse.status).toBe(200);
+      expect((await leagueResponse.json()).season_start_date).toBe("2032-03-07");
+      expect((await postPostponeRound({ league_id: IDS.leagueB, round_number: 1 })).status).toBe(200);
+      const postponed = (await pool.query(`
+        SELECT nova_planned_date(match_date)::text AS match_date, time_slot,
+               EXTRACT(ISODOW FROM nova_planned_date(match_date))::int AS weekday,
+               CASE WHEN pg_typeof(match_date)::text = 'date'
+                 THEN match_date::text
+                 ELSE to_char(match_date AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+               END AS stored_value
+        FROM matches WHERE id = $1
+      `, [generated.id])).rows[0];
+      expect(postponed).toMatchObject({ match_date: "2032-03-14", time_slot: "18:30", weekday: 7 });
+      expect(postponed.stored_value).toBe(yearBoundary.storage_type === "date" ? "2032-03-14" : "2032-03-14 00:00:00");
+    } finally {
+      process.env.TZ = originalProcessTimeZone;
+      if (originalPoolOptions === undefined) delete pool.options.options;
+      else pool.options.options = originalPoolOptions;
+      await Promise.all((pool._clients ?? []).map((client) => (
+        client.query("SELECT set_config('TimeZone', 'Africa/Johannesburg', false)")
+      )));
+    }
+  }, 30_000);
+
   it("postpones a scheduled round by seven calendar days", async () => {
     const response = await postPostponeRound({ league_id: IDS.league, round_number: 5 });
     expect(response.status).toBe(200);
     expect((await pool.query("SELECT nova_planned_date(match_date)::text AS match_date FROM matches WHERE id = $1", [IDS.match4])).rows[0].match_date).toBe("2030-02-26");
   });
+
+  it("rejects a wrong-venue administrator before waiting on a victim match lock", async () => {
+    const blocker = await pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match4]);
+      authState.actorId = IDS.venueAdminB;
+      const response = await Promise.race([
+        postPostponeRound({ league_id: IDS.league, round_number: 5 }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("wrong-venue request waited on victim locks")), 1000)),
+      ]);
+      expect(response.status).toBe(403);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+    }
+  });
+
+  it.each([IDS.captain, IDS.referee])("rejects a non-admin identity before waiting on victim locks (%s)", async (actorId) => {
+    const blocker = await pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match4]);
+      authState.actorId = actorId;
+      const response = await Promise.race([
+        postPostponeRound({ league_id: IDS.league, round_number: 5 }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("non-admin request waited on victim locks")), 1000)),
+      ]);
+      expect(response.status).toBe(401);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+    }
+  });
+
+  it("does not reveal whether a forbidden league exists during cheap preauthorization", async () => {
+    authState.actorId = IDS.venueAdminB;
+    const existing = await postPostponeRound({ league_id: IDS.league, round_number: 5 });
+    const absent = await postPostponeRound({ league_id: "40000000-0000-4000-8000-999999999999", round_number: 5 });
+    expect([existing.status, absent.status]).toEqual([403, 403]);
+    expect(await existing.json()).toEqual(await absent.json());
+  });
+
+  it("rechecks actor role after early authorization while queued on a victim row", async () => {
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match4]);
+      queued = postPostponeRound({ league_id: IDS.league, round_number: 5 });
+      await waitForLockQueue("nova_planned_date(match_date)", "POSTPONE_ROUND never queued on the victim match row");
+      await pool.query("UPDATE auth_users SET role = 'captain' WHERE id = $1", [IDS.venueAdminA]);
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(403);
+      expect((await pool.query("SELECT nova_planned_date(match_date)::text AS match_date FROM matches WHERE id = $1", [IDS.match4])).rows[0].match_date).toBe("2030-02-19");
+      expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'POSTPONE_ROUND'")).rows[0].count)).toBe(0);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  }, 20_000);
+
+  it("rechecks tenant scope after early authorization while queued on a victim row", async () => {
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match4]);
+      queued = postPostponeRound({ league_id: IDS.league, round_number: 5 });
+      await waitForLockQueue("nova_planned_date(match_date)", "POSTPONE_ROUND never queued on the victim match row");
+      await pool.query("UPDATE auth_users SET venue_id = $1, organization_id = $2 WHERE id = $3", [IDS.venueB, IDS.orgB, IDS.venueAdminA]);
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(403);
+      expect((await pool.query("SELECT nova_planned_date(match_date)::text AS match_date FROM matches WHERE id = $1", [IDS.match4])).rows[0].match_date).toBe("2030-02-19");
+      expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'POSTPONE_ROUND'")).rows[0].count)).toBe(0);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  }, 20_000);
+
+  it("locks every target row and re-evaluates it after a concurrent status change", async () => {
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match4]);
+      queued = postPostponeRound({ league_id: IDS.league, round_number: 5 });
+      await waitForLockQueue("nova_planned_date(match_date)", "POSTPONE_ROUND never queued on the victim match row");
+      await blocker.query("UPDATE matches SET status = 'cancelled' WHERE id = $1", [IDS.match4]);
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(404);
+      expect((await pool.query("SELECT status, nova_planned_date(match_date)::text AS match_date FROM matches WHERE id = $1", [IDS.match4])).rows[0])
+        .toMatchObject({ status: "cancelled", match_date: "2030-02-19" });
+      expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'POSTPONE_ROUND'")).rows[0].count)).toBe(0);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  }, 20_000);
 
   it.each(["referee", "mixed resource and referee"])("rejects a round shift with a %s conflict atomically", async (kind) => {
     await pool.query("UPDATE matches SET referee_id = $1 WHERE id = $2", [IDS.referee, IDS.match4]);
@@ -1162,7 +1416,7 @@ describe("Gate 4A fixture and result operations", () => {
       resultRequest = action === "FORFEIT_MATCH"
         ? postMatch({ action, matchId: IDS.match4, winnerSide: "home" })
         : postMatch({ action, matchId: IDS.match4, homeScore: 2, awayScore: 0, status: "final", reason: "Lock order" });
-      await waitForLockQueue("SELECT id, win_points, draw_points", `${action} never queued on the league lock`);
+      await waitForLockQueue("SELECT id, venue_id, status, fields_count", `${action} never queued on the league lock`);
       roundRequest = postPostponeRound({ league_id: IDS.league, round_number: 5 });
       await waitForLockQueue("nova_planned_date(match_date)", "Round postpone never queued on the match row");
       await blocker.query("COMMIT");

@@ -86,7 +86,7 @@ jobs:
           fi
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0008_gate4a_league_operations.sql
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "SELECT result_type, nova_planned_date(match_date) FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'"
-          TEST_DATABASE_URL="$production_shape_url" npx vitest run tests/integration/gate2-remediation-routes.test.js
+          TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js
 
       - name: Unit and contract tests
         run: npm test

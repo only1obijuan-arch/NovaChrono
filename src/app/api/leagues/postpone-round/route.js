@@ -7,11 +7,14 @@ import {
   lockFixtureSchedule,
   lockRefereeSchedule,
   refereeScheduleKey,
+  setCanonicalScheduleTimeZone,
 } from "@/app/api/matches/scheduling";
 import { addDaysToLocalDate, formatLocalFixtureDate } from "@/utils/scheduling";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { sendPush } from "@/app/api/utils/send-push";
 import { rateLimit } from "@/app/api/utils/rate-limit";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request) {
   try {
@@ -25,16 +28,38 @@ export async function POST(request) {
       return Response.json({ error: "Too many alerts sent. Try again later." }, { status: 429 });
     }
 
-    const { league_id, round_number } = await request.json();
+    const { league_id, round_number: rawRoundNumber } = await request.json();
+    const round_number = Number(rawRoundNumber);
 
-    if (!league_id || !round_number) {
+    if (!UUID_RE.test(league_id ?? "") || !Number.isInteger(round_number) || round_number < 1) {
       return Response.json(
-        { error: "league_id and round_number required" },
+        { error: "A valid league_id and positive integer round_number are required" },
         { status: 400 }
       );
     }
 
+    // Reject obviously out-of-scope callers before taking any victim match-row
+    // locks. This is deliberately non-enumerating: absent and inaccessible
+    // leagues receive the same response. The transaction repeats this check.
+    const [earlyLeague] = await sql`
+      SELECT l.venue_id, v.organization_id
+      FROM leagues l
+      JOIN venues v ON v.id = l.venue_id
+      WHERE l.id = ${league_id}
+    `;
+    const [earlyActor] = await sql`
+      SELECT id, role, venue_id, organization_id
+      FROM auth_users
+      WHERE id = ${user.id}
+    `;
+    if (!earlyLeague || !earlyActor
+      || !["venue_admin", "org_admin", "super_admin"].includes(earlyActor.role)
+      || !canAdministerVenue(earlyActor, earlyLeague.venue_id, earlyLeague.organization_id)) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const operation = await withTransaction(async (txSql) => {
+      await setCanonicalScheduleTimeZone(txSql);
       const candidateIds = await txSql`
         SELECT id
         FROM matches

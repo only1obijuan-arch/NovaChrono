@@ -2,6 +2,13 @@ import { isValidLocalDate, isValidLocalTime } from "@/utils/scheduling";
 
 export const ACTIVE_SCHEDULE_STATUSES = ["scheduled", "live"];
 
+// DATE and TIMESTAMPTZ deployments must interpret Nova's date-only inputs the
+// same way. UTC preserves the accepted production representation (midnight
+// UTC) while nova_planned_date remains the compatibility read boundary.
+export async function setCanonicalScheduleTimeZone(txSql) {
+  await txSql`SET LOCAL TIME ZONE 'UTC'`;
+}
+
 export function scheduleValidationError({ matchDate, timeSlot, fieldNumber }, league) {
   if (!isValidLocalDate(matchDate)) return "matchDate must be a real YYYY-MM-DD local date";
   if (!isValidLocalTime(timeSlot)) return "timeSlot must be a valid 24-hour HH:MM time";
