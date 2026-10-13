@@ -32,11 +32,11 @@ export async function POST(request) {
     const { joinCode, name, password, teamName } = parsed.data;
     const email = canonicalizeEmail(parsed.data.email);
 
-    // Validate league code
+    // Cheap validation only; registration status is authoritatively rechecked
+    // under the league lock in the transaction below.
     const [league] = await sql`
       SELECT id, name FROM leagues
       WHERE UPPER(join_code) = UPPER(${joinCode})
-      AND status IN ('registration', 'active')
     `;
     if (!league) {
       return Response.json(
@@ -53,6 +53,17 @@ export async function POST(request) {
     const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await withTransaction(async (txSql) => {
+      const [lockedLeague] = await txSql`
+        SELECT id, name, status
+        FROM leagues
+        WHERE id = ${league.id} AND UPPER(join_code) = UPPER(${joinCode})
+        FOR UPDATE
+      `;
+      if (!lockedLeague || lockedLeague.status !== "registration") {
+        const err = new Error("This league is no longer accepting registrations.");
+        err.code = "REGISTRATION_CLOSED";
+        throw err;
+      }
       // Lock the slot inside the transaction to prevent concurrent signups
       // claiming the same slot. FOR UPDATE SKIP LOCKED lets a second concurrent
       // request skip this row and claim the next free slot rather than blocking.
@@ -60,8 +71,8 @@ export async function POST(request) {
         SELECT ls.id
         FROM league_slots ls
         LEFT JOIN teams t ON t.slot_id = ls.id AND t.status = 'active'
-        WHERE ls.league_id = ${league.id} AND t.id IS NULL
-        ORDER BY ls.slot_number
+        WHERE ls.league_id = ${lockedLeague.id} AND t.id IS NULL
+        ORDER BY ls.slot_number, ls.id
         LIMIT 1
         FOR UPDATE OF ls SKIP LOCKED
       `;
@@ -98,7 +109,7 @@ export async function POST(request) {
 
       await txSql`
         INSERT INTO teams (league_id, slot_id, name, captain_user_id)
-        VALUES (${league.id}, ${claimedSlot.id}, ${teamName}, ${newUser.id})
+        VALUES (${lockedLeague.id}, ${claimedSlot.id}, ${teamName}, ${newUser.id})
       `;
 
       await txSql`
@@ -124,8 +135,8 @@ export async function POST(request) {
 
     return Response.json({ success: true, requiresVerification: true });
   } catch (err) {
-    if (err.code === "LEAGUE_FULL" || err.code === "DUPLICATE_EMAIL") {
-      return Response.json({ error: err.message }, { status: 400 });
+    if (["LEAGUE_FULL", "DUPLICATE_EMAIL", "REGISTRATION_CLOSED"].includes(err.code)) {
+      return Response.json({ error: err.message }, { status: err.code === "REGISTRATION_CLOSED" ? 409 : 400 });
     }
     console.error("Signup error:", err);
     return Response.json({ error: "An unexpected error occurred." }, { status: 500 });

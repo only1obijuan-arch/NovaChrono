@@ -2,7 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), query: vi.fn(), send: vi.fn(), push: vi.fn(), limit: vi.fn() }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 // sql and requireRole are production implementations; isolate only the database transport.
-vi.mock("@neondatabase/serverless", () => ({ Pool: class { query(...args) { return mocks.query(...args); } } }));
+vi.mock("@neondatabase/serverless", () => ({ Pool: class {
+  query(...args) { return mocks.query(...args); }
+  async connect() {
+    return {
+      query: async (...args) => ["BEGIN", "COMMIT", "ROLLBACK"].includes(args[0])
+        ? { rows: [], rowCount: 0 }
+        : mocks.query(...args),
+      release: vi.fn(),
+    };
+  }
+} }));
 vi.mock("@/app/api/utils/send-email", () => ({ sendEmail: mocks.send }));
 vi.mock("@/app/api/utils/send-push", () => ({ sendPush: mocks.push }));
 vi.mock("@/app/api/utils/rate-limit", () => ({ rateLimit: mocks.limit }));
@@ -29,18 +39,22 @@ beforeEach(() => {
     if (sql.includes("mobile_sessions")) rows = [];
     else if (sql.includes("SELECT * FROM auth_users")) rows = user ? [user] : [];
     else if (sql.includes("FROM auth_users") && sql.includes("role = 'captain'")) rows = captain ? [{ id: CAPTAIN }] : [];
+    else if (sql.includes("FROM auth_users")) rows = user ? [user] : [];
     else if (sql.includes("FROM venues")) rows = missing ? [] : [{ id: params[0] }];
     else if (sql.includes("FROM players")) rows = missing ? [] : [{ id: PLAYER, team_id: TEAM }];
     else if (sql.includes("SELECT l.venue_id, v.organization_id")) rows = missing ? [] : [{ venue_id: targetVenue, organization_id: targetOrganization }];
     else if (sql.includes("FROM teams t") && sql.includes("LEFT JOIN auth_users au") && !sql.includes("JOIN leagues")) rows = [{ id: TEAM, league_id: LEAGUE, slot_id: id(9), name: "Team", status: "active", captain_user_id: CAPTAIN, captain_name: "Captain", created_at: "2030-01-01T00:00:00Z" }];
     else if (sql.includes("FROM teams t") && sql.includes("t.league_id") && !sql.includes("JOIN leagues")) rows = [{ id: TEAM, league_id: LEAGUE, slot_id: id(9), name: "Team", status: "active" }];
     else if (sql.includes("FROM teams t") && sql.includes("JOIN leagues")) rows = missing ? [] : [{ id: TEAM, venue_id: targetVenue, organization_id: targetOrganization, captain_user_id: CAPTAIN }];
+    else if (sql.includes("FROM teams t")) rows = missing ? [] : [{ id: TEAM, league_id: LEAGUE, slot_id: id(9), name: "Team", status: "active", captain_user_id: CAPTAIN }];
+    else if (sql.includes("SELECT id, league_id FROM teams")) rows = missing ? [] : [{ id: TEAM, league_id: LEAGUE }];
     else if (sql.includes("SELECT id FROM teams")) rows = duplicate ? [{ id: TEAM }] : [];
-    else if (sql.includes("FROM leagues")) rows = missing ? [] : [{ id: LEAGUE, venue_id: targetVenue, status: leagueStatus, join_code: "ABC12345", name: "League" }];
-    else if (sql.includes("FROM matches m")) rows = missing ? [] : [{ id: MATCH, venue_id: targetVenue, match_date: "2030-01-01", home_team_id: TEAM, home_captain_email: "captain@example.test", home_captain_id: CAPTAIN, home_team_name: "Team", time_slot: "18:30" }];
+    else if (sql.includes("FROM leagues")) rows = missing ? [] : [{ id: LEAGUE, venue_id: targetVenue, organization_id: targetOrganization, status: leagueStatus, join_code: "ABC12345", name: "League" }];
+    else if (sql.includes("FROM matches")) rows = missing ? [] : [{ id: MATCH, status: "scheduled", venue_id: targetVenue, match_date: "2030-01-01", home_team_id: TEAM, home_captain_email: "captain@example.test", home_captain_id: CAPTAIN, home_team_name: "Team", time_slot: "18:30" }];
     else if (sql.includes("SELECT DISTINCT au")) rows = [{ id: CAPTAIN, email: "captain@example.test" }];
     else if (sql.includes("FROM availability_responses")) rows = [{ token: "token" }];
     else if (sql.includes("FROM league_slots")) rows = [{ id: id(9) }];
+    else if (sql.trim().startsWith("WITH")) rows = [];
     else if (/^\s*(INSERT|UPDATE|DELETE)/i.test(sql)) rows = [{ id: TEAM }];
     else throw new Error("Unexpected SQL: " + sql);
     return { rows, rowCount: rows.length };
@@ -64,7 +78,10 @@ describe("D1 live profile authority", () => {
 const mutations = [
   ["add team", () => teams(request({ action: "ADD_TEAM", leagueId: LEAGUE, teamName: "Team" }))],
   ["rename team", () => teams(request({ action: "UPDATE_TEAM", teamId: TEAM, teamName: "Team" }))],
-  ["deactivate team", () => teams(request({ action: "DELETE_TEAM", teamId: TEAM }))],
+  ["withdraw team", () => {
+    leagueStatus = "active";
+    return teams(request({ action: "WITHDRAW_TEAM", teamId: TEAM, reason: "No longer participating", policy: "VACATE_FOR_REPLACEMENT" }));
+  }],
   ["add player", () => addPlayer(request({ teamId: TEAM, name: "Player" }))],
   ["delete player", () => deletePlayer(request(null, "DELETE", "/api/players?playerId=" + PLAYER))],
   ["weather send", () => weather(request({ league_id: LEAGUE, alert_type: "warning", message: "Weather" }))],
@@ -76,8 +93,14 @@ describe.each(mutations)("D2 %s", (_label, call) => {
   it("preserves platform-wide authority", async () => { user.role = "super_admin"; targetVenue = B; expect((await call()).status).toBe(200); });
   it("rejects deleted target", async () => { missing = true; expect((await call()).status).toBe(404); expect(writes()).toEqual([]); expect(mocks.send).not.toHaveBeenCalled(); });
 });
+it("D2 rejects withdrawal outside an active league", async () => {
+  leagueStatus = "registration";
+  const response = await teams(request({ action: "WITHDRAW_TEAM", teamId: TEAM, reason: "No longer participating", policy: "VACATE_FOR_REPLACEMENT" }));
+  expect(response.status).toBe(409);
+  expect(writes()).toEqual([]);
+});
 it.each([
-  [teams, { action: "ADD_TEAM", leagueId: "bad" }], [teams, { action: "UPDATE_TEAM", teamId: "bad" }], [teams, { action: "DELETE_TEAM", teamId: "bad" }],
+  [teams, { action: "ADD_TEAM", leagueId: "bad" }], [teams, { action: "UPDATE_TEAM", teamId: "bad" }], [teams, { action: "WITHDRAW_TEAM", teamId: "bad", reason: "reason", policy: "VACATE_FOR_REPLACEMENT" }],
   [addPlayer, { teamId: "bad", name: "Player" }], [weather, { league_id: "bad", message: "m", alert_type: "warning" }], [reminder, { matchId: "bad" }],
 ])("D2 rejects malformed IDs without a mutation", async (handler, body) => { expect((await handler(request(body))).status).toBe(400); expect(writes()).toEqual([]); });
 it("D2 rejects malformed player deletion ID", async () => { expect((await deletePlayer(request(null, "DELETE", "/api/players?playerId=bad"))).status).toBe(400); expect(writes()).toEqual([]); });

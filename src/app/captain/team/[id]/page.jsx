@@ -55,7 +55,7 @@ export default function TeamDashboard({ params, searchParams }) {
   });
 
   const liveMatch = matches.find(
-    (m) => (m.home_slot_id === team?.slot_id || m.away_slot_id === team?.slot_id) && m.status === "live"
+    (m) => (m.home_team_id === team?.id || m.away_team_id === team?.id) && m.status === "live"
   );
 
   const { data: liveMatchData } = useQuery({
@@ -183,7 +183,7 @@ export default function TeamDashboard({ params, searchParams }) {
     );
 
   const teamMatches = matches.filter(
-    (m) => m.home_slot_id === team.slot_id || m.away_slot_id === team.slot_id,
+    (m) => m.home_team_id === team.id || m.away_team_id === team.id,
   );
   const upcomingMatches = teamMatches.filter((m) => m.status === "scheduled");
   const completedMatches = teamMatches.filter((m) => m.status === "final");
@@ -471,7 +471,7 @@ export default function TeamDashboard({ params, searchParams }) {
                 <div className="td-card-body">
                   <div className="td-fixture-list">
                     {teamMatches.map((match) => {
-                      const isHome = match.home_slot_id === team.slot_id;
+                      const isHome = match.home_team_id === team.id;
                       const opponent = isHome
                         ? match.away_team_name
                         : match.home_team_name;
@@ -557,7 +557,7 @@ export default function TeamDashboard({ params, searchParams }) {
                     </p>
                     <p className="td-next-opponent">
                       vs{" "}
-                      {nextMatch.home_slot_id === team.slot_id
+                      {nextMatch.home_team_id === team.id
                         ? nextMatch.away_team_name || "TBD"
                         : nextMatch.home_team_name || "TBD"}
                     </p>
@@ -566,7 +566,7 @@ export default function TeamDashboard({ params, searchParams }) {
                         FIELD {nextMatch.field_number}
                       </span>
                       <span className="td-next-meta-item">
-                        {nextMatch.home_slot_id === team.slot_id
+                        {nextMatch.home_team_id === team.id
                           ? "HOME"
                           : "AWAY"}
                       </span>

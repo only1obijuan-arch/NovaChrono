@@ -15,6 +15,9 @@ $productionDb = "${DatabasePrefix}_production"
 $holdDb = "${DatabasePrefix}_hold"
 $preflightDb = "${DatabasePrefix}_preconditions"
 $gate4GuardDb = "${DatabasePrefix}_gate4_guard"
+$gate4bAmbiguousDb = "${DatabasePrefix}_gate4b_ambiguous"
+$gate4bDuplicateDb = "${DatabasePrefix}_gate4b_duplicate"
+$gate4bMissingDb = "${DatabasePrefix}_gate4b_missing"
 
 function Invoke-PsqlFile([string]$Database, [string]$File) {
   & $psql -X -v ON_ERROR_STOP=1 -1 -h $HostName -p $Port -U $AdminUser -d $Database -f $File
@@ -28,16 +31,25 @@ function New-TestDatabase([string]$Database) {
 }
 
 function Assert-PsqlFileFails([string]$Database, [string]$File, [string]$ExpectedMessage) {
-  $output = & $psql -X -v ON_ERROR_STOP=1 -1 -h $HostName -p $Port -U $AdminUser -d $Database -f $File 2>&1 | Out-String
-  if ($LASTEXITCODE -eq 0) { throw "$File unexpectedly accepted an invalid fixture" }
+  $command = "`"$psql`" -X -v ON_ERROR_STOP=1 -1 -h $HostName -p $Port -U $AdminUser -d $Database -f `"$File`" 2>&1"
+  $output = & $env:ComSpec /d /s /c $command | Out-String
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -eq 0) { throw "$File unexpectedly accepted an invalid fixture" }
   if ($output -notmatch [regex]::Escape($ExpectedMessage)) {
-    throw "$File failed without the expected precondition message: $ExpectedMessage"
+    throw "$File failed without the expected precondition message: $ExpectedMessage`n$output"
   }
 }
 
 function Assert-PsqlCommandFails([string]$Database, [string]$Query, [string]$ExpectedMessage) {
-  $output = & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $Database -c $Query 2>&1 | Out-String
-  if ($LASTEXITCODE -eq 0) { throw "Invalid SQL fixture unexpectedly succeeded: $Query" }
+  $previousErrorAction = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $Database -c $Query 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorAction
+  }
+  if ($exitCode -eq 0) { throw "Invalid SQL fixture unexpectedly succeeded: $Query" }
   if ($output -notmatch [regex]::Escape($ExpectedMessage)) {
     throw "Invalid SQL fixture failed without the expected message: $ExpectedMessage"
   }
@@ -54,12 +66,15 @@ function Assert-PsqlValue([string]$Database, [string]$Query, [string]$Expected, 
 function Assert-MigrationStatus([string]$Database, [bool]$ShouldSucceed, [string]$ExpectedMessage = "") {
   $previousUrl = $env:DATABASE_URL
   $previousDriver = $env:DATABASE_DRIVER
+  $previousErrorAction = $ErrorActionPreference
   try {
+    $ErrorActionPreference = "Continue"
     $env:DATABASE_URL = "postgresql://${AdminUser}@${HostName}:$Port/$Database"
     $env:DATABASE_DRIVER = "pg"
     $output = & node (Join-Path $root "scripts\migrate.js") --status 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
   } finally {
+    $ErrorActionPreference = $previousErrorAction
     $env:DATABASE_URL = $previousUrl
     $env:DATABASE_DRIVER = $previousDriver
   }
@@ -75,6 +90,17 @@ function Assert-MigrationStatus([string]$Database, [bool]$ShouldSucceed, [string
   }
 }
 
+function New-Gate4bPreflightDatabase([string]$Database) {
+  New-TestDatabase $Database
+  foreach ($migration in $historical) {
+    Invoke-PsqlFile $Database (Join-Path $root "migrations\$migration")
+  }
+  Invoke-PsqlFile $Database (Join-Path $root "tests\fixtures\gate2-production-shape.sql")
+  foreach ($migration in ($gate2 + $gate3 + $gate4)) {
+    Invoke-PsqlFile $Database (Join-Path $root "migrations\$migration")
+  }
+}
+
 $historical = @("0001_initial.sql", "0002_add_unique_league_slots.sql")
 $gate2 = @(
   "0003_auth_identity_integrity.sql",
@@ -84,9 +110,10 @@ $gate2 = @(
 )
 $gate3 = @("0007_match_goal_idempotency.sql")
 $gate4 = @("0008_gate4a_league_operations.sql")
+$gate4b = @("0009_gate4b_league_lifecycle.sql")
 
 New-TestDatabase $freshDb
-foreach ($migration in ($historical + $gate2 + $gate3 + $gate4)) {
+foreach ($migration in ($historical + $gate2 + $gate3 + $gate4 + $gate4b)) {
   Invoke-PsqlFile $freshDb (Join-Path $root "migrations\$migration")
 }
 
@@ -106,6 +133,9 @@ foreach ($migration in $gate3) {
   Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
 }
 foreach ($migration in $gate4) {
+  Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
+}
+foreach ($migration in $gate4b) {
   Invoke-PsqlFile $productionDb (Join-Path $root "migrations\$migration")
 }
 
@@ -136,12 +166,18 @@ Assert-PsqlCommandFails $productionDb "INSERT INTO match_events (match_id, type,
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000001', 'goal_home', '90000000-0000-4000-8000-000000000092')"
 if ($LASTEXITCODE -ne 0) { throw "Goal operation ID fixture must be accepted" }
 Assert-PsqlCommandFails $productionDb "INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000001', 'goal_home', '90000000-0000-4000-8000-000000000092')" "match_events_match_goal_operation_unique"
-& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO matches (id, league_id, round_number, match_date, time_slot, field_number, home_slot_id) SELECT '70000000-0000-4000-8000-000000000002', league_id, 2, match_date + INTERVAL '7 days', time_slot, field_number, home_slot_id FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'; INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000002', 'goal_home', '90000000-0000-4000-8000-000000000092')"
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "INSERT INTO matches (id, league_id, round_number, match_date, time_slot, field_number, home_slot_id, away_slot_id, home_team_id, away_team_id) SELECT '70000000-0000-4000-8000-000000000002', league_id, 2, match_date + INTERVAL '7 days', time_slot, field_number, home_slot_id, away_slot_id, home_team_id, away_team_id FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'; INSERT INTO match_events (match_id, type, operation_id) VALUES ('70000000-0000-4000-8000-000000000002', 'goal_home', '90000000-0000-4000-8000-000000000092')"
 if ($LASTEXITCODE -ne 0) { throw "The same operation ID must remain valid for another match" }
 Assert-PsqlValue $productionDb "SELECT column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'matches' AND column_name = 'result_type'" "'played'::text" "Gate 4A result metadata must default to played"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_constraint WHERE conrelid = 'matches'::regclass AND conname = 'matches_result_type_check' AND convalidated" "1" "Gate 4A result type constraint must be validated"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid IN (to_regclass('public.matches_active_schedule_lookup'), to_regclass('public.matches_active_referee_schedule_lookup'))" "2" "Gate 4A conflict lookup indexes must exist"
 Assert-PsqlValue $productionDb "SELECT count(*) FROM matches WHERE result_type <> 'played' OR result_type IS NULL" "0" "Historical matches must backfill safely as played"
+Assert-PsqlValue $productionDb "SELECT home_team_id::text || ',' || away_team_id::text FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'" "60000000-0000-4000-8000-000000000001,60000000-0000-4000-8000-000000000002" "Gate 4B must deterministically snapshot historical match identities"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'matches' AND column_name IN ('home_team_id','away_team_id') AND is_nullable = 'NO'" "2" "Gate 4B match team identities must be mandatory"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM teams WHERE slot_id = '50000000-0000-4000-8000-000000000003'" "2" "A safe inactive plus active slot history must survive Gate 4B"
+Assert-PsqlValue $productionDb "SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.teams_one_active_per_slot')" "1" "Gate 4B active-slot uniqueness must exist"
+Assert-PsqlCommandFails $productionDb "INSERT INTO teams (league_id, slot_id, name, status) VALUES ('40000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000003', 'Forbidden Duplicate', 'active')" "teams_one_active_per_slot"
+Assert-PsqlCommandFails $productionDb "UPDATE matches SET home_team_id = '60000000-0000-4000-8000-000000000002' WHERE id = '70000000-0000-4000-8000-000000000001'" "home team identity must belong to the match league and home slot"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $productionDb -c "CREATE TABLE schema_migrations (id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); INSERT INTO schema_migrations (name) VALUES ('0008_gate4a_league_operations.sql')"
 if ($LASTEXITCODE -ne 0) { throw "Failed preparing the valid Gate 4A ledger guard rehearsal" }
 Assert-MigrationStatus $productionDb $true
@@ -156,6 +192,21 @@ Assert-MigrationStatus $gate4GuardDb $true
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $gate4GuardDb -c "INSERT INTO schema_migrations (name) VALUES ('0008_gate4a_league_operations.sql')"
 if ($LASTEXITCODE -ne 0) { throw "Failed preparing the incomplete 0008 ledger guard rehearsal" }
 Assert-MigrationStatus $gate4GuardDb $false "old/incomplete 0008 detected; forward repair migration required"
+
+New-Gate4bPreflightDatabase $gate4bAmbiguousDb
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $gate4bAmbiguousDb -c "INSERT INTO teams (id, league_id, slot_id, name, status) VALUES ('60000000-0000-4000-8000-000000000010', '40000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000001', 'Ambiguous Historical Team', 'inactive')"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the ambiguous historical occupant rehearsal" }
+Assert-PsqlFileFails $gate4bAmbiguousDb (Join-Path $root "migrations\0009_gate4b_league_lifecycle.sql") "historical match participant backfill is missing or ambiguous"
+
+New-Gate4bPreflightDatabase $gate4bDuplicateDb
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $gate4bDuplicateDb -c "INSERT INTO teams (id, league_id, slot_id, name, status) VALUES ('60000000-0000-4000-8000-000000000011', '40000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000003', 'Duplicate Active Team', 'active')"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the duplicate active occupant rehearsal" }
+Assert-PsqlFileFails $gate4bDuplicateDb (Join-Path $root "migrations\0009_gate4b_league_lifecycle.sql") "duplicate active team occupants exist for a league slot"
+
+New-Gate4bPreflightDatabase $gate4bMissingDb
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $gate4bMissingDb -c "DELETE FROM teams WHERE id = '60000000-0000-4000-8000-000000000002'"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the missing match participant rehearsal" }
+Assert-PsqlFileFails $gate4bMissingDb (Join-Path $root "migrations\0009_gate4b_league_lifecycle.sql") "historical match participant backfill is missing or ambiguous"
 
 New-TestDatabase $holdDb
 foreach ($migration in $historical) {
@@ -181,7 +232,8 @@ Invoke-PsqlFile $preflightDb (Join-Path $root "tests\fixtures\gate2-production-s
 Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0003_auth_identity_integrity.sql") "canonical auth_users email duplicates exist"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c "DELETE FROM auth_users WHERE name = 'Duplicate'"
 
-& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c 'INSERT INTO auth_accounts (id, "userId", type, provider, "providerAccountId") VALUES (''duplicate-account'', ''30000000-0000-4000-8000-000000000002'', ''credentials'', ''credentials'', ''duplicate'')'
+& $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c "INSERT INTO auth_accounts SELECT (json_populate_record(NULL::auth_accounts, json_build_object('id', 'duplicate-account', 'userId', '30000000-0000-4000-8000-000000000002', 'type', 'credentials', 'provider', 'credentials', 'providerAccountId', 'duplicate'))).*"
+if ($LASTEXITCODE -ne 0) { throw "Failed preparing the duplicate Auth.js account rehearsal" }
 Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0003_auth_identity_integrity.sql") "duplicate auth_accounts owner/provider rows exist"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c "DELETE FROM auth_accounts WHERE id = 'duplicate-account'"
 Invoke-PsqlFile $preflightDb (Join-Path $root "migrations\0003_auth_identity_integrity.sql")
@@ -198,4 +250,4 @@ Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_
 Assert-PsqlFileFails $preflightDb (Join-Path $root "migrations\0004_application_schema_integrity.sql") "duplicate availability match/team rows exist"
 & $psql -X -v ON_ERROR_STOP=1 -h $HostName -p $Port -U $AdminUser -d $preflightDb -c "DELETE FROM availability_responses WHERE token = 'duplicate-availability'"
 
-Write-Output "Gate 2/3/4A migration verification passed: fresh, production-shaped, historical preservation, Gate 3 goal idempotency, Gate 4A result metadata, lookup indexes, amended-0008 ledger compatibility guard, NULL-role hold, and anomaly fail-closed paths."
+Write-Output "Gate 2/3/4A/4B migration verification passed: fresh, production-shaped, historical participant backfill, active-slot uniqueness, Gate 3 goal idempotency, Gate 4A result metadata, lookup indexes, amended-0008 ledger compatibility guard, NULL-role hold, and anomaly fail-closed paths."
