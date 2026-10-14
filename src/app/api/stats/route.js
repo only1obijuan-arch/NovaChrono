@@ -30,7 +30,7 @@ export async function GET(request) {
 
   try {
     const formRows = await sql`
-      SELECT m.id, m.home_slot_id, m.away_slot_id, m.home_score, m.away_score
+      SELECT m.id, m.home_team_id, m.away_team_id, m.home_score, m.away_score
       FROM matches m
       WHERE m.league_id = ${leagueId} AND m.status = 'final'
       ORDER BY m.match_date DESC, m.time_slot DESC
@@ -38,17 +38,17 @@ export async function GET(request) {
     `;
     const formMap = new Map();
     for (const row of formRows) {
-      const apply = (slotId, gf, ga) => {
-        if (!slotId) return;
-        const arr = formMap.get(String(slotId)) || [];
+      const apply = (teamId, gf, ga) => {
+        if (!teamId) return;
+        const arr = formMap.get(String(teamId)) || [];
         if (arr.length >= 5) return;
         arr.push(gf > ga ? 'W' : gf === ga ? 'D' : 'L');
-        formMap.set(String(slotId), arr);
+        formMap.set(String(teamId), arr);
       };
-      apply(row.home_slot_id, row.home_score, row.away_score);
-      apply(row.away_slot_id, row.away_score, row.home_score);
+      apply(row.home_team_id, row.home_score, row.away_score);
+      apply(row.away_team_id, row.away_score, row.home_score);
     }
-    standings = standings.map((s) => ({ ...s, form_last5: formMap.get(String(s.slot_id)) || [], movement: null }));
+    standings = standings.map((s) => ({ ...s, form_last5: formMap.get(String(s.team_id)) || [], movement: null }));
   } catch (error) {
     console.error('Form guide query error:', error);
   }
@@ -58,6 +58,7 @@ export async function GET(request) {
       SELECT
         p.name AS player_name,
         COUNT(*) AS goals,
+        t.id AS team_id,
         t.slot_id AS team_slot_id,
         m.league_id
       FROM match_events me
@@ -67,7 +68,7 @@ export async function GET(request) {
       WHERE me.type IN ('goal_home', 'goal_away')
         AND me.player_id IS NOT NULL
         AND m.league_id = ${leagueId}
-      GROUP BY p.id, p.name, t.slot_id, m.league_id
+      GROUP BY p.id, p.name, t.id, t.slot_id, m.league_id
       ORDER BY COUNT(*) DESC
       LIMIT 10
     `;

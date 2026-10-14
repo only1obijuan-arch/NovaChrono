@@ -1,7 +1,7 @@
 /**
- * Rebuild a league table from final matches. Current active teams are resolved
- * through their slots, matching the existing product model. Replacement and
- * withdrawal history remain a Gate 4 concern.
+ * Rebuild a league table from immutable match participant identities. Active
+ * teams remain visible at zero; withdrawn teams remain only when final history
+ * references them.
  */
 export async function recomputeLeagueStandings(txSql, leagueId) {
   const [league] = await txSql`
@@ -13,28 +13,30 @@ export async function recomputeLeagueStandings(txSql, leagueId) {
   if (!league) throw new Error("League not found while recomputing standings");
 
   await txSql`
-    UPDATE standings
-    SET played = 0,
-        won = 0,
-        drawn = 0,
-        lost = 0,
-        goals_for = 0,
-        goals_against = 0,
-        goal_difference = 0,
-        points = 0
-    WHERE league_id = ${leagueId}
+    DELETE FROM standings s
+    WHERE s.league_id = ${leagueId}
+      AND NOT EXISTS (
+        SELECT 1 FROM teams t
+        WHERE t.id = s.team_id AND t.league_id = ${leagueId} AND t.status = 'active'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM matches m
+        WHERE m.league_id = ${leagueId} AND m.status = 'final'
+          AND (m.home_team_id = s.team_id OR m.away_team_id = s.team_id)
+      )
   `;
 
   await txSql`
-    WITH active_teams AS (
-      SELECT id, slot_id
-      FROM teams
-      WHERE league_id = ${leagueId}
-        AND status = 'active'
+    WITH eligible_teams AS (
+      SELECT id FROM teams WHERE league_id = ${leagueId} AND status = 'active'
+      UNION
+      SELECT m.home_team_id FROM matches m WHERE m.league_id = ${leagueId} AND m.status = 'final'
+      UNION
+      SELECT m.away_team_id FROM matches m WHERE m.league_id = ${leagueId} AND m.status = 'final'
     ),
     contributions AS (
       SELECT
-        home.id AS team_id,
+        m.home_team_id AS team_id,
         1 AS played,
         CASE WHEN m.home_score > m.away_score THEN 1 ELSE 0 END AS won,
         CASE WHEN m.home_score = m.away_score THEN 1 ELSE 0 END AS drawn,
@@ -48,14 +50,12 @@ export async function recomputeLeagueStandings(txSql, leagueId) {
           ELSE 0
         END AS points
       FROM matches m
-      JOIN active_teams home ON home.slot_id = m.home_slot_id
-      JOIN active_teams away ON away.slot_id = m.away_slot_id
       WHERE m.league_id = ${leagueId} AND m.status = 'final'
 
       UNION ALL
 
       SELECT
-        away.id AS team_id,
+        m.away_team_id AS team_id,
         1 AS played,
         CASE WHEN m.away_score > m.home_score THEN 1 ELSE 0 END AS won,
         CASE WHEN m.away_score = m.home_score THEN 1 ELSE 0 END AS drawn,
@@ -69,8 +69,6 @@ export async function recomputeLeagueStandings(txSql, leagueId) {
           ELSE 0
         END AS points
       FROM matches m
-      JOIN active_teams home ON home.slot_id = m.home_slot_id
-      JOIN active_teams away ON away.slot_id = m.away_slot_id
       WHERE m.league_id = ${leagueId} AND m.status = 'final'
     ),
     totals AS (
@@ -102,7 +100,7 @@ export async function recomputeLeagueStandings(txSql, leagueId) {
       COALESCE(totals.goals_against, 0),
       COALESCE(totals.goal_difference, 0),
       COALESCE(totals.points, 0)
-    FROM active_teams team
+    FROM eligible_teams team
     LEFT JOIN totals ON totals.team_id = team.id
     ON CONFLICT (league_id, team_id) DO UPDATE SET
       played = EXCLUDED.played,

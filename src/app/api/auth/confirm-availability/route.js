@@ -39,10 +39,8 @@ export async function GET(request) {
       FROM availability_responses ar
       JOIN matches m ON ar.match_id = m.id
       JOIN leagues l ON m.league_id = l.id
-      LEFT JOIN league_slots home_slot ON m.home_slot_id = home_slot.id
-      LEFT JOIN league_slots away_slot ON m.away_slot_id = away_slot.id
-      LEFT JOIN teams home_team ON home_slot.id = home_team.slot_id AND home_team.status = 'active'
-      LEFT JOIN teams away_team ON away_slot.id = away_team.slot_id AND away_team.status = 'active'
+      JOIN teams home_team ON home_team.id = m.home_team_id
+      JOIN teams away_team ON away_team.id = m.away_team_id
       LEFT JOIN teams t ON ar.team_id = t.id
       LEFT JOIN auth_users au ON t.captain_user_id = au.id
       WHERE ar.token = ${token}

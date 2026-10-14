@@ -157,6 +157,8 @@ function matchSnapshot(match) {
     time_slot: match.time_slot,
     field_number: match.field_number,
     referee_id: match.referee_id,
+    home_team_id: match.home_team_id,
+    away_team_id: match.away_team_id,
     home_score: match.home_score,
     away_score: match.away_score,
     status: match.status,
@@ -177,6 +179,23 @@ async function validateParticipantSlots(txSql, leagueId, homeSlotId, awaySlotId)
   return slots.length === 2 ? null : "Both participant slots must belong to this league";
 }
 
+async function resolveActiveParticipantTeams(txSql, leagueId, homeSlotId, awaySlotId) {
+  if (homeSlotId === awaySlotId) return { error: "Home and away slots must be different" };
+  const participants = await txSql`
+    SELECT ls.id AS slot_id, t.id AS team_id
+    FROM league_slots ls
+    JOIN teams t ON t.slot_id = ls.id AND t.status = 'active'
+    WHERE ls.league_id = ${leagueId} AND ls.id IN (${homeSlotId}, ${awaySlotId})
+    ORDER BY ls.id, t.id
+    FOR SHARE OF ls, t
+  `;
+  if (participants.length !== 2) return { error: "Both participant slots must have one active team in this league" };
+  return {
+    homeTeamId: participants.find((row) => row.slot_id === homeSlotId)?.team_id,
+    awayTeamId: participants.find((row) => row.slot_id === awaySlotId)?.team_id,
+  };
+}
+
 async function validateReferee(txSql, refereeId, venueId) {
   if (refereeId == null) return null;
   const [referee] = await txSql`
@@ -188,6 +207,17 @@ async function validateReferee(txSql, refereeId, venueId) {
   if (!referee || referee.role !== "referee") return { error: "Referee not found", status: 404 };
   if (referee.venue_id !== venueId) return { error: "Referee does not belong to this venue", status: 403 };
   return null;
+}
+
+async function validateActiveMatchParticipants(txSql, match) {
+  const teams = await txSql`
+    SELECT id
+    FROM teams
+    WHERE id IN (${match.home_team_id}, ${match.away_team_id}) AND status = 'active'
+    ORDER BY id
+    FOR SHARE
+  `;
+  return teams.length === 2 ? null : "Both match participants must be active before resolving this fixture";
 }
 
 async function claimFixtureSchedule(txSql, schedule, excludeMatchId = null) {
@@ -233,8 +263,8 @@ export async function POST(request) {
         }
         const scheduleError = scheduleValidationError({ matchDate, timeSlot, fieldNumber }, league);
         if (scheduleError) return Response.json({ error: scheduleError }, { status: 400 });
-        const slotError = await validateParticipantSlots(txSql, leagueId, homeSlotId, awaySlotId);
-        if (slotError) return Response.json({ error: slotError }, { status: 409 });
+        const participants = await resolveActiveParticipantTeams(txSql, leagueId, homeSlotId, awaySlotId);
+        if (participants.error) return Response.json({ error: participants.error }, { status: 409 });
         const refereeError = await validateReferee(txSql, refereeId, league.venue_id);
         if (refereeError) return Response.json({ error: refereeError.error }, { status: refereeError.status });
 
@@ -249,11 +279,11 @@ export async function POST(request) {
         const [fixture] = await txSql`
           INSERT INTO matches (
             league_id, round_number, match_date, time_slot, field_number,
-            home_slot_id, away_slot_id, referee_id
+            home_slot_id, away_slot_id, home_team_id, away_team_id, referee_id
           )
           VALUES (
             ${leagueId}, ${roundNumber}, ${matchDate}::date, ${timeSlot}, ${fieldNumber},
-            ${homeSlotId}, ${awaySlotId}, ${refereeId}
+            ${homeSlotId}, ${awaySlotId}, ${participants.homeTeamId}, ${participants.awayTeamId}, ${refereeId}
           )
           RETURNING id
         `;
@@ -263,7 +293,7 @@ export async function POST(request) {
             ${authorization.actor.id},
             ${fixture.id},
             'CREATE_FIXTURE',
-            ${JSON.stringify({ league_id: leagueId, round_number: roundNumber, match_date: matchDate, time_slot: timeSlot, field_number: fieldNumber, home_slot_id: homeSlotId, away_slot_id: awaySlotId, referee_id: refereeId, status: "scheduled" })}
+            ${JSON.stringify({ league_id: leagueId, round_number: roundNumber, match_date: matchDate, time_slot: timeSlot, field_number: fieldNumber, home_slot_id: homeSlotId, away_slot_id: awaySlotId, home_team_id: participants.homeTeamId, away_team_id: participants.awayTeamId, referee_id: refereeId, status: "scheduled" })}
           )
         `;
         return Response.json({ success: true, matchId: fixture.id });
@@ -373,9 +403,14 @@ export async function POST(request) {
         if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
         const authorization = await authorizeLockedMatch(txSql, user.id, match);
         if (authorization.response) return authorization.response;
+        if (match.league_status !== "active") {
+          return Response.json({ error: "Matches can only be started in an active league" }, { status: 409 });
+        }
         if (match.status !== "scheduled") {
           return Response.json({ error: `Cannot start a match with status '${match.status}'` }, { status: 409 });
         }
+        const participantError = await validateActiveMatchParticipants(txSql, match);
+        if (participantError) return Response.json({ error: participantError }, { status: 409 });
 
         await txSql`
           UPDATE matches
@@ -401,18 +436,10 @@ export async function POST(request) {
           return Response.json({ error: `Cannot record goals for a match with status '${match.status}'` }, { status: 409 });
         }
 
-        const slotId = type === "goal_home" ? match.home_slot_id : match.away_slot_id;
-        const [team] = await txSql`
-          SELECT id
-          FROM teams
-          WHERE league_id = ${match.league_id}
-            AND slot_id = ${slotId}
-            AND status = 'active'
-          LIMIT 1
-          FOR SHARE
-        `;
+        const scoringTeamId = type === "goal_home" ? match.home_team_id : match.away_team_id;
+        const [team] = await txSql`SELECT id FROM teams WHERE id = ${scoringTeamId} FOR SHARE`;
         if (!team) {
-          return Response.json({ error: "No active scoring team is assigned to this slot" }, { status: 409 });
+          return Response.json({ error: "The match scoring team identity is missing" }, { status: 409 });
         }
 
         if (playerId != null) {
@@ -569,6 +596,9 @@ export async function POST(request) {
         if (!RESULT_OVERRIDE_STATUSES.includes(oldMatch.status)) {
           return Response.json({ error: `Cannot correct a match with status '${oldMatch.status}'` }, { status: 409 });
         }
+        if (newStatus === "scheduled" && league.status !== "active") {
+          return Response.json({ error: "A completed or inactive league cannot be reopened through a match override" }, { status: 409 });
+        }
 
         if (oldMatch.status === "final" && newStatus === "scheduled") {
           const schedule = {
@@ -682,9 +712,14 @@ export async function POST(request) {
           && match.home_score === homeScore && match.away_score === awayScore) {
           return Response.json({ success: true, idempotent: true });
         }
+        if (league.status !== "active") {
+          return Response.json({ error: "Forfeits can only be recorded in an active league" }, { status: 409 });
+        }
         if (match.status !== "scheduled") {
           return Response.json({ error: `Cannot record a forfeit for a fixture with status '${match.status}'` }, { status: 409 });
         }
+        const participantError = await validateActiveMatchParticipants(txSql, match);
+        if (participantError) return Response.json({ error: participantError }, { status: 409 });
         if (!match.home_slot_id || !match.away_slot_id || match.home_slot_id === match.away_slot_id) {
           return Response.json({ error: "Match participants are not valid for a forfeit" }, { status: 409 });
         }
@@ -754,10 +789,8 @@ export async function GET(request) {
              l.match_duration_minutes,
              ref.name as referee_name
       FROM matches m
-      LEFT JOIN league_slots lsh ON m.home_slot_id = lsh.id
-      LEFT JOIN teams th ON th.slot_id = lsh.id AND th.status = 'active'
-      LEFT JOIN league_slots lsa ON m.away_slot_id = lsa.id
-      LEFT JOIN teams ta ON ta.slot_id = lsa.id AND ta.status = 'active'
+      JOIN teams th ON th.id = m.home_team_id
+      JOIN teams ta ON ta.id = m.away_team_id
       LEFT JOIN auth_users ref ON ref.id = m.referee_id
       JOIN leagues l ON m.league_id = l.id
       WHERE m.id = ${matchId}
@@ -780,10 +813,8 @@ export async function GET(request) {
              ta.name as away_team_name,
              ref.name as referee_name
       FROM matches m
-      LEFT JOIN league_slots lsh ON m.home_slot_id = lsh.id
-      LEFT JOIN teams th ON th.slot_id = lsh.id AND th.status = 'active'
-      LEFT JOIN league_slots lsa ON m.away_slot_id = lsa.id
-      LEFT JOIN teams ta ON ta.slot_id = lsa.id AND ta.status = 'active'
+      JOIN teams th ON th.id = m.home_team_id
+      JOIN teams ta ON ta.id = m.away_team_id
       LEFT JOIN auth_users ref ON ref.id = m.referee_id
       WHERE m.league_id = ${leagueId}
       ORDER BY m.round_number, m.match_date, m.time_slot
@@ -802,10 +833,8 @@ export async function GET(request) {
              ref.name as referee_name
       FROM matches m
       JOIN leagues l ON m.league_id = l.id
-      LEFT JOIN league_slots lsh ON m.home_slot_id = lsh.id
-      LEFT JOIN teams th ON th.slot_id = lsh.id AND th.status = 'active'
-      LEFT JOIN league_slots lsa ON m.away_slot_id = lsa.id
-      LEFT JOIN teams ta ON ta.slot_id = lsa.id AND ta.status = 'active'
+      JOIN teams th ON th.id = m.home_team_id
+      JOIN teams ta ON ta.id = m.away_team_id
       LEFT JOIN auth_users ref ON ref.id = m.referee_id
       WHERE nova_planned_date(m.match_date) = ${date}::date
       AND (${venueId}::uuid IS NULL OR l.venue_id = ${venueId}::uuid)

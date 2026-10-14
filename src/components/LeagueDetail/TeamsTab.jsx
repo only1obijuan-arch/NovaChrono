@@ -28,8 +28,11 @@ export function TeamsTab({ teams, onManageTeam, onAddTeam }) {
             ) : (
               teams.map((team, idx) => (
                 <tr key={team.id}>
-                  <td><span className="ld-table-slot">#{idx + 1}</span></td>
-                  <td><span className="ld-table-name">{team.name}</span></td>
+                  <td><span className="ld-table-slot">#{team.slot_number ?? idx + 1}</span></td>
+                  <td>
+                    <span className="ld-table-name">{team.name}</span>
+                    {team.status === "inactive" && <span style={{ marginLeft: 8, color: "#FFB347", fontSize: 10 }}>WITHDRAWN</span>}
+                  </td>
                   <td>{team.captain_name || "—"}</td>
                   <td>{new Date(team.created_at).toLocaleDateString()}</td>
                   <td style={{ textAlign: "right" }}>

@@ -1,5 +1,10 @@
 "use client";
 import { isValidJoinCode } from "@/utils/join-code";
+import {
+  findTeamPosition,
+  findTeamStanding,
+  scorerBelongsToTeam,
+} from "@/utils/team-identity";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -55,7 +60,7 @@ export default function TeamDashboard({ params, searchParams }) {
   });
 
   const liveMatch = matches.find(
-    (m) => (m.home_slot_id === team?.slot_id || m.away_slot_id === team?.slot_id) && m.status === "live"
+    (m) => (m.home_team_id === team?.id || m.away_team_id === team?.id) && m.status === "live"
   );
 
   const { data: liveMatchData } = useQuery({
@@ -183,23 +188,18 @@ export default function TeamDashboard({ params, searchParams }) {
     );
 
   const teamMatches = matches.filter(
-    (m) => m.home_slot_id === team.slot_id || m.away_slot_id === team.slot_id,
+    (m) => m.home_team_id === team.id || m.away_team_id === team.id,
   );
   const upcomingMatches = teamMatches.filter((m) => m.status === "scheduled");
   const completedMatches = teamMatches.filter((m) => m.status === "final");
   const nextMatch = upcomingMatches[0];
 
   const standings = stats?.standings || [];
-  const leaguePosition =
-    standings.findIndex((s) => s.slot_id === team.slot_id) + 1;
-  const teamStanding = standings.find((s) => s.slot_id === team.slot_id);
+  const leaguePosition = findTeamPosition(standings, team.id);
+  const teamStanding = findTeamStanding(standings, team.id);
 
   const teamScorers = (stats?.topScorers || [])
-    .filter(
-      (s) =>
-        s.team_slot_id === team.slot_id ||
-        players.some((p) => p.name === s.player_name),
-    )
+    .filter((scorer) => scorerBelongsToTeam(scorer, team.id))
     .slice(0, 5);
 
   return (
@@ -471,7 +471,7 @@ export default function TeamDashboard({ params, searchParams }) {
                 <div className="td-card-body">
                   <div className="td-fixture-list">
                     {teamMatches.map((match) => {
-                      const isHome = match.home_slot_id === team.slot_id;
+                      const isHome = match.home_team_id === team.id;
                       const opponent = isHome
                         ? match.away_team_name
                         : match.home_team_name;
@@ -557,7 +557,7 @@ export default function TeamDashboard({ params, searchParams }) {
                     </p>
                     <p className="td-next-opponent">
                       vs{" "}
-                      {nextMatch.home_slot_id === team.slot_id
+                      {nextMatch.home_team_id === team.id
                         ? nextMatch.away_team_name || "TBD"
                         : nextMatch.home_team_name || "TBD"}
                     </p>
@@ -566,7 +566,7 @@ export default function TeamDashboard({ params, searchParams }) {
                         FIELD {nextMatch.field_number}
                       </span>
                       <span className="td-next-meta-item">
-                        {nextMatch.home_slot_id === team.slot_id
+                        {nextMatch.home_team_id === team.id
                           ? "HOME"
                           : "AWAY"}
                       </span>

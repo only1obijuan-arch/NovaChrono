@@ -273,7 +273,7 @@ export default function PublicLeagueView({ params }) {
                 </thead>
                 <tbody>
                   {stats.standings.map((team, idx) => (
-                    <tr key={team.slot_id} className={idx < 3 ? "top3" : ""}>
+                    <tr key={team.team_id} className={idx < 3 ? "top3" : ""}>
                       <td>
                         <span
                           className={`plv-pos${

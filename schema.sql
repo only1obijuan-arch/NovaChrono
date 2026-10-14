@@ -188,6 +188,10 @@ CREATE TABLE teams (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX teams_one_active_per_slot
+  ON teams (slot_id)
+  WHERE status = 'active' AND slot_id IS NOT NULL;
+
 CREATE TABLE players (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   team_id        UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
@@ -208,6 +212,8 @@ CREATE TABLE matches (
   field_number      INT     NOT NULL,
   home_slot_id      UUID    REFERENCES league_slots(id),
   away_slot_id      UUID    REFERENCES league_slots(id),
+  home_team_id      UUID    NOT NULL REFERENCES teams(id),
+  away_team_id      UUID    NOT NULL REFERENCES teams(id),
   home_score        INT     NOT NULL DEFAULT 0,
   away_score        INT     NOT NULL DEFAULT 0,
   status            TEXT    NOT NULL DEFAULT 'scheduled'
@@ -217,11 +223,67 @@ CREATE TABLE matches (
   referee_id        UUID    REFERENCES auth_users(id),     -- NULL until assigned
   start_time        TIMESTAMPTZ,                           -- set on START_MATCH
   half2_start_time  TIMESTAMPTZ,                           -- set on START_SECOND_HALF
-  end_time          TIMESTAMPTZ                            -- set on END_MATCH
+  end_time          TIMESTAMPTZ,                           -- set on END_MATCH
+  CONSTRAINT matches_distinct_team_ids_check CHECK (home_team_id <> away_team_id)
 );
 
 CREATE INDEX idx_matches_league_id  ON matches (league_id);
 CREATE INDEX idx_matches_match_date ON matches (match_date);
+CREATE INDEX matches_home_team_lookup ON matches (home_team_id);
+CREATE INDEX matches_away_team_lookup ON matches (away_team_id);
+
+CREATE OR REPLACE FUNCTION nova_validate_match_team_identity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM teams t
+    WHERE t.id = NEW.home_team_id
+      AND t.league_id = NEW.league_id
+      AND t.slot_id = NEW.home_slot_id
+  ) THEN
+    RAISE EXCEPTION 'home team identity must belong to the match league and home slot';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM teams t
+    WHERE t.id = NEW.away_team_id
+      AND t.league_id = NEW.league_id
+      AND t.slot_id = NEW.away_slot_id
+  ) THEN
+    RAISE EXCEPTION 'away team identity must belong to the match league and away slot';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+CREATE TRIGGER matches_team_identity_guard
+BEFORE INSERT OR UPDATE OF league_id, home_slot_id, away_slot_id, home_team_id, away_team_id
+ON matches
+FOR EACH ROW
+EXECUTE FUNCTION nova_validate_match_team_identity();
+
+CREATE OR REPLACE FUNCTION nova_preserve_referenced_team_identity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF (NEW.league_id, NEW.slot_id) IS DISTINCT FROM (OLD.league_id, OLD.slot_id)
+     AND EXISTS (
+       SELECT 1 FROM matches m
+       WHERE m.home_team_id = OLD.id OR m.away_team_id = OLD.id
+     ) THEN
+    RAISE EXCEPTION 'a team referenced by a fixture cannot move league or slot';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+CREATE TRIGGER teams_historical_identity_guard
+BEFORE UPDATE OF league_id, slot_id
+ON teams
+FOR EACH ROW
+EXECUTE FUNCTION nova_preserve_referenced_team_identity();
 
 CREATE OR REPLACE FUNCTION nova_planned_date(value DATE)
 RETURNS DATE

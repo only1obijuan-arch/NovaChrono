@@ -40,7 +40,7 @@ export default function LeagueDetail({ params }) {
   const [showManageTeam, setShowManageTeam] = useState(false);
   const [showNewSeasonModal, setShowNewSeasonModal] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState(null);
-  const [teamForm, setTeamForm] = useState({ name: "" });
+  const [teamForm, setTeamForm] = useState({ name: "", reason: "", transferFutureFixtures: true });
   const [newSeasonName, setNewSeasonName] = useState("");
   const [newSeasonStartDate, setNewSeasonStartDate] = useState("");
   const [fixtureOperation, setFixtureOperation] = useState(null);
@@ -200,19 +200,42 @@ export default function LeagueDetail({ params }) {
     onError: (err) => toast.error(err.message),
   });
 
-  const deleteTeamMutation = useMutation({
-    mutationFn: async (teamId) => {
+  const withdrawTeamMutation = useMutation({
+    mutationFn: async ({ teamId, reason }) => {
       const res = await fetch("/api/teams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "DELETE_TEAM", teamId }),
+        body: JSON.stringify({ action: "WITHDRAW_TEAM", teamId, reason, policy: "VACATE_FOR_REPLACEMENT" }),
       });
-      if (!res.ok) throw new Error("Failed to delete team");
-      return res.json();
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof payload.error === "string" ? payload.error : "Failed to withdraw team");
+      return payload;
     },
     onSuccess: () => {
-      toast.success("Team removed!");
+      toast.success("Team withdrawn; historical results were preserved");
       queryClient.invalidateQueries({ queryKey: ["league-teams", id] });
+      queryClient.invalidateQueries({ queryKey: ["league-matches", id] });
+      queryClient.invalidateQueries({ queryKey: ["league-stats", id] });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const replaceTeamMutation = useMutation({
+    mutationFn: async ({ priorTeamId, name, reason, transferFutureFixtures }) => {
+      const res = await fetch("/api/teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "REPLACE_TEAM", priorTeamId, teamName: name, reason, transferFutureFixtures }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof payload.error === "string" ? payload.error : "Failed to replace team");
+      return payload;
+    },
+    onSuccess: () => {
+      toast.success("Replacement team created");
+      queryClient.invalidateQueries({ queryKey: ["league-teams", id] });
+      queryClient.invalidateQueries({ queryKey: ["league-matches", id] });
+      queryClient.invalidateQueries({ queryKey: ["league-stats", id] });
     },
     onError: (err) => toast.error(err.message),
   });
@@ -269,7 +292,7 @@ export default function LeagueDetail({ params }) {
       {
         onSuccess: () => {
           setShowAddTeam(false);
-          setTeamForm({ name: "" });
+          setTeamForm({ name: "", reason: "", transferFutureFixtures: true });
         },
       },
     );
@@ -282,15 +305,24 @@ export default function LeagueDetail({ params }) {
     );
   };
 
-  const handleDeleteTeam = () => {
-    deleteTeamMutation.mutate(selectedTeam.id, {
+  const handleWithdrawTeam = () => {
+    withdrawTeamMutation.mutate({ teamId: selectedTeam.id, reason: teamForm.reason }, {
       onSuccess: () => setShowManageTeam(false),
     });
   };
 
+  const handleReplaceTeam = () => {
+    replaceTeamMutation.mutate({
+      priorTeamId: selectedTeam.id,
+      name: teamForm.name,
+      reason: teamForm.reason,
+      transferFutureFixtures: teamForm.transferFutureFixtures,
+    }, { onSuccess: () => setShowManageTeam(false) });
+  };
+
   const handleManageTeam = (team) => {
     setSelectedTeam(team);
-    setTeamForm({ name: team.name });
+    setTeamForm({ name: team.status === "inactive" ? "" : team.name, reason: "", transferFutureFixtures: true });
     setShowManageTeam(true);
   };
 
@@ -319,8 +351,14 @@ export default function LeagueDetail({ params }) {
 
   if (leagueLoading || !league) return <LoadingState />;
 
+  const activeTeams = teams.filter((team) => team.status === "active");
   const champion = stats?.standings?.[0];
   const maxRound = matches.length > 0 ? Math.max(...matches.map((m) => m.round_number)) : 0;
+  const selectedTeamFutureFixtures = selectedTeam
+    ? matches.filter((match) =>
+        ["scheduled", "postponed"].includes(match.status)
+        && (match.home_team_id === selectedTeam.id || match.away_team_id === selectedTeam.id)).length
+    : 0;
 
   return (
     <>
@@ -383,12 +421,12 @@ export default function LeagueDetail({ params }) {
           onNewSeason={() => setShowNewSeasonModal(true)}
           onCancelLeague={() => cancelLeagueMutation.mutate()}
           generateFixturesPending={generateFixturesMutation.isPending}
-          teamsCount={teams.length}
+          teamsCount={activeTeams.length}
         />
 
         <div className="ld-inner">
           {activeTab === "overview" && (
-            <OverviewTab league={league} teams={teams} matches={matches} />
+            <OverviewTab league={league} teams={activeTeams} matches={matches} />
           )}
 
           {activeTab === "teams" && (
@@ -443,12 +481,15 @@ export default function LeagueDetail({ params }) {
         show={showManageTeam}
         onClose={() => setShowManageTeam(false)}
         onUpdate={handleUpdateTeam}
-        onDelete={handleDeleteTeam}
+        onWithdraw={handleWithdrawTeam}
+        onReplace={handleReplaceTeam}
         selectedTeam={selectedTeam}
+        futureFixtureImpact={selectedTeamFutureFixtures}
         teamForm={teamForm}
         setTeamForm={setTeamForm}
         updatePending={updateTeamMutation.isPending}
-        deletePending={deleteTeamMutation.isPending}
+        withdrawPending={withdrawTeamMutation.isPending}
+        replacePending={replaceTeamMutation.isPending}
       />
 
       <NewSeasonModal

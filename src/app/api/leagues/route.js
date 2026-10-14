@@ -3,6 +3,7 @@ import sql, { withTransaction } from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
 import { findFixtureConflict, fixtureScheduleKey, lockFixtureSchedule, setCanonicalScheduleTimeZone } from "@/app/api/matches/scheduling";
 import { addDaysToLocalDate, addMonthsToLocalDate, localDateString } from "@/utils/scheduling";
+import { recomputeLeagueStandings } from "@/app/api/matches/standings";
 import { z } from "zod";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -134,35 +135,73 @@ export async function POST(request) {
 
     if (action === "COMPLETE_SEASON") {
       const { leagueId } = data;
-      const [league] = await sql`SELECT venue_id FROM leagues WHERE id = ${leagueId}`;
-      if (!league || !canAccessVenue(user, league.venue_id)) {
-        return Response.json({ error: "Forbidden" }, { status: 403 });
-      }
-      await sql`UPDATE leagues SET status = 'completed' WHERE id = ${leagueId}`;
-      return Response.json({ success: true });
+      const knownMatches = await sql`SELECT id FROM matches WHERE league_id = ${leagueId} ORDER BY id`;
+      const knownIds = knownMatches.map((match) => match.id);
+      return await withTransaction(async (txSql) => {
+        if (knownIds.length > 0) {
+          await txSql`
+            SELECT id FROM matches WHERE id = ANY(${knownIds}::uuid[]) ORDER BY id FOR UPDATE
+          `;
+        }
+        const [league] = await txSql`
+          SELECT id, venue_id, status FROM leagues WHERE id = ${leagueId} FOR UPDATE
+        `;
+        if (!league) return Response.json({ error: "League not found" }, { status: 404 });
+        const currentMatches = await txSql`SELECT id, status FROM matches WHERE league_id = ${leagueId} ORDER BY id`;
+        if (currentMatches.length !== knownIds.length || currentMatches.some((match, index) => match.id !== knownIds[index])) {
+          return Response.json({ error: "League fixtures changed concurrently; retry completion" }, { status: 409 });
+        }
+        const [actor] = await txSql`
+          SELECT id, role, venue_id FROM auth_users WHERE id = ${user.id} FOR SHARE
+        `;
+        if (!actor || !["venue_admin", "super_admin"].includes(actor.role)) {
+          return Response.json({ error: "Insufficient permissions" }, { status: 403 });
+        }
+        if (!canAccessVenue(actor, league.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
+        const unresolved = currentMatches.filter((match) => ["scheduled", "live", "postponed"].includes(match.status));
+        if (league.status === "completed") {
+          if (unresolved.length > 0) {
+            return Response.json({ error: "A completed league contains unresolved fixtures", unresolvedMatchIds: unresolved.map((match) => match.id) }, { status: 409 });
+          }
+          return Response.json({ success: true, idempotent: true });
+        }
+        if (league.status !== "active") {
+          return Response.json({ error: `Cannot complete a league with status '${league.status}'` }, { status: 409 });
+        }
+        if (unresolved.length > 0) {
+          return Response.json({ error: "All scheduled, live, and postponed fixtures must be resolved before completion", unresolvedMatchIds: unresolved.map((match) => match.id) }, { status: 409 });
+        }
+        await recomputeLeagueStandings(txSql, leagueId);
+        await txSql`UPDATE leagues SET status = 'completed' WHERE id = ${leagueId}`;
+        await txSql`
+          INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value)
+          VALUES (${actor.id}, ${leagueId}, 'COMPLETE_SEASON', ${JSON.stringify({ status: league.status })}, ${JSON.stringify({ status: "completed" })})
+        `;
+        return Response.json({ success: true, idempotent: false });
+      });
     }
 
     if (action === "CREATE_NEW_SEASON") {
       const { parentLeagueId, seasonName, seasonStartDate } = data;
 
-      const [parentLeague] =
-        await sql`SELECT * FROM leagues WHERE id = ${parentLeagueId}`;
-      if (!parentLeague) {
-        throw new Error("Parent league not found");
-      }
-      if (!canAccessVenue(user, parentLeague.venue_id)) {
-        return Response.json({ error: "Forbidden" }, { status: 403 });
-      }
-
-      let seasonEndDate = null;
-      if (seasonStartDate) {
-        seasonEndDate = addMonthsToLocalDate(seasonStartDate, 3);
-      }
-
-      const joinCode = randomBytes(4).toString("hex").toUpperCase();
-
       const newLeague = await withTransaction(async (txSql) => {
         await setCanonicalScheduleTimeZone(txSql);
+        const [parentLeague] = await txSql`SELECT * FROM leagues WHERE id = ${parentLeagueId} FOR UPDATE`;
+        if (!parentLeague) return { response: Response.json({ error: "Parent league not found" }, { status: 404 }) };
+        const [actor] = await txSql`
+          SELECT id, role, venue_id FROM auth_users WHERE id = ${user.id} FOR SHARE
+        `;
+        if (!actor || !["venue_admin", "super_admin"].includes(actor.role)) {
+          return { response: Response.json({ error: "Insufficient permissions" }, { status: 403 }) };
+        }
+        if (!canAccessVenue(actor, parentLeague.venue_id)) {
+          return { response: Response.json({ error: "Forbidden" }, { status: 403 }) };
+        }
+        if (parentLeague.status !== "completed") {
+          return { response: Response.json({ error: "The parent season must be completed first" }, { status: 409 }) };
+        }
+        const seasonEndDate = seasonStartDate ? addMonthsToLocalDate(seasonStartDate, 3) : null;
+        const joinCode = randomBytes(4).toString("hex").toUpperCase();
         const [league] = await txSql`
           INSERT INTO leagues (
             venue_id, name, day_of_week, season_start_date, season_end_date,
@@ -192,10 +231,10 @@ export async function POST(request) {
           INSERT INTO league_slots (league_id, slot_number)
           SELECT ${league.id}, unnest(${slotNumbers}::int[])
         `;
-        return league;
+        return { league };
       });
-
-      return Response.json(newLeague);
+      if (newLeague.response) return newLeague.response;
+      return Response.json(newLeague.league);
     }
 
     if (action === "GENERATE_FIXTURES") {
@@ -237,7 +276,7 @@ export async function POST(request) {
         }
 
         const occupiedSlots = await txSql`
-          SELECT ls.id, ls.slot_number
+          SELECT ls.id, ls.slot_number, t.id AS team_id
           FROM league_slots ls
           INNER JOIN teams t ON t.slot_id = ls.id AND t.status = 'active'
           WHERE ls.league_id = ${leagueId}
@@ -250,21 +289,21 @@ export async function POST(request) {
         }
 
         const rounds = numSlots % 2 === 0 ? numSlots - 1 : numSlots;
-        const slotIds = occupiedSlots.map((slot) => slot.id);
-        if (numSlots % 2 !== 0) slotIds.push(null);
-        const matchesPerRound = slotIds.length / 2;
+        const participantSlots = occupiedSlots.map((slot) => ({ slotId: slot.id, teamId: slot.team_id }));
+        if (numSlots % 2 !== 0) participantSlots.push(null);
+        const matchesPerRound = participantSlots.length / 2;
         const fixtures = [];
-        const currentSlotIds = [...slotIds];
+        const currentParticipants = [...participantSlots];
         for (let round = 0; round < rounds; round += 1) {
           const roundMatches = [];
           for (let matchIndex = 0; matchIndex < matchesPerRound; matchIndex += 1) {
-            const home = currentSlotIds[matchIndex];
-            const away = currentSlotIds[currentSlotIds.length - 1 - matchIndex];
+            const home = currentParticipants[matchIndex];
+            const away = currentParticipants[currentParticipants.length - 1 - matchIndex];
             if (home && away) roundMatches.push({ home, away });
           }
           fixtures.push(roundMatches);
-          const last = currentSlotIds.pop();
-          currentSlotIds.splice(1, 0, last);
+          const last = currentParticipants.pop();
+          currentParticipants.splice(1, 0, last);
         }
 
         const slotFieldCombos = [];
@@ -292,8 +331,10 @@ export async function POST(request) {
             matchDate: roundDate,
             timeSlot: slotFieldCombos[index].timeSlot,
             fieldNumber: slotFieldCombos[index].fieldNumber,
-            homeSlotId: fixture.home,
-            awaySlotId: fixture.away,
+            homeSlotId: fixture.home.slotId,
+            awaySlotId: fixture.away.slotId,
+            homeTeamId: fixture.home.teamId,
+            awayTeamId: fixture.away.teamId,
             venueId: league.venue_id,
           }));
         }
@@ -319,11 +360,12 @@ export async function POST(request) {
           await txSql`
             INSERT INTO matches (
               league_id, round_number, match_date, time_slot, field_number,
-              home_slot_id, away_slot_id
+              home_slot_id, away_slot_id, home_team_id, away_team_id
             )
             VALUES (
               ${leagueId}, ${fixture.roundNumber}, ${fixture.matchDate}::date,
-              ${fixture.timeSlot}, ${fixture.fieldNumber}, ${fixture.homeSlotId}, ${fixture.awaySlotId}
+              ${fixture.timeSlot}, ${fixture.fieldNumber}, ${fixture.homeSlotId}, ${fixture.awaySlotId},
+              ${fixture.homeTeamId}, ${fixture.awayTeamId}
             )
           `;
         }

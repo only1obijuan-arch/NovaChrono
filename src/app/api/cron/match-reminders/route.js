@@ -61,10 +61,8 @@ async function handleMorningReminders(appUrl) {
     FROM matches m
     JOIN leagues l ON m.league_id = l.id
     JOIN venues v ON l.venue_id = v.id
-    LEFT JOIN league_slots home_slot ON m.home_slot_id = home_slot.id
-    LEFT JOIN league_slots away_slot ON m.away_slot_id = away_slot.id
-    LEFT JOIN teams home_team ON home_slot.id = home_team.slot_id AND home_team.status = 'active'
-    LEFT JOIN teams away_team ON away_slot.id = away_team.slot_id AND away_team.status = 'active'
+    JOIN teams home_team ON home_team.id = m.home_team_id
+    JOIN teams away_team ON away_team.id = m.away_team_id
     LEFT JOIN auth_users home_captain ON home_team.captain_user_id = home_captain.id
     LEFT JOIN auth_users away_captain ON away_team.captain_user_id = away_captain.id
     WHERE m.status = 'scheduled'
@@ -300,10 +298,8 @@ async function handleMiddayCheck(appUrl) {
       away_team.id as away_team_id
     FROM matches m
     JOIN leagues l ON m.league_id = l.id
-    LEFT JOIN league_slots home_slot ON m.home_slot_id = home_slot.id
-    LEFT JOIN league_slots away_slot ON m.away_slot_id = away_slot.id
-    LEFT JOIN teams home_team ON home_slot.id = home_team.slot_id AND home_team.status = 'active'
-    LEFT JOIN teams away_team ON away_slot.id = away_team.slot_id AND away_team.status = 'active'
+    JOIN teams home_team ON home_team.id = m.home_team_id
+    JOIN teams away_team ON away_team.id = m.away_team_id
     WHERE m.status = 'scheduled'
     AND m.match_date = CURRENT_DATE
   `;
