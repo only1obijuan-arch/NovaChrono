@@ -76,8 +76,76 @@ describe("Gate 4B lifecycle concurrency and historical identity", () => {
     transferFutureFixtures: true,
     reason: "Gate 4B integration replacement",
   }, bearer);
+  const completeValidSeason = async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'cancelled' WHERE league_id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'final', home_score = 2, away_score = 0 WHERE id = $1", [IDS.match]);
+    const response = await postLeague({ action: "COMPLETE_SEASON", leagueId: IDS.league });
+    expect(response.status).toBe(200);
+  };
+
+  it("enforces the Gate 4B foreign keys, triggers, distinct-team check, and active-slot index", async () => {
+    const constraints = (await pool.query(`
+      SELECT conname, contype, convalidated
+      FROM pg_constraint
+      WHERE conrelid = 'matches'::regclass
+        AND conname IN ('matches_home_team_id_fkey', 'matches_away_team_id_fkey', 'matches_distinct_team_ids_check')
+      ORDER BY conname
+    `)).rows;
+    expect(constraints).toEqual([
+      { conname: "matches_away_team_id_fkey", contype: "f", convalidated: true },
+      { conname: "matches_distinct_team_ids_check", contype: "c", convalidated: true },
+      { conname: "matches_home_team_id_fkey", contype: "f", convalidated: true },
+    ]);
+
+    const triggers = (await pool.query(`
+      SELECT tgname
+      FROM pg_trigger
+      WHERE tgrelid IN ('matches'::regclass, 'teams'::regclass)
+        AND NOT tgisinternal
+        AND tgname IN ('matches_team_identity_guard', 'teams_historical_identity_guard')
+      ORDER BY tgname
+    `)).rows.map((row) => row.tgname);
+    expect(triggers).toEqual(["matches_team_identity_guard", "teams_historical_identity_guard"]);
+
+    const [activeSlotIndex] = (await pool.query(`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = 'public' AND indexname = 'teams_one_active_per_slot'
+    `)).rows;
+    expect(activeSlotIndex.indexdef).toContain("UNIQUE INDEX");
+    expect(activeSlotIndex.indexdef).toContain("WHERE ((status = 'active'::text) AND (slot_id IS NOT NULL))");
+
+    await expect(pool.query(
+      "INSERT INTO teams (league_id, slot_id, name, status) VALUES ($1, $2, 'Duplicate occupant', 'active')",
+      [IDS.league, IDS.slotA],
+    )).rejects.toMatchObject({ code: "23505" });
+    await expect(pool.query(
+      "UPDATE teams SET league_id = $1, slot_id = $2 WHERE id = $3",
+      [IDS.leagueB, IDS.slotC, IDS.team],
+    )).rejects.toMatchObject({ code: "P0001" });
+    await expect(pool.query(
+      "UPDATE matches SET home_team_id = $1 WHERE id = $2",
+      [IDS.teamB, IDS.match],
+    )).rejects.toMatchObject({ code: "P0001" });
+
+    await pool.query("ALTER TABLE matches DISABLE TRIGGER matches_team_identity_guard");
+    try {
+      await expect(pool.query(
+        "UPDATE matches SET home_team_id = $1 WHERE id = $2",
+        ["60000000-0000-4000-8000-000000000099", IDS.match],
+      )).rejects.toMatchObject({ code: "23503" });
+      await expect(pool.query(
+        "UPDATE matches SET away_team_id = home_team_id WHERE id = $1",
+        [IDS.match],
+      )).rejects.toMatchObject({ code: "23514" });
+    } finally {
+      await pool.query("ALTER TABLE matches ENABLE TRIGGER matches_team_identity_guard");
+    }
+  });
 
   it("A: serializes two JOIN_LEAGUE calls claiming the final free slot", async () => {
+    await pool.query("UPDATE leagues SET status = 'registration' WHERE id = $1", [IDS.league]);
     await pool.query("UPDATE teams SET status = 'inactive' WHERE id = $1", [IDS.team]);
     authState.actorId = null;
     const captainToken = await issueActorToken(IDS.captain, "join-final-slot");
@@ -102,6 +170,7 @@ describe("Gate 4B lifecycle concurrency and historical identity", () => {
   }, 20_000);
 
   it("B: serializes JOIN_LEAGUE against ADD_TEAM for the final free slot", async () => {
+    await pool.query("UPDATE leagues SET status = 'registration' WHERE id = $1", [IDS.league]);
     await pool.query("UPDATE teams SET status = 'inactive' WHERE id = $1", [IDS.team]);
     authState.actorId = null;
     const captainToken = await issueActorToken(IDS.captain, "join-v-add-captain");
@@ -348,6 +417,10 @@ describe("Gate 4B lifecycle concurrency and historical identity", () => {
     for (let index = 0; index < scores.length; index += 1) {
       await pool.query("UPDATE matches SET status = 'final', home_score = $2, away_score = $3 WHERE id = $1", [[IDS.match, IDS.protectedMatch, IDS.match2, IDS.match3, IDS.match4][index], scores[index][0], scores[index][1]]);
     }
+    await pool.query(
+      "INSERT INTO match_events (match_id, type, player_id, team_id) VALUES ($1, 'goal_home', $2, $3)",
+      [IDS.match, IDS.playerA, IDS.team],
+    );
     const futureScheduled = "70000000-0000-4000-8000-000000000090";
     const futurePostponed = "70000000-0000-4000-8000-000000000091";
     await pool.query(`
@@ -373,14 +446,18 @@ describe("Gate 4B lifecycle concurrency and historical identity", () => {
     const stats = await (await getStats(request(`/api/stats?leagueId=${IDS.league}`))).json();
     expect(stats.standings.find((row) => row.team_id === IDS.team).form_last5).toEqual(["L", "W", "L", "D", "W"]);
     expect(stats.standings.find((row) => row.team_id === replacementTeam.id).form_last5).toEqual([]);
+    expect(stats.topScorers.find((row) => row.player_name === "Home Player")).toMatchObject({
+      team_id: IDS.team,
+      team_slot_id: IDS.slotA,
+    });
     const fixtureHistory = await (await getMatches(request(`/api/matches?leagueId=${IDS.league}`))).json();
     expect(fixtureHistory.filter((match) => match.status === "final").every((match) => match.home_team_name === "Nova United")).toBe(true);
     expect(fixtureHistory.find((match) => match.id === futureScheduled).home_team_name).toBe("Nova Successor");
 
-    expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: futureScheduled, homeScore: 1, awayScore: 0, status: "final", reason: "replacement oracle" })).status).toBe(200);
+    expect((await postMatch({ action: "ADMIN_OVERRIDE", matchId: futureScheduled, homeScore: 1, awayScore: 1, status: "final", reason: "replacement oracle" })).status).toBe(200);
     const finalRows = (await pool.query("SELECT team_id, played, points FROM standings WHERE league_id = $1", [IDS.league])).rows;
     expect(finalRows.find((row) => row.team_id === IDS.team)).toMatchObject({ played: 5, points: 7 });
-    expect(finalRows.find((row) => row.team_id === replacementTeam.id)).toMatchObject({ played: 1, points: 3 });
+    expect(finalRows.find((row) => row.team_id === replacementTeam.id)).toMatchObject({ played: 1, points: 1 });
   });
 
   it.each(["scheduled", "live", "postponed"])("rejects season completion while a %s fixture remains", async (status) => {
@@ -402,6 +479,240 @@ describe("Gate 4B lifecycle concurrency and historical identity", () => {
     expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'COMPLETE_SEASON' AND target_id = $1", [IDS.league])).rows[0].count)).toBe(1);
     expect((await pool.query("SELECT played, points FROM standings WHERE league_id = $1 AND team_id = $2", [IDS.league, IDS.team])).rows[0]).toMatchObject({ played: 1, points: 3 });
   });
+
+  it("blocks final-to-scheduled override after season completion", async () => {
+    await completeValidSeason();
+    const response = await postMatch({
+      action: "ADMIN_OVERRIDE",
+      matchId: IDS.match,
+      homeScore: 2,
+      awayScore: 0,
+      status: "scheduled",
+      reason: "Attempted completed-season reopen",
+    });
+    expect(response.status).toBe(409);
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match])).rows[0].status).toBe("final");
+    expect((await pool.query("SELECT status FROM leagues WHERE id = $1", [IDS.league])).rows[0].status).toBe("completed");
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'ADMIN_OVERRIDE' AND target_id = $1", [IDS.match])).rows[0].count)).toBe(0);
+  });
+
+  it("serializes completion ahead of a queued final-to-scheduled override", async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'cancelled' WHERE league_id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'final', home_score = 2, away_score = 0 WHERE id = $1", [IDS.match]);
+    authState.actorId = null;
+    const completeToken = await issueActorToken(IDS.super, "complete-before-reopen");
+    const overrideToken = await issueActorToken(IDS.venueAdminA, "reopen-after-complete");
+    const blocker = await pool.connect();
+    let completion;
+    let override;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match]);
+      completion = postLeagueAs({ action: "COMPLETE_SEASON", leagueId: IDS.league }, completeToken);
+      await waitForLockQueue("WHERE id = ANY", "COMPLETE_SEASON never queued before the reopen attempt");
+      override = postMatchAs({
+        action: "ADMIN_OVERRIDE",
+        matchId: IDS.match,
+        homeScore: 2,
+        awayScore: 0,
+        status: "scheduled",
+        reason: "Queued completed-season reopen",
+      }, overrideToken);
+      await waitForLockQueue("FOR UPDATE OF m", "ADMIN_OVERRIDE never queued behind completion");
+      await blocker.query("COMMIT");
+      expect((await completion).status).toBe(200);
+      expect((await override).status).toBe(409);
+      expect((await pool.query("SELECT l.status AS league_status, m.status AS match_status FROM leagues l JOIN matches m ON m.league_id = l.id WHERE l.id = $1 AND m.id = $2", [IDS.league, IDS.match])).rows[0])
+        .toMatchObject({ league_status: "completed", match_status: "final" });
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (completion) await completion.catch(() => {});
+      if (override) await override.catch(() => {});
+    }
+  }, 20_000);
+
+  it("blocks START_MATCH in a completed league even if a scheduled row already exists", async () => {
+    await completeValidSeason();
+    await pool.query("UPDATE matches SET status = 'scheduled' WHERE id = $1", [IDS.match]);
+    authState.actorId = IDS.referee;
+    const response = await postMatch({ action: "START_MATCH", matchId: IDS.match });
+    expect(response.status).toBe(409);
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match])).rows[0].status).toBe("scheduled");
+    expect(await eventCount(IDS.match, "start_first_half")).toBe(0);
+  });
+
+  it("blocks a new FORFEIT_MATCH result in a completed league", async () => {
+    await completeValidSeason();
+    await pool.query("UPDATE matches SET status = 'scheduled', result_type = 'played', home_score = 0, away_score = 0 WHERE id = $1", [IDS.match]);
+    const response = await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match, winnerSide: "home", reason: "Attempted completed-season forfeit" });
+    expect(response.status).toBe(409);
+    expect((await pool.query("SELECT status, result_type, home_score, away_score FROM matches WHERE id = $1", [IDS.match])).rows[0])
+      .toMatchObject({ status: "scheduled", result_type: "played", home_score: 0, away_score: 0 });
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'FORFEIT_MATCH' AND target_id = $1", [IDS.match])).rows[0].count)).toBe(0);
+  });
+
+  it("serializes completion ahead of a queued new forfeit result", async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'cancelled' WHERE league_id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'final', result_type = 'played', home_score = 2, away_score = 0 WHERE id = $1", [IDS.match]);
+    authState.actorId = null;
+    const completeToken = await issueActorToken(IDS.super, "complete-before-forfeit");
+    const forfeitToken = await issueActorToken(IDS.venueAdminA, "forfeit-after-complete");
+    const blocker = await pool.connect();
+    let completion;
+    let forfeit;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match]);
+      completion = postLeagueAs({ action: "COMPLETE_SEASON", leagueId: IDS.league }, completeToken);
+      await waitForLockQueue("WHERE id = ANY", "COMPLETE_SEASON never queued before the forfeit attempt");
+      forfeit = postMatchAs({ action: "FORFEIT_MATCH", matchId: IDS.match, winnerSide: "away", reason: "Queued completed-season forfeit" }, forfeitToken);
+      await waitForLockQueue("FOR UPDATE OF m", "FORFEIT_MATCH never queued behind completion");
+      await blocker.query("COMMIT");
+      expect((await completion).status).toBe(200);
+      expect((await forfeit).status).toBe(409);
+      expect((await pool.query("SELECT l.status AS league_status, m.status AS match_status, m.result_type FROM leagues l JOIN matches m ON m.league_id = l.id WHERE l.id = $1 AND m.id = $2", [IDS.league, IDS.match])).rows[0])
+        .toMatchObject({ league_status: "completed", match_status: "final", result_type: "played" });
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (completion) await completion.catch(() => {});
+      if (forfeit) await forfeit.catch(() => {});
+    }
+  }, 20_000);
+
+  it("allows final-to-final correction after completion", async () => {
+    await completeValidSeason();
+    const response = await postMatch({
+      action: "ADMIN_OVERRIDE",
+      matchId: IDS.match,
+      homeScore: 1,
+      awayScore: 1,
+      status: "final",
+      reason: "Official correction after completion",
+    });
+    expect(response.status).toBe(200);
+    expect((await pool.query("SELECT status, home_score, away_score FROM matches WHERE id = $1", [IDS.match])).rows[0])
+      .toMatchObject({ status: "final", home_score: 1, away_score: 1 });
+    expect((await pool.query("SELECT status FROM leagues WHERE id = $1", [IDS.league])).rows[0].status).toBe("completed");
+  });
+
+  it("rejects idempotent completion when a completed league contains an unresolved fixture", async () => {
+    await completeValidSeason();
+    await pool.query("UPDATE matches SET status = 'scheduled' WHERE id = $1", [IDS.match]);
+    const response = await postLeague({ action: "COMPLETE_SEASON", leagueId: IDS.league });
+    expect(response.status).toBe(409);
+    expect((await response.json()).unresolvedMatchIds).toEqual([IDS.match]);
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'COMPLETE_SEASON' AND target_id = $1", [IDS.league])).rows[0].count)).toBe(1);
+  });
+
+  it("preserves exact FORFEIT_MATCH idempotency after completion", async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'cancelled' WHERE league_id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'scheduled' WHERE id = $1", [IDS.match]);
+    expect((await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match, winnerSide: "home", reason: "No-show" })).status).toBe(200);
+    expect((await postLeague({ action: "COMPLETE_SEASON", leagueId: IDS.league })).status).toBe(200);
+    const retry = await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match, winnerSide: "home", reason: "Retry" });
+    expect(retry.status).toBe(200);
+    expect((await retry.json()).idempotent).toBe(true);
+    expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'FORFEIT_MATCH' AND target_id = $1", [IDS.match])).rows[0].count)).toBe(1);
+  });
+
+  it("rejects start and forfeit while a withdrawn team still owns the fixture", async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    await pool.query("UPDATE teams SET status = 'inactive' WHERE id = $1", [IDS.team]);
+    authState.actorId = IDS.referee;
+    expect((await postMatch({ action: "START_MATCH", matchId: IDS.match })).status).toBe(409);
+    authState.actorId = IDS.super;
+    expect((await postMatch({ action: "FORFEIT_MATCH", matchId: IDS.match, winnerSide: "away", reason: "Inactive participant" })).status).toBe(409);
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match])).rows[0].status).toBe("scheduled");
+  });
+
+  it("allows start after explicit replacement transfers the fixture to an active team", async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    await pool.query("UPDATE teams SET status = 'inactive' WHERE id = $1", [IDS.team]);
+    const replacementResponse = await replace(IDS.team, "Startable replacement");
+    expect(replacementResponse.status).toBe(200);
+    const replacementTeam = (await replacementResponse.json()).team;
+    expect((await pool.query("SELECT home_team_id FROM matches WHERE id = $1", [IDS.match])).rows[0].home_team_id).toBe(replacementTeam.id);
+    authState.actorId = IDS.referee;
+    expect((await postMatch({ action: "START_MATCH", matchId: IDS.match })).status).toBe(200);
+    expect((await pool.query("SELECT status FROM matches WHERE id = $1", [IDS.match])).rows[0].status).toBe("live");
+  });
+
+  it("WITHDRAW_TEAM rechecks a queued actor before mutation", async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    authState.actorId = null;
+    const token = await issueActorToken(IDS.venueAdminA, "withdraw-actor-recheck");
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match]);
+      queued = withdraw(IDS.team, token);
+      await waitForLockQueue("WHERE id = ANY", "WITHDRAW_TEAM never queued on its lifecycle lock");
+      await pool.query("UPDATE auth_users SET role = 'captain' WHERE id = $1", [IDS.venueAdminA]);
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(403);
+      expect((await pool.query("SELECT status FROM teams WHERE id = $1", [IDS.team])).rows[0].status).toBe("active");
+      expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'WITHDRAW_TEAM' AND target_id = $1", [IDS.team])).rows[0].count)).toBe(0);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  }, 20_000);
+
+  it("REPLACE_TEAM rechecks a queued actor before mutation", async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    await pool.query("UPDATE teams SET status = 'inactive' WHERE id = $1", [IDS.team]);
+    authState.actorId = null;
+    const token = await issueActorToken(IDS.venueAdminA, "replace-actor-recheck");
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match]);
+      queued = replace(IDS.team, "Forbidden replacement", token);
+      await waitForLockQueue("WHERE id = ANY", "REPLACE_TEAM never queued on its lifecycle lock");
+      await pool.query("UPDATE auth_users SET role = 'captain' WHERE id = $1", [IDS.venueAdminA]);
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(403);
+      expect(Number((await pool.query("SELECT count(*) FROM teams WHERE slot_id = $1 AND status = 'active'", [IDS.slotA])).rows[0].count)).toBe(0);
+      expect((await pool.query("SELECT home_team_id FROM matches WHERE id = $1", [IDS.match])).rows[0].home_team_id).toBe(IDS.team);
+      expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'REPLACE_TEAM'", [])).rows[0].count)).toBe(0);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  }, 20_000);
+
+  it("COMPLETE_SEASON rechecks a queued actor before mutation", async () => {
+    await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
+    await pool.query("UPDATE matches SET status = 'cancelled' WHERE league_id = $1", [IDS.league]);
+    authState.actorId = null;
+    const token = await issueActorToken(IDS.venueAdminA, "complete-actor-recheck");
+    const blocker = await pool.connect();
+    let queued;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match]);
+      queued = postLeagueAs({ action: "COMPLETE_SEASON", leagueId: IDS.league }, token);
+      await waitForLockQueue("WHERE id = ANY", "COMPLETE_SEASON never queued on its lifecycle lock");
+      await pool.query("UPDATE auth_users SET role = 'captain' WHERE id = $1", [IDS.venueAdminA]);
+      await blocker.query("COMMIT");
+      expect((await queued).status).toBe(403);
+      expect((await pool.query("SELECT status FROM leagues WHERE id = $1", [IDS.league])).rows[0].status).toBe("active");
+      expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE action_type = 'COMPLETE_SEASON' AND target_id = $1", [IDS.league])).rows[0].count)).toBe(0);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+      if (queued) await queued.catch(() => {});
+    }
+  }, 20_000);
 
   it("requires a completed parent and creates a clean successor season", async () => {
     await pool.query("UPDATE leagues SET status = 'active' WHERE id = $1", [IDS.league]);
@@ -456,8 +767,8 @@ async function seed() {
   await pool.query(`
     INSERT INTO leagues
       (id, venue_id, name, day_of_week, match_format, match_duration_minutes,
-       fields_count, time_slots, max_teams, join_code)
-    VALUES ($1, $2, 'League', 2, '2x20', 40, 1, '["18:30"]', 2, 'G2ROUTE1')
+       fields_count, time_slots, max_teams, join_code, status)
+    VALUES ($1, $2, 'League', 2, '2x20', 40, 1, '["18:30"]', 2, 'G2ROUTE1', 'active')
   `, [IDS.league, IDS.venueA]);
   await pool.query(`
     INSERT INTO leagues
@@ -696,9 +1007,16 @@ async function waitForLockQueue(queryFragment, failureMessage) {
 
 async function setPoolSessionTimeZone(timeZone) {
   pool.options.options = `-c timezone=${timeZone}`;
-  await Promise.all((pool._clients ?? []).map((client) => (
+  const clients = (pool._clients ?? []).filter((client) => (
+    client._connected && !client._ending && !client._ended
+  ));
+  const results = await Promise.allSettled(clients.map((client) => (
     client.query("SELECT set_config('TimeZone', $1, false)", [timeZone])
   )));
+  const unexpectedFailure = results.find((result) => (
+    result.status === "rejected" && result.reason?.message !== "Connection terminated"
+  ));
+  if (unexpectedFailure) throw unexpectedFailure.reason;
 }
 
 async function issueActorToken(actorId, suffix) {

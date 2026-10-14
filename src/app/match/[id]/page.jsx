@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { findTeamPosition } from "@/utils/team-identity";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
@@ -73,8 +74,8 @@ export default function MatchDetailPage({ params }) {
   const isLive = match.status === "live";
 
   const standings = statsData?.standings || [];
-  const homePos = standings.findIndex((s) => s.slot_id === match.home_slot_id) + 1;
-  const awayPos = standings.findIndex((s) => s.slot_id === match.away_slot_id) + 1;
+  const homePos = findTeamPosition(standings, match.home_team_id);
+  const awayPos = findTeamPosition(standings, match.away_team_id);
   const ordinal = (n) => n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
   const posLabel = homePos && awayPos ? `${ordinal(homePos)} vs ${ordinal(awayPos)}` : "—";
 

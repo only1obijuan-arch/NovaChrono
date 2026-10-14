@@ -6,6 +6,7 @@ import { apiFetch } from "@/utils/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCaptainTeam } from "@/utils/CaptainTeamContext";
 import { Calendar, MapPin } from "lucide-react-native";
+import { isHomeTeam, matchBelongsToTeam } from "@/utils/team-identity";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -38,9 +39,7 @@ export default function Schedule() {
     setRefreshing(false);
   };
 
-  const teamMatches = matches.filter(
-    (m) => m.home_slot_id === team?.slot_id || m.away_slot_id === team?.slot_id,
-  );
+  const teamMatches = team ? matches.filter((match) => matchBelongsToTeam(match, team.id)) : [];
   const upcoming = teamMatches.filter((m) => m.status === "scheduled");
   const completed = teamMatches.filter((m) => m.status === "final");
 
@@ -151,7 +150,7 @@ export default function Schedule() {
           ) : (
             <View style={{ gap: 12 }}>
               {upcoming.map((match) => {
-                const isHome = match.home_slot_id === team.slot_id;
+                const isHome = isHomeTeam(match, team.id);
                 const opponent = isHome
                   ? match.away_team_name
                   : match.home_team_name;
@@ -283,7 +282,7 @@ export default function Schedule() {
             </View>
             <View style={{ gap: 10 }}>
               {completed.map((match) => {
-                const isHome = match.home_slot_id === team.slot_id;
+                const isHome = isHomeTeam(match, team.id);
                 const opponent = isHome
                   ? match.away_team_name
                   : match.home_team_name;

@@ -38,6 +38,14 @@ ALTER TABLE matches
 ALTER TABLE matches
   ADD COLUMN home_team_id UUID,
   ADD COLUMN away_team_id UUID;
+ALTER TABLE matches
+  ADD CONSTRAINT matches_home_team_id_fkey
+    FOREIGN KEY (home_team_id) REFERENCES teams(id) ON DELETE SET NULL,
+  ADD CONSTRAINT matches_away_team_id_fkey
+    FOREIGN KEY (away_team_id) REFERENCES teams(id) ON DELETE SET NULL;
+ALTER TABLE matches
+  ALTER COLUMN home_score DROP NOT NULL,
+  ALTER COLUMN away_score DROP NOT NULL;
 ALTER TABLE notifications DROP CONSTRAINT notifications_user_id_fkey;
 ALTER TABLE notifications DROP CONSTRAINT notifications_type_check;
 ALTER TABLE notifications ALTER COLUMN user_id TYPE TEXT USING user_id::text;
@@ -62,6 +70,7 @@ ALTER TABLE availability_responses DROP COLUMN reminder_count;
 ALTER TABLE availability_responses DROP COLUMN last_reminder_at;
 
 ALTER TABLE leagues
+  ALTER COLUMN status SET DEFAULT 'active',
   ADD COLUMN win_points INT NOT NULL DEFAULT 3,
   ADD COLUMN draw_points INT NOT NULL DEFAULT 1,
   ADD COLUMN forfeit_score_home INT NOT NULL DEFAULT 3,

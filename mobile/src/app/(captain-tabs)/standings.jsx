@@ -6,6 +6,7 @@ import { apiFetch } from "@/utils/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCaptainTeam } from "@/utils/CaptainTeamContext";
 import { Trophy, Target } from "lucide-react-native";
+import { standingRowKey } from "@/utils/team-identity";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -227,7 +228,7 @@ export default function Standings() {
               </View>
 
               {standings.map((standing, index) => {
-                const isMyTeam = standing.slot_id === team?.slot_id;
+                const isMyTeam = standing.team_id === team?.id;
                 const posColor =
                   index === 0
                     ? "#FFD700"
@@ -239,7 +240,7 @@ export default function Standings() {
 
                 return (
                   <View
-                    key={standing.slot_id}
+                    key={standingRowKey(standing)}
                     style={{
                       flexDirection: "row",
                       paddingHorizontal: 16,

@@ -14,6 +14,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trophy, Calendar, Users } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useCaptainTeam } from "@/utils/CaptainTeamContext";
+import {
+  findTeamPosition,
+  findTeamStanding,
+  isHomeTeam,
+  matchBelongsToTeam,
+} from "@/utils/team-identity";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -147,16 +153,13 @@ export default function TeamDashboard() {
     );
   }
 
-  const teamMatches = matches.filter(
-    (m) => m.home_slot_id === team.slot_id || m.away_slot_id === team.slot_id,
-  );
+  const teamMatches = matches.filter((match) => matchBelongsToTeam(match, team.id));
   const upcomingMatches = teamMatches
     .filter((m) => m.status === "scheduled")
     .slice(0, 3);
   const standings = stats?.standings || [];
-  const leaguePosition =
-    standings.findIndex((s) => s.slot_id === team.slot_id) + 1;
-  const teamStanding = standings.find((s) => s.slot_id === team.slot_id);
+  const leaguePosition = findTeamPosition(standings, team.id);
+  const teamStanding = findTeamStanding(standings, team.id);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#091833" }}>
@@ -384,7 +387,7 @@ export default function TeamDashboard() {
           ) : (
             <View style={{ gap: 10 }}>
               {upcomingMatches.map((match) => {
-                const isHome = match.home_slot_id === team.slot_id;
+                const isHome = isHomeTeam(match, team.id);
                 const opponent = isHome
                   ? match.away_team_name
                   : match.home_team_name;

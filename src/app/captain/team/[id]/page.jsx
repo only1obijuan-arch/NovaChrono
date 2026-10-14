@@ -1,5 +1,10 @@
 "use client";
 import { isValidJoinCode } from "@/utils/join-code";
+import {
+  findTeamPosition,
+  findTeamStanding,
+  scorerBelongsToTeam,
+} from "@/utils/team-identity";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -190,16 +195,11 @@ export default function TeamDashboard({ params, searchParams }) {
   const nextMatch = upcomingMatches[0];
 
   const standings = stats?.standings || [];
-  const leaguePosition =
-    standings.findIndex((s) => s.slot_id === team.slot_id) + 1;
-  const teamStanding = standings.find((s) => s.slot_id === team.slot_id);
+  const leaguePosition = findTeamPosition(standings, team.id);
+  const teamStanding = findTeamStanding(standings, team.id);
 
   const teamScorers = (stats?.topScorers || [])
-    .filter(
-      (s) =>
-        s.team_slot_id === team.slot_id ||
-        players.some((p) => p.name === s.player_name),
-    )
+    .filter((scorer) => scorerBelongsToTeam(scorer, team.id))
     .slice(0, 5);
 
   return (

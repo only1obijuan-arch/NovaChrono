@@ -158,11 +158,16 @@ export async function POST(request) {
           return Response.json({ error: "Insufficient permissions" }, { status: 403 });
         }
         if (!canAccessVenue(actor, league.venue_id)) return Response.json({ error: "Forbidden" }, { status: 403 });
-        if (league.status === "completed") return Response.json({ success: true, idempotent: true });
+        const unresolved = currentMatches.filter((match) => ["scheduled", "live", "postponed"].includes(match.status));
+        if (league.status === "completed") {
+          if (unresolved.length > 0) {
+            return Response.json({ error: "A completed league contains unresolved fixtures", unresolvedMatchIds: unresolved.map((match) => match.id) }, { status: 409 });
+          }
+          return Response.json({ success: true, idempotent: true });
+        }
         if (league.status !== "active") {
           return Response.json({ error: `Cannot complete a league with status '${league.status}'` }, { status: 409 });
         }
-        const unresolved = currentMatches.filter((match) => ["scheduled", "live", "postponed"].includes(match.status));
         if (unresolved.length > 0) {
           return Response.json({ error: "All scheduled, live, and postponed fixtures must be resolved before completion", unresolvedMatchIds: unresolved.map((match) => match.id) }, { status: 409 });
         }

@@ -58,6 +58,7 @@ export async function GET(request) {
       SELECT
         p.name AS player_name,
         COUNT(*) AS goals,
+        t.id AS team_id,
         t.slot_id AS team_slot_id,
         m.league_id
       FROM match_events me
@@ -67,7 +68,7 @@ export async function GET(request) {
       WHERE me.type IN ('goal_home', 'goal_away')
         AND me.player_id IS NOT NULL
         AND m.league_id = ${leagueId}
-      GROUP BY p.id, p.name, t.slot_id, m.league_id
+      GROUP BY p.id, p.name, t.id, t.slot_id, m.league_id
       ORDER BY COUNT(*) DESC
       LIMIT 10
     `;

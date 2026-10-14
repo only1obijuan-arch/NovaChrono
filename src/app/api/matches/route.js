@@ -403,6 +403,9 @@ export async function POST(request) {
         if (!match) return Response.json({ error: "Match not found" }, { status: 404 });
         const authorization = await authorizeLockedMatch(txSql, user.id, match);
         if (authorization.response) return authorization.response;
+        if (match.league_status !== "active") {
+          return Response.json({ error: "Matches can only be started in an active league" }, { status: 409 });
+        }
         if (match.status !== "scheduled") {
           return Response.json({ error: `Cannot start a match with status '${match.status}'` }, { status: 409 });
         }
@@ -593,6 +596,9 @@ export async function POST(request) {
         if (!RESULT_OVERRIDE_STATUSES.includes(oldMatch.status)) {
           return Response.json({ error: `Cannot correct a match with status '${oldMatch.status}'` }, { status: 409 });
         }
+        if (newStatus === "scheduled" && league.status !== "active") {
+          return Response.json({ error: "A completed or inactive league cannot be reopened through a match override" }, { status: 409 });
+        }
 
         if (oldMatch.status === "final" && newStatus === "scheduled") {
           const schedule = {
@@ -705,6 +711,9 @@ export async function POST(request) {
         if (match.status === "final" && match.result_type === resultType
           && match.home_score === homeScore && match.away_score === awayScore) {
           return Response.json({ success: true, idempotent: true });
+        }
+        if (league.status !== "active") {
+          return Response.json({ error: "Forfeits can only be recorded in an active league" }, { status: 409 });
         }
         if (match.status !== "scheduled") {
           return Response.json({ error: `Cannot record a forfeit for a fixture with status '${match.status}'` }, { status: 409 });

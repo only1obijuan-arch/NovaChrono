@@ -20,7 +20,7 @@ export function StandingsTab({ stats }) {
         </thead>
         <tbody>
           {standings.map((team, idx) => (
-            <tr key={team.slot_id} className={idx < 3 ? "top3" : ""}>
+            <tr key={team.team_id} className={idx < 3 ? "top3" : ""}>
               <td>
                 <span className={`ld-pos${idx === 0 ? " gold" : idx === 1 ? " silver" : idx === 2 ? " bronze" : ""}`}>
                   {idx + 1}
