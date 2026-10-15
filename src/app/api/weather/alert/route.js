@@ -5,6 +5,7 @@ import sql from "@/app/api/utils/sql";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { sendPush } from "@/app/api/utils/send-push";
 import { rateLimit } from "@/app/api/utils/rate-limit";
+import { NOTIFICATION_TYPES } from "@/constants/notification-types";
 
 export async function POST(request) {
   try {
@@ -50,7 +51,9 @@ export async function POST(request) {
     const isWarning = alert_type === "warning";
     const alertColor = isWarning ? "#FFD700" : "#FF00CC";
     const alertLabel = isWarning ? "⚠️ WEATHER WARNING" : "🚫 MATCH POSTPONED";
-    const notifType = isWarning ? "weather_warning" : "match_postponed";
+    const notifType = isWarning
+      ? NOTIFICATION_TYPES.WEATHER_WARNING
+      : NOTIFICATION_TYPES.MATCH_POSTPONED;
     const emailSubject = isWarning
       ? `⚠️ Weather Warning — ${league.name}`
       : `🚫 Match Postponed — ${league.name}`;

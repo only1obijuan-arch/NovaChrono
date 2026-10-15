@@ -43,27 +43,26 @@ export function usePushNotifications(userId) {
 }
 
 async function registerForPushNotifications() {
-  if (Platform.OS === "android") {
-    await Notifications.setNotificationChannelAsync("default", {
-      name: "NovaChrono",
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: "#4FC3F7",
-    });
-  }
-
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-
-  if (existingStatus !== "granted") {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-
-  if (finalStatus !== "granted") return;
-
   try {
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync("default", {
+        name: "NovaChrono",
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: "#4FC3F7",
+      });
+    }
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== "granted") {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== "granted") return;
+
+    const projectId = Constants.easConfig?.projectId
+      || Constants.expoConfig?.extra?.eas?.projectId;
     const tokenData = await Notifications.getExpoPushTokenAsync(
       projectId ? { projectId } : undefined
     );
@@ -73,7 +72,7 @@ async function registerForPushNotifications() {
       method: "POST",
       body: JSON.stringify({ token }),
     });
-  } catch (err) {
-    console.warn("Push token registration failed:", err);
+  } catch {
+    console.warn("Push token registration failed");
   }
 }

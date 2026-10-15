@@ -1,5 +1,7 @@
-import sql from "@/app/api/utils/sql";
+import { sql } from "@/app/api/utils/db";
 import { resolveCurrentUser } from "@/app/api/utils/auth";
+import { isValidExpoPushToken } from "@/app/api/utils/push-token";
+import { assignPushToken } from "@/app/api/utils/push-token-store";
 
 export async function POST(request) {
   try {
@@ -10,15 +12,17 @@ export async function POST(request) {
 
     const { token } = await request.json();
 
-    if (!token || !token.startsWith("ExponentPushToken")) {
+    if (!isValidExpoPushToken(token)) {
       return Response.json({ error: "Invalid push token" }, { status: 400 });
     }
 
-    await sql`
-      UPDATE auth_users
-      SET push_token = ${token}
-      WHERE id = ${user.id}
-    `;
+    const registration = await assignPushToken(user.id, token);
+    if (registration.status === "not_found") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (registration.status === "conflict") {
+      return Response.json({ error: "Push token ownership changed; retry" }, { status: 409 });
+    }
 
     return Response.json({ success: true });
   } catch (error) {

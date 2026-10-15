@@ -122,6 +122,14 @@ export async function signOut() {
   const stored = await getStoredAuth();
   if (stored?.token) {
     try {
+      await fetch(`${BASE_URL}/api/push-token`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${stored.token}` },
+      });
+    } catch {
+      // offline or server error — session revocation still proceeds
+    }
+    try {
       await fetch(`${BASE_URL}/api/auth/mobile-signout`, {
         method: "POST",
         headers: { Authorization: `Bearer ${stored.token}` },

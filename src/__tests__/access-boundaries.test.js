@@ -25,7 +25,7 @@ import { POST as register } from "@/app/api/register-team/route";
 import { SignJWT } from "jose";
 
 const id = n => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
-const A = id(1), B = id(2), USER = id(3), LEAGUE = id(4), TEAM = id(5), PLAYER = id(6), MATCH = id(7), CAPTAIN = id(8);
+const A = id(1), B = id(2), USER = id(3), LEAGUE = id(4), TEAM = id(5), PLAYER = id(6), MATCH = id(7), CAPTAIN = id(8), OPPONENT = id(10);
 let user, targetVenue, targetOrganization, missing, captain, duplicate, leagueStatus;
 const request = (body, method = "POST", path = "/api/test") => new Request("https://example.test" + path, { method, ...(method === "DELETE" ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
 const writes = () => mocks.query.mock.calls.filter(([sql]) => /^\s*(INSERT|UPDATE|DELETE)/i.test(sql));
@@ -38,11 +38,16 @@ beforeEach(() => {
     let rows = [];
     if (sql.includes("mobile_sessions")) rows = [];
     else if (sql.includes("SELECT * FROM auth_users")) rows = user ? [user] : [];
+    else if (sql.includes("SELECT id, role, venue_id, organization_id") && sql.includes("FROM auth_users")) rows = user ? [user] : [];
     else if (sql.includes("FROM auth_users") && sql.includes("role = 'captain'")) rows = captain ? [{ id: CAPTAIN }] : [];
     else if (sql.includes("FROM auth_users")) rows = user ? [user] : [];
     else if (sql.includes("FROM venues")) rows = missing ? [] : [{ id: params[0] }];
     else if (sql.includes("FROM players")) rows = missing ? [] : [{ id: PLAYER, team_id: TEAM }];
     else if (sql.includes("SELECT l.venue_id, v.organization_id")) rows = missing ? [] : [{ venue_id: targetVenue, organization_id: targetOrganization }];
+    else if (sql.includes("FROM teams t") && sql.includes("LEFT JOIN auth_users captain")) rows = [
+      { id: TEAM, name: "Team", status: "active", captain_user_id: CAPTAIN, captain_name: "Captain", captain_email: "captain@example.test", captain_push_token: null },
+      { id: OPPONENT, name: "Opponent", status: "active", captain_user_id: CAPTAIN, captain_name: "Captain", captain_email: "captain@example.test", captain_push_token: null },
+    ];
     else if (sql.includes("FROM teams t") && sql.includes("LEFT JOIN auth_users au") && !sql.includes("JOIN leagues")) rows = [{ id: TEAM, league_id: LEAGUE, slot_id: id(9), name: "Team", status: "active", captain_user_id: CAPTAIN, captain_name: "Captain", created_at: "2030-01-01T00:00:00Z" }];
     else if (sql.includes("FROM teams t") && sql.includes("t.league_id") && !sql.includes("JOIN leagues")) rows = [{ id: TEAM, league_id: LEAGUE, slot_id: id(9), name: "Team", status: "active" }];
     else if (sql.includes("FROM teams t") && sql.includes("JOIN leagues")) rows = missing ? [] : [{ id: TEAM, venue_id: targetVenue, organization_id: targetOrganization, captain_user_id: CAPTAIN }];
@@ -50,7 +55,7 @@ beforeEach(() => {
     else if (sql.includes("SELECT id, league_id FROM teams")) rows = missing ? [] : [{ id: TEAM, league_id: LEAGUE }];
     else if (sql.includes("SELECT id FROM teams")) rows = duplicate ? [{ id: TEAM }] : [];
     else if (sql.includes("FROM leagues")) rows = missing ? [] : [{ id: LEAGUE, venue_id: targetVenue, organization_id: targetOrganization, status: leagueStatus, join_code: "ABC12345", name: "League" }];
-    else if (sql.includes("FROM matches")) rows = missing ? [] : [{ id: MATCH, status: "scheduled", venue_id: targetVenue, match_date: "2030-01-01", home_team_id: TEAM, home_captain_email: "captain@example.test", home_captain_id: CAPTAIN, home_team_name: "Team", time_slot: "18:30" }];
+    else if (sql.includes("FROM matches") || sql.includes("FROM matches m")) rows = missing ? [] : [{ id: MATCH, status: "scheduled", match_status: "scheduled", league_status: "active", venue_id: targetVenue, organization_id: targetOrganization, match_date: "2030-01-01", match_date_label: "Tuesday, 01 January 2030", match_starts_at: "2030-01-01T16:30:00.000Z", days_until: 10, home_team_id: TEAM, away_team_id: OPPONENT, home_captain_email: "captain@example.test", home_captain_id: CAPTAIN, home_team_name: "Team", time_slot: "18:30", field_number: 1 }];
     else if (sql.includes("SELECT DISTINCT au")) rows = [{ id: CAPTAIN, email: "captain@example.test" }];
     else if (sql.includes("FROM availability_responses")) rows = [{ token: "token" }];
     else if (sql.includes("FROM league_slots")) rows = [{ id: id(9) }];

@@ -11,7 +11,7 @@ const { Pool: NodePostgresPool } = pg;
 // once so the guard is a no-op, but it doesn't hurt.
 const globalForDb = globalThis;
 
-if (!globalForDb._novaPool) {
+if (!globalForDb._novaPool || globalForDb._novaPool.ended) {
   const Pool = process.env.DATABASE_DRIVER === "pg" ? NodePostgresPool : NeonPool;
   globalForDb._novaPool = new Pool({
     connectionString: process.env.DATABASE_URL,
