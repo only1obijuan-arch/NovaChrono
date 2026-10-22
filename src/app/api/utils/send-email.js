@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -84,7 +86,7 @@ export async function sendEmail({
     });
   }
 
-  const key = validateIdempotencyKey(idempotencyKey);
+  const key = validateIdempotencyKey(idempotencyKey) ?? randomUUID();
   const attempts = Math.max(1, Math.min(Number(maxAttempts) || 1, 3));
   const payload = {
     from: from || process.env.RESEND_FROM_EMAIL || "noreply@novachrono.app",
@@ -103,7 +105,7 @@ export async function sendEmail({
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
-          ...(key ? { "Idempotency-Key": key } : {}),
+          "Idempotency-Key": key,
         },
         body: JSON.stringify(payload),
         signal: controller.signal,

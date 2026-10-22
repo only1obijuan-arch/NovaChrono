@@ -16,6 +16,36 @@ function emailInput(overrides = {}) {
   };
 }
 
+function fakeIdempotentProvider(steps = ["success"]) {
+  const keys = [];
+  const deliveries = new Map();
+  let attempt = 0;
+  const fetchMock = vi.fn(async (_url, options) => {
+    const key = options.headers["Idempotency-Key"];
+    keys.push(key);
+    if (!deliveries.has(key)) {
+      deliveries.set(key, `logical-delivery-${deliveries.size + 1}`);
+    }
+    const providerId = deliveries.get(key);
+    const step = steps[Math.min(attempt, steps.length - 1)];
+    attempt += 1;
+    if (step === "timeout") {
+      throw Object.assign(new Error("response lost after acceptance"), { name: "AbortError" });
+    }
+    if (step === "network") {
+      throw new Error("connection reset after acceptance");
+    }
+    if (typeof step === "number") {
+      return new Response("{}", { status: step });
+    }
+    return new Response(JSON.stringify({ id: providerId }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  return { deliveries, fetchMock, keys };
+}
+
 describe("Gate 5 Resend transport semantics", () => {
   beforeEach(() => {
     process.env.RESEND_API_KEY = "unit-test-key";
@@ -26,15 +56,29 @@ describe("Gate 5 Resend transport semantics", () => {
     delete process.env.RESEND_API_KEY;
   });
 
-  it("returns the provider ID and forwards a bounded idempotency key", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "email-1" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+  it("uses one request and one logical delivery on first-attempt success", async () => {
+    const { deliveries, fetchMock, keys } = fakeIdempotentProvider();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(sendEmail(emailInput())).resolves.toEqual({ id: "email-1" });
-    expect(fetchMock.mock.calls[0][1].headers["Idempotency-Key"]).toContain("match-reminder/");
+    await expect(sendEmail(emailInput())).resolves.toEqual({ id: "logical-delivery-1" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(deliveries.size).toBe(1);
+    expect(keys).toEqual(["match-reminder/00000000-0000-4000-8000-000000000001"]);
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer unit-test-key");
+  });
+
+  it.each([
+    ["timeout/lost response", "timeout"],
+    ["connection reset", "network"],
+    ["retryable 5xx after acceptance", 500],
+  ])("deduplicates a provider-accepted email after %s", async (_name, firstStep) => {
+    const { deliveries, fetchMock, keys } = fakeIdempotentProvider([firstStep, "success"]);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendEmail(emailInput({ idempotencyKey: undefined, maxAttempts: 2 })))
+      .resolves.toEqual({ id: "logical-delivery-1" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(keys[0]).toBeTruthy();
+    expect(new Set(keys).size).toBe(1);
+    expect(deliveries.size).toBe(1);
   });
 
   it("fails clearly when delivery is not configured", async () => {
@@ -46,28 +90,67 @@ describe("Gate 5 Resend transport semantics", () => {
   });
 
   it("does not retry a provider 400 and sanitizes its response", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "sensitive provider text" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const { deliveries, fetchMock, keys } = fakeIdempotentProvider([400]);
     vi.stubGlobal("fetch", fetchMock);
-    const failure = await sendEmail(emailInput()).catch((error) => error);
+    const failure = await sendEmail(emailInput({ idempotencyKey: undefined })).catch((error) => error);
     expect(failure).toBeInstanceOf(EmailDeliveryError);
     expect(failure).toMatchObject({ code: "EMAIL_PROVIDER_ERROR", status: 400, retryable: false });
-    expect(failure.message).not.toContain("sensitive provider text");
+    expect(failure.message).not.toContain("provider details");
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(keys[0]).toBeTruthy();
+    expect(deliveries.size).toBe(1);
   });
 
-  it.each([429, 500])("retries retryable HTTP %s responses", async (status) => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response("{}", { status }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: `after-${status}` }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }));
+  it("retries 429 with the same automatic key", async () => {
+    const { deliveries, fetchMock, keys } = fakeIdempotentProvider([429, "success"]);
     vi.stubGlobal("fetch", fetchMock);
-    await expect(sendEmail(emailInput({ maxAttempts: 2 }))).resolves.toEqual({ id: `after-${status}` });
+    await expect(sendEmail(emailInput({ idempotencyKey: undefined, maxAttempts: 2 })))
+      .resolves.toEqual({ id: "logical-delivery-1" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Set(keys).size).toBe(1);
+    expect(deliveries.size).toBe(1);
+  });
+
+  it("preserves an explicit domain key exactly across retries", async () => {
+    const explicitKey = "match-reminder/00000000-0000-4000-8000-000000000001";
+    const { deliveries, fetchMock, keys } = fakeIdempotentProvider(["network", "success"]);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendEmail(emailInput({ idempotencyKey: explicitKey, maxAttempts: 2 })))
+      .resolves.toEqual({ id: "logical-delivery-1" });
+    expect(keys).toEqual([explicitKey, explicitKey]);
+    expect(deliveries.size).toBe(1);
+  });
+
+  it.each(["", "x".repeat(257), 42])("rejects invalid explicit idempotency key %j before I/O", async (key) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendEmail(emailInput({ idempotencyKey: key }))).rejects.toMatchObject({
+      code: "INVALID_IDEMPOTENCY_KEY",
+      retryable: false,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("generates one bounded UUID key outside the retry loop", async () => {
+    const { deliveries, fetchMock, keys } = fakeIdempotentProvider([500, "success"]);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendEmail(emailInput({ idempotencyKey: undefined, maxAttempts: 2 })))
+      .resolves.toEqual({ id: "logical-delivery-1" });
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(keys[0].length).toBeLessThanOrEqual(256);
+    expect(keys[1]).toBe(keys[0]);
+    expect(deliveries.size).toBe(1);
+  });
+
+  it("uses different automatic keys for independent logical invocations", async () => {
+    const { deliveries, fetchMock, keys } = fakeIdempotentProvider(["success"]);
+    vi.stubGlobal("fetch", fetchMock);
+    await sendEmail(emailInput({ idempotencyKey: undefined }));
+    await sendEmail(emailInput({ idempotencyKey: undefined }));
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+    expect(deliveries.size).toBe(2);
   });
 
   it("reports a retryable network failure without leaking transport details", async () => {

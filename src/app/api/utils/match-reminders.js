@@ -305,7 +305,7 @@ async function finalizeClaim(claim) {
     const [updated] = await txSql`
       UPDATE availability_responses
       SET reminder_count = reminder_count + 1,
-          last_reminder_at = CURRENT_TIMESTAMP,
+          last_reminder_at = clock_timestamp(),
           delivery_claim_id = NULL,
           delivery_claimed_at = NULL
       WHERE id = ${claim.availabilityId}

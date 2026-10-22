@@ -138,7 +138,8 @@ describe("Gate 5 reminder truthfulness contracts", () => {
     expect(emailAt).toBeGreaterThan(0);
     expect(finalizeAt).toBeGreaterThan(emailAt);
     expect(reminders).toContain("reminder_count = reminder_count + 1");
-    expect(reminders).toContain("last_reminder_at = CURRENT_TIMESTAMP");
+    expect(reminders).toContain("last_reminder_at = clock_timestamp()");
+    expect(reminders).not.toContain("last_reminder_at = CURRENT_TIMESTAMP");
     expect(reminders).toContain("await releaseClaim(claim.availabilityId, claim.claimId)");
     expect(reminders).toContain("match-reminder/${claim.claimId}");
     expect(reminders).toContain("WHERE id = ${claim.matchId}\n      FOR UPDATE");

@@ -75,6 +75,14 @@ async function waitForLockWaiters(fragment, minimum = 1) {
   }
 }
 
+async function waitForProviderCalls(mock, minimum = 1) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    if (mock.mock.calls.length >= minimum) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Expected ${minimum} provider call(s), received ${mock.mock.calls.length}`);
+}
+
 async function setPoolSessionTimeZone(timeZone) {
   pool.options.options = `-c timezone=${timeZone}`;
   const clients = (pool._clients ?? []).filter((client) => (
@@ -283,6 +291,8 @@ describe("Gate 5 required-email failure recovery", () => {
     expect(afterFailure.last_reminder_at).toBeNull();
     expect(afterFailure.delivery_claim_id).not.toBeNull();
     expect(afterFailure.delivery_claimed_at).toBeNull();
+    const firstKey = providers.sendEmail.mock.calls[0][0].idempotencyKey;
+    expect(firstKey).toBe(`match-reminder/${afterFailure.delivery_claim_id}`);
 
     providers.sendEmail.mockResolvedValueOnce({ id: "retry-success" });
     const retry = await sendReminderForTeam({
@@ -298,6 +308,86 @@ describe("Gate 5 required-email failure recovery", () => {
     expect(afterRetry.last_reminder_at).not.toBeNull();
     expect(afterRetry.delivery_claim_id).toBeNull();
     expect(afterRetry.delivery_claimed_at).toBeNull();
+    expect(providers.sendEmail.mock.calls[1][0].idempotencyKey).toBe(firstKey);
+  });
+
+  it("reuses the explicit claim key after provider success and finalization failure", async () => {
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION gate5_force_finalize_failure()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.last_reminder_at IS NOT NULL
+            AND NEW.last_reminder_at IS DISTINCT FROM OLD.last_reminder_at THEN
+          RAISE EXCEPTION 'Gate 5 forced finalization failure';
+        END IF;
+        RETURN NEW;
+      END
+      $$
+    `);
+    await pool.query(`
+      CREATE TRIGGER gate5_force_finalize_failure
+      BEFORE UPDATE ON availability_responses
+      FOR EACH ROW EXECUTE FUNCTION gate5_force_finalize_failure()
+    `);
+
+    let finalizationError;
+    try {
+      await sendReminderForTeam({
+        matchId: ID.match,
+        teamId: ID.teamA,
+        side: "home",
+        automatic: true,
+        appUrl: "https://example.test",
+      });
+    } catch (error) {
+      finalizationError = error;
+    } finally {
+      await pool.query("DROP TRIGGER IF EXISTS gate5_force_finalize_failure ON availability_responses");
+      await pool.query("DROP FUNCTION IF EXISTS gate5_force_finalize_failure()");
+    }
+    expect(finalizationError).toBeInstanceOf(Error);
+    expect(providers.sendEmail).toHaveBeenCalledOnce();
+
+    const { rows: [stranded] } = await pool.query(`
+      SELECT reminder_count, delivery_claim_id, delivery_claimed_at
+      FROM availability_responses
+      WHERE match_id = $1 AND team_id = $2
+    `, [ID.match, ID.teamA]);
+    expect(stranded.reminder_count).toBe(0);
+    expect(stranded.delivery_claim_id).not.toBeNull();
+    expect(stranded.delivery_claimed_at).not.toBeNull();
+    const firstKey = providers.sendEmail.mock.calls[0][0].idempotencyKey;
+    expect(firstKey).toBe(`match-reminder/${stranded.delivery_claim_id}`);
+
+    await pool.query(`
+      UPDATE availability_responses
+      SET delivery_claimed_at = CURRENT_TIMESTAMP - INTERVAL '16 minutes'
+      WHERE match_id = $1 AND team_id = $2
+    `, [ID.match, ID.teamA]);
+    providers.sendEmail.mockResolvedValueOnce({ id: "provider-original-response" });
+    const retry = await sendReminderForTeam({
+      matchId: ID.match,
+      teamId: ID.teamA,
+      side: "home",
+      automatic: true,
+      appUrl: "https://example.test",
+    });
+    expect(retry).toMatchObject({ status: "sent", finalized: true });
+    expect(providers.sendEmail.mock.calls[1][0].idempotencyKey).toBe(firstKey);
+    const { rows: [finalized] } = await pool.query(`
+      SELECT reminder_count, delivery_claim_id, delivery_claimed_at
+      FROM availability_responses
+      WHERE match_id = $1 AND team_id = $2
+    `, [ID.match, ID.teamA]);
+    expect(finalized).toEqual({
+      reminder_count: 1,
+      delivery_claim_id: null,
+      delivery_claimed_at: null,
+    });
+    expect(Number((await pool.query(
+      "SELECT count(*) FROM notifications WHERE match_id = $1 AND type = 'match_reminder'",
+      [ID.match],
+    )).rows[0].count)).toBe(1);
   });
 
   it("keeps email success authoritative when optional push fails", async () => {
@@ -372,6 +462,112 @@ describe("Gate 5 deterministic PostgreSQL concurrency A-J", () => {
     const { rows: [row] } = await pool.query("SELECT reminder_count, delivery_claimed_at FROM availability_responses WHERE match_id = $1 AND team_id = $2", [ID.match, ID.teamA]);
     expect(row.reminder_count).toBe(1);
     expect(row.delivery_claimed_at).toBeNull();
+  });
+
+  it("D2: a manual request started after finalization begins is suppressed by wall-clock completion", async () => {
+    let resolveFirstEmail;
+    providers.sendEmail.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFirstEmail = resolve;
+    }));
+    const first = sendReminderForTeam({
+      matchId: ID.match,
+      teamId: ID.teamA,
+      side: "home",
+      automatic: false,
+      actorId: ID.admin,
+      appUrl: "https://example.test",
+    });
+    await waitForProviderCalls(providers.sendEmail, 1);
+
+    const blocker = await pool.connect();
+    let secondStartedAt;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [ID.match]);
+      resolveFirstEmail({ id: "manual-first" });
+      await waitForLockWaiters("FROM matches", 1);
+
+      secondStartedAt = new Date();
+      const second = sendReminderForTeam({
+        matchId: ID.match,
+        teamId: ID.teamA,
+        side: "home",
+        automatic: false,
+        actorId: ID.admin,
+        appUrl: "https://example.test",
+      });
+      await waitForLockWaiters("FROM matches", 2);
+      await blocker.query("COMMIT");
+
+      expect(await first).toMatchObject({ status: "sent", finalized: true });
+      expect(await second).toMatchObject({
+        status: "skipped",
+        reason: "delivery_completed_during_attempt",
+      });
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+    }
+
+    expect(providers.sendEmail).toHaveBeenCalledOnce();
+    const { rows: [row] } = await pool.query(`
+      SELECT reminder_count, last_reminder_at, delivery_claim_id, delivery_claimed_at
+      FROM availability_responses
+      WHERE match_id = $1 AND team_id = $2
+    `, [ID.match, ID.teamA]);
+    expect(row.reminder_count).toBe(1);
+    expect(new Date(row.last_reminder_at).getTime()).toBeGreaterThanOrEqual(secondStartedAt.getTime());
+    expect(row.delivery_claim_id).toBeNull();
+    expect(row.delivery_claimed_at).toBeNull();
+    expect(Number((await pool.query(
+      "SELECT count(*) FROM notifications WHERE match_id = $1 AND type = 'match_reminder'",
+      [ID.match],
+    )).rows[0].count)).toBe(1);
+  });
+
+  it("D3: a genuinely later manual request remains allowed", async () => {
+    const first = await sendReminderForTeam({
+      matchId: ID.match,
+      teamId: ID.teamA,
+      side: "home",
+      automatic: false,
+      actorId: ID.admin,
+      appUrl: "https://example.test",
+    });
+    const { rows: [firstFinalized] } = await pool.query(`
+      SELECT last_reminder_at
+      FROM availability_responses
+      WHERE match_id = $1 AND team_id = $2
+    `, [ID.match, ID.teamA]);
+    for (let attempt = 0; Date.now() <= new Date(firstFinalized.last_reminder_at).getTime(); attempt += 1) {
+      if (attempt >= 500) throw new Error("Wall clock did not advance after first finalization");
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const second = await sendReminderForTeam({
+      matchId: ID.match,
+      teamId: ID.teamA,
+      side: "home",
+      automatic: false,
+      actorId: ID.admin,
+      appUrl: "https://example.test",
+    });
+    expect(first).toMatchObject({ status: "sent", finalized: true });
+    expect(second).toMatchObject({ status: "sent", finalized: true });
+    expect(providers.sendEmail).toHaveBeenCalledTimes(2);
+    const { rows: [row] } = await pool.query(`
+      SELECT reminder_count, delivery_claim_id, delivery_claimed_at
+      FROM availability_responses
+      WHERE match_id = $1 AND team_id = $2
+    `, [ID.match, ID.teamA]);
+    expect(row).toEqual({
+      reminder_count: 2,
+      delivery_claim_id: null,
+      delivery_claimed_at: null,
+    });
+    expect(Number((await pool.query(
+      "SELECT count(*) FROM notifications WHERE match_id = $1 AND type = 'match_reminder'",
+      [ID.match],
+    )).rows[0].count)).toBe(2);
   });
 
   it("E: replacement queued first makes the reminder resolve the new team", async () => {
