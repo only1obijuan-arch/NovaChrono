@@ -1,37 +1,37 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
-export default function ResetPassword() {
-  const [mounted, setMounted] = useState(false);
-  const [token, setToken] = useState(null);
-  const [tokenValid, setTokenValid] = useState(null);
+function ResetPasswordForm() {
+  // The token is derived from the URL; only the async validation result is state.
+  const token = useSearchParams().get("token");
+  const [validation, setValidation] = useState(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // null = still validating, false = invalid/missing, otherwise the API's `valid`
+  const tokenValid = !token ? false : validation?.token === token ? validation.valid : null;
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!token) return;
 
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get("token");
-    if (!t) {
-      setTokenValid(false);
-      return;
-    }
-    setToken(t);
-
-    fetch(`${window.location.origin}/api/auth/reset-password?token=${encodeURIComponent(t)}`)
+    let cancelled = false;
+    fetch(`${window.location.origin}/api/auth/reset-password?token=${encodeURIComponent(token)}`)
       .then((res) => res.json())
-      .then((data) => setTokenValid(data.valid))
-      .catch(() => setTokenValid(false));
-  }, [mounted]);
+      .then((data) => {
+        if (!cancelled) setValidation({ token, valid: data.valid });
+      })
+      .catch(() => {
+        if (!cancelled) setValidation({ token, valid: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -73,8 +73,6 @@ export default function ResetPassword() {
   };
 
   const strength = strengthCheck(password);
-
-  if (!mounted) return null;
 
   return (
     <>
@@ -245,5 +243,13 @@ export default function ResetPassword() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function ResetPassword() {
+  return (
+    <Suspense fallback={null}>
+      <ResetPasswordForm />
+    </Suspense>
   );
 }

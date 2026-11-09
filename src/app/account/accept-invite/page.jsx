@@ -1,43 +1,49 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 
 function AcceptInviteForm() {
-  const [token, setToken] = useState(null);
-  const [invite, setInvite] = useState(null);
+  // The token is derived from the URL; only the async validation result is state.
+  const token = useSearchParams().get("token");
+  const [validation, setValidation] = useState(null);
   const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get("token");
-    if (!t) {
-      setError("No invite token found. Please use the link from your email.");
-      setLoading(false);
-      return;
-    }
-    setToken(t);
+  const result = validation?.token === token ? validation : null;
+  const invite = result?.invite ?? null;
+  const loading = Boolean(token) && !result;
+  const loadError = !token
+    ? "No invite token found. Please use the link from your email."
+    : (result?.error ?? null);
 
-    fetch(`/api/admin/invite?token=${t}`)
+  useEffect(() => {
+    if (!token) return;
+
+    let cancelled = false;
+    fetch(`/api/admin/invite?token=${encodeURIComponent(token)}`)
       .then((res) => res.json())
       .then((data) => {
-        if (!data.valid) {
-          setError(data.error || "Invalid or expired invite link.");
-        } else {
-          setInvite(data);
-        }
-        setLoading(false);
+        if (cancelled) return;
+        setValidation(
+          data.valid
+            ? { token, invite: data }
+            : { token, error: data.error || "Invalid or expired invite link." },
+        );
       })
       .catch(() => {
-        setError("Failed to validate invite. Please try again.");
-        setLoading(false);
+        if (!cancelled) {
+          setValidation({ token, error: "Failed to validate invite. Please try again." });
+        }
       });
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const strengthCheck = (p) => {
     if (!p) return null;
@@ -109,7 +115,7 @@ function AcceptInviteForm() {
     );
   }
 
-  if (error && !invite) {
+  if (loadError && !invite) {
     return (
       <div className="ai-card" style={{ padding: 40, textAlign: "center" }}>
         <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
@@ -133,7 +139,7 @@ function AcceptInviteForm() {
             marginBottom: 24,
           }}
         >
-          {error.toUpperCase()}
+          {loadError.toUpperCase()}
         </p>
         <a
           href="/account/signin"
