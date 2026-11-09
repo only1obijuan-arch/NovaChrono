@@ -2,20 +2,25 @@
 
 ## Release identity and safety
 
-- Starting SHA: `0ac94c2ef8c282c25334c692d7a4f56612ce56cb`
+- Starting SHA (Gate 4B production base): `0ac94c2ef8c282c25334c692d7a4f56612ce56cb`
 - Working branch: `gate5/availability-notifications`
-- Original Gate 5 implementation SHA: `bd89aa17e7d8608460afff94406aee2df8c2cc79`
-- Narrow-remediation starting SHA: `046731f4acdc0186d45bb7b8ac01d7b8c4b66f82`
-- Narrow-remediation implementation SHA: `6937f041727526b202b7c5d296deb27c1ceab927`
+- Final Gate 5 lineage, in order:
+  - Gate 5 implementation: `bd89aa17e7d8608460afff94406aee2df8c2cc79`
+  - Gate 5 documentation (also the narrow-remediation starting SHA): `046731f4acdc0186d45bb7b8ac01d7b8c4b66f82`
+  - Gate 5 narrow remediation: `6937f041727526b202b7c5d296deb27c1ceab927`
+  - Remediation documentation: `51c72dfbeedd7eb805637a77232aa56e8b28b3a7`
+  - CI harness isolation: `08dc9b7a531c29cf29fafe24b57351cc67e5571b`
+  - Next 16.4.5 security update: `187f7533f2e84b8ee41a297df4e2162263f0b19d`
+  - Auth compatibility (engineering-accepted release candidate; this report is a documentation-only change on top of it): `4b97b85bbdd1b67e996756ee6b499261c40986ea`
 - New forward-only migration: `0010_gate5_availability_notifications.sql`
-- Migrations `0001` through `0009` remain byte-identical to Gate 5's starting state, and `0010` is byte-identical to the narrow-remediation starting SHA. No `0011` exists.
-- Work and database verification used isolated local PostgreSQL databases only. Production Neon was not connected to or changed. Nothing was pushed, merged, deployed, or applied to production.
+- Migrations `0001` through `0009` remain byte-identical to Gate 5's starting state, and `0010` is byte-identical from the Gate 5 implementation commit onward. The `migrations/` tree hash (`927675549bf46a14fe1c9f6dd64c5a87deee1ac3`) is identical across every commit from the implementation through the auth-compatibility commit. No `0011` exists.
+- Work and database verification used isolated local PostgreSQL databases only. Production Neon was not connected to or changed. Nothing was merged, deployed, or applied to production. The commits after `51c72df` were prepared and validated locally before publication.
 
 ## Outcome
 
 Gate 5 makes the existing match-communications paths fail closed around current match/team identity, makes availability confirmation a single-use POST mutation, serializes reminder delivery claims, governs notification vocabulary, and gives email/push failures explicit behavior. It does not introduce a generic messaging framework.
 
-No known P1 issue remains in the implemented scope. The deliberately deferred P2 items are recorded below.
+For the accepted release candidate, P0 = 0 and P1 = 0. The deliberately deferred P2 items are recorded below.
 
 ## Verified behavior
 
@@ -131,7 +136,7 @@ The shared reminder service implements this sequence:
 
 A claim is stale after 15 minutes. A required-email failure does not change reminder count or last-reminder time; it clears only the live timestamp so a retry is immediately possible. When the schedule is unchanged, that retry retains the claim UUID and provider idempotency key. The service never reports a failed required email as sent.
 
-Automatic sends retain the established 20-hour cadence. For manual/manual overlap, the service also records when each request began: if another attempt completes while a queued manual request waits, `last_reminder_at >= attempt_started_at` suppresses the overlapping delivery. A genuinely later manual action remains permitted.
+Automatic sends retain the established 20-hour cadence. For manual/manual overlap, the service also records when each request began: if another attempt completes while a queued manual request waits, `last_reminder_at >= attempt_started_at` suppresses the overlapping delivery. `last_reminder_at` is the wall-clock time of the finalization write; a request that begins after that write but before the transaction commits (a window of roughly one database round trip) is not covered. A genuinely later manual action remains permitted.
 
 ## Failure and provider semantics
 
@@ -200,7 +205,7 @@ Captain-message email and push channels execute independently. The route returns
 
 - Reminder claim: match → authoritative actor/team reads → availability row → claim commit → external providers.
 - Reminder finalisation: match → availability row → in-app notification → metadata → commit.
-- Availability POST: cheap token scope read → match → availability row → current league/team/captain revalidation → response plus notification → commit → external email.
+- Availability POST: cheap token scope read → match → availability row → current league/participant-team revalidation (no captain re-resolution; see deferred item 4) → response plus notification → commit → external email.
 - Replacement and match-start races therefore share the established match-first order and do not introduce the availability-first deadlock found during implementation testing.
 - Same-day alert: match → current teams/responses → deduped notification commit → external email.
 - Push ownership: one atomic database operation clears any prior owner and assigns the current owner; the unique index handles concurrent last-writer conflict safely.
@@ -268,6 +273,8 @@ SHA-256 migration evidence at narrow-remediation handoff:
 0010 21628D25AF6F5066FFD39347867B7C658B3AA43B34126A813AC7E3430C8D00BF
 ```
 
+The `0001` and `0002` values were recorded from a CRLF Windows checkout; the committed (LF) blobs hash differently, but the files are unchanged and the `migrations/` tree hash quoted above is identical across all later commits.
+
 ## Concurrency proof
 
 The Gate 5 integration suite uses independent PostgreSQL connections, blocker transactions, and observed lock waits. All required races A–J passed on the fresh DATE schema and the accepted production-shaped TIMESTAMPTZ schema:
@@ -275,7 +282,7 @@ The Gate 5 integration suite uses independent PostgreSQL connections, blocker tr
 1. A — concurrent availability `yes` versus `no`: one `200`, one `410`, one response and one notification.
 2. B — cron versus cron: one required email and no stranded claim.
 3. C — cron versus manual: one required email and no stranded claim.
-4. D — manual versus manual: one required email when B starts before A finalization and when B starts after A's finalization transaction begins but before A commits; a genuinely later post-commit invocation remains allowed.
+4. D — manual versus manual: one required email when B starts before A finalization and when B starts after A's finalization transaction begins but before A's wall-clock `last_reminder_at` write (a request starting between that write and the commit is not covered); a genuinely later post-commit invocation remains allowed.
 5. E — replacement queued first: reminder resolves and records the replacement identity.
 6. F — `START_MATCH` queued first: reminder issuance is skipped.
 7. G — response behind replacement: old-team availability is not transferred and the token returns `410`.
@@ -315,12 +322,15 @@ No `.only`, `.skip`, `.todo`, or `passWithNoTests` marker is present under `src`
 
 ## Validation evidence
 
-- Locked dependency install: passed.
+Final accepted evidence for the release candidate (the `ci.yml` steps replayed locally, in order, against a clean checkout with a clean `npm ci` on npm 10.9.10, using disposable PostgreSQL; P0 = 0, P1 = 0):
+
+- Locked dependency install (`npm ci`): passed.
 - Unit/contract suite: 22 files, 309/309 tests passed.
 - Full DATE integration suite: 2 files, 184/184 tests passed.
 - Focused Gate 5 DATE suite: 1 file, 34/34 tests passed.
 - Focused Gate 5 production-shaped TIMESTAMPTZ suite: 1 file, 34/34 tests passed.
-- Deterministic PostgreSQL concurrency A–J: 10/10 passed on both shapes.
+- Gate 2 route rehearsal on an isolated clone of the production-shaped database: 150/150 tests passed.
+- Deterministic PostgreSQL concurrency A–J: pass on both shapes.
 - Availability and lifecycle oracle: passed.
 - Global email idempotency/provider matrix (`400`, `429`, `500`, accepted-then-timeout, accepted-then-network-reset, explicit and generated keys): passed.
 - Duplicate-delivery route regressions for password reset, captain/admin message, and weather alert: passed.
@@ -329,13 +339,46 @@ No `.only`, `.skip`, `.todo`, or `passWithNoTests` marker is present under `src`
 - Push-token validation, ownership race, and cleanup policy: passed.
 - Notification authorization and idempotent `read_at`: passed.
 - Email escaping and provider-boundary contracts: passed.
-- Playwright: 9/9 passed.
-- ESLint: passed.
-- Next.js production build: passed; only the pre-existing middleware-to-proxy deprecation warning remains.
-- `npm audit --omit=dev --audit-level=high`: 0 vulnerabilities.
-- `git diff --check`: passed (Windows line-ending notices only).
-- Migration immutability: `0001`–`0010` unchanged from narrow-remediation start; no `0011`.
-- Secret/private-key scan: no private keys or production credentials found.
+- Playwright: 21/21 passed (the 9 existing smoke tests plus 12 focused Accept Invite / Reset Password tests).
+- ESLint: 0 errors.
+- Next.js 16.4.5 production build: passed; only the pre-existing middleware-to-proxy deprecation warning remains.
+- `npm audit --omit=dev --audit-level=high`: exit 0. Production findings: critical 0, high 0, moderate 5, low 0. The five moderate findings are in the unchanged Sentry dependency chain and are tracked in the deferred items below; they were not fixed by this work.
+- `git diff --check`: passed.
+- Migration ledger: exactly 10 entries (`0001`–`0010`) on both the fresh and the production-shaped rehearsal.
+- Fail-closed Gate 5 migration fixtures: 5/5 rejected as intended.
+- Migration immutability: `0001`–`0010` unchanged from the narrow-remediation start through the final release candidate; no `0011`.
+- Secret/private-key scan: passed; no private keys or production credentials found.
+
+## Final release notes — Next.js security update and auth-page compatibility
+
+| Package | Previous | Final |
+| --- | --- | --- |
+| `next` | 16.3.8 | 16.4.5 |
+| `eslint-config-next` | 16.3.8 | 16.4.5 |
+
+- The update removes the Next.js advisories that affected 16.3.8 (image-optimizer and `use cache` remote code execution, and Server Actions denial of service: GHSA-2464-fhr4-w9xw, GHSA-673q-mjm6-r5xr, GHSA-p3m5-59mp-jv5r). Fixes begin at 16.4.1; 16.4.5 is the current stable release.
+- Exactly one Next copy is installed and locked, and no Next 16.3.8 remains. `sharp` remains 0.35.5.
+- `package-lock.json` was generated with npm 10.9.10 (the npm line that ships with GitHub's Node 22) and verified with a clean `npm ci`. Lock movement is limited to the `@next/*` 16.4.5 set, dev-only `eslint-plugin-react-hooks` 7.1.1 and `zod` 4.6.7, and bundled-dependency entries for the optional wasm32 package `@tailwindcss/oxide-wasm32-wasi`. The integrity of every changed entry matches the npm registry.
+- `npm audit --omit=dev --audit-level=high` exits 0 (production: critical 0, high 0, moderate 5, low 0). The five moderate findings (`@sentry/nextjs`, `@sentry/bundler-plugins`, `@sentry/node`, `glob`, `minimatch`) are in the unchanged Sentry chain. Dev-only high advisories (`vite`, `js-yaml`, development copies of `brace-expansion`) remain outside the production audit gate; no untrusted-input exposure in CI or the build was identified.
+
+### Auth-page compatibility
+
+`eslint-config-next` 16.4.5 enables the stricter `react-hooks/set-state-in-effect` rule, so two client pages needed narrow changes (no lint-rule suppression):
+
+- `src/app/account/accept-invite/page.jsx`
+- `src/app/account/reset-password/page.jsx`
+
+Both pages now derive the query token through `useSearchParams()` rather than synchronously copying URL state into React state from an effect:
+
+- The validation result is stored together with the token it belongs to, so a result for one token is never treated as valid for another.
+- A stale validation response cannot overwrite a newer token's state.
+- Submit uses the token currently in the URL, and the form is shown only after that token has been validated.
+- A missing or empty token renders the invalid-link state directly and does not call the validation endpoint.
+- In production each page performs one read-only validation `GET` per page load.
+- Both pages sit inside a `Suspense` boundary (Accept Invite already did; Reset Password gained one in place of its mount-state workaround), which Next 16.4.5 requires for `useSearchParams` on a static page. Both pages build as static pages.
+- Accept Invite now URL-encodes the token when building its validation request, as Reset Password already did.
+- Backend auth APIs and token semantics (expiry, single-use consumption, password rules) were unchanged; `src/app/api/**` is byte-identical across the range.
+- Twelve focused Playwright tests in `tests/e2e/auth-pages.spec.js` (API mocked in the browser) cover missing, empty, valid, invalid/expired, and failed-request tokens, a rejected submit, token URL-encoding, the exact token submitted, request count, and the absence of hydration/Suspense console errors. They do not exercise in-page query-token switching (deferred item 16).
 
 ## Changed implementation files
 
@@ -381,15 +424,23 @@ This report is a separate documentation-only handoff change.
 
 No product route, dependency, package manifest, CI workflow, mobile source, or migration changed in the narrow-remediation implementation commit.
 
+### Later release-candidate commits
+
+- `08dc9b7` (CI harness isolation): `.github/workflows/ci.yml` only. The Gate 2 route suite now runs against a disposable clone of the production-shaped database so the Gate 5 facts fixture and fail-closed rehearsals inherit an intact database.
+- `187f753` (Next 16.4.5 security update): `package.json` and `package-lock.json` only.
+- `4b97b85` (auth compatibility): `src/app/account/accept-invite/page.jsx`, `src/app/account/reset-password/page.jsx`, and `tests/e2e/auth-pages.spec.js`.
+
+No migration, backend route, Gate 5 communication source, or mobile source changed in these commits.
+
 ## Deferred P2 / known limitations
 
-### P1
+### P0 / P1
 
-None known in the accepted Gate 5 scope.
+P0 = 0 and P1 = 0 for the accepted release candidate.
 
 ### P2 / explicitly deferred
 
-1. Reusing a stale reminder claim also reuses its provider key even if a future code change were to alter the payload for that same claim.
+1. Reusing a stale reminder claim also reuses its provider key. If the retry payload differs from the first attempt's (for example an automatic attempt later retried manually, which changes the subject and urgency label), a provider that enforces key/payload matching can reject the retry until the schedule rotates the claim or the key expires.
 2. Morning reminder and midday-alert candidate queries have a silent hard cap of 100 and no pagination or truncation report.
 3. Midday dedupe interpolates the raw driver-returned `match_local_date` rather than an explicitly formatted Johannesburg date.
 4. Availability token consumption does not revalidate captain reassignment; the token remains bound to the current participant team, not the current captain.
@@ -404,5 +455,14 @@ None known in the accepted Gate 5 scope.
 13. Push-token format is enforced by application validation, not a database CHECK.
 14. Applying `0010` is not rollback-compatible with running the pre-Gate-5 application against that database shape.
 15. Weather-alert and round-postponement routes contain normal structured push failures, but a theoretically throwing push helper is not isolated per recipient in every path.
+
+Observations from the final Next 16.4.5 adversarial review (none is a P0 or P1):
+
+16. The committed Playwright coverage for the two account pages does not exercise in-page query-token switching (the token changing while the page stays mounted). Independent adversarial probes verified the implementation for both orderings of overlapping validations, submission of the current token, and token removal; those probes are not part of the committed suite.
+17. After an unusual same-page query-token change, some cosmetic client state can survive: an already-rendered success screen, typed password fields, or a previous submit error. Email links open as full page loads, and server-side token validation remains authoritative.
+18. Reset Password emits two identical read-only validation `GET`s under development React StrictMode (it previously emitted one). Accept Invite emitted two both before and after the upgrade. Production emits one per page load.
+19. Five moderate production dependency advisories remain in the unchanged Sentry chain (`@sentry/nextjs`, `@sentry/bundler-plugins`, `@sentry/node`, `glob`, `minimatch`), and dev-only high advisories (`vite`, `js-yaml`, development copies of `brace-expansion`) remain outside the production audit gate.
+20. Historical reset-validation behavior is retained: if the validation endpoint were ever to return JSON without a `valid` field, Reset Password renders its form, as it did before the upgrade. The current server contract always returns a boolean, and the reset `POST` revalidates the token.
+21. A provider `409 concurrent_idempotent_requests` response is not retried. Because every `sendEmail` call now carries a key, a retry that overlaps a still-processing earlier attempt can be reported as a failure even though the provider may deliver the email once; it cannot produce a duplicate delivery.
 
 These items are not blockers for the implemented availability/reminder integrity gate, but should remain visible in adversarial review and future communications work.
