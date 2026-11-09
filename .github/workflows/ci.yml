@@ -117,7 +117,56 @@ jobs:
 
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0009_gate4b_league_lifecycle.sql
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "SELECT result_type, nova_planned_date(match_date) FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'"
-          TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate2_routes
+          TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate2_routes' npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js
+
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f tests/fixtures/gate5-production-facts.sql
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate5_bad_notification
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate5_duplicate_push
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate5_bad_response
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate5_bad_state
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate5_duplicate_identity
+
+          bad_notification_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate5_bad_notification'
+          psql "$bad_notification_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO notifications (user_id, type, title, message) VALUES ('30000000-0000-4000-8000-000000000002', 'unsupported_type', 'Bad', 'Bad')"
+          if psql "$bad_notification_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0010_gate5_availability_notifications.sql; then
+            echo "Gate 5 unexpectedly accepted an unsupported notification type"
+            exit 1
+          fi
+
+          duplicate_push_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate5_duplicate_push'
+          psql "$duplicate_push_url" -X -v ON_ERROR_STOP=1 -c "UPDATE auth_users SET push_token = 'ExpoPushToken[duplicate]' WHERE id IN ('30000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000002')"
+          if psql "$duplicate_push_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0010_gate5_availability_notifications.sql; then
+            echo "Gate 5 unexpectedly accepted duplicate push-token ownership"
+            exit 1
+          fi
+
+          bad_response_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate5_bad_response'
+          psql "$bad_response_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO availability_responses (match_id, team_id, token, response, responded_at) VALUES ('70000000-0000-4000-8000-000000000001', '60000000-0000-4000-8000-000000000001', NULL, 'maybe', CURRENT_TIMESTAMP)"
+          if psql "$bad_response_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0010_gate5_availability_notifications.sql; then
+            echo "Gate 5 unexpectedly accepted an invalid availability response"
+            exit 1
+          fi
+
+          bad_state_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate5_bad_state'
+          psql "$bad_state_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO availability_responses (match_id, team_id, token, response, responded_at) VALUES ('70000000-0000-4000-8000-000000000001', '60000000-0000-4000-8000-000000000001', repeat('a', 64), 'yes', CURRENT_TIMESTAMP)"
+          if psql "$bad_state_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0010_gate5_availability_notifications.sql; then
+            echo "Gate 5 unexpectedly accepted inconsistent availability state"
+            exit 1
+          fi
+
+          duplicate_identity_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate5_duplicate_identity'
+          psql "$duplicate_identity_url" -X -v ON_ERROR_STOP=1 -c "ALTER TABLE availability_responses DROP CONSTRAINT availability_responses_match_team_key; INSERT INTO availability_responses (match_id, team_id, token) VALUES ('70000000-0000-4000-8000-000000000001', '60000000-0000-4000-8000-000000000001', repeat('a', 64)), ('70000000-0000-4000-8000-000000000001', '60000000-0000-4000-8000-000000000001', repeat('b', 64))"
+          if psql "$duplicate_identity_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0010_gate5_availability_notifications.sql; then
+            echo "Gate 5 unexpectedly accepted duplicate availability identity"
+            exit 1
+          fi
+
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0010_gate5_availability_notifications.sql
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns WHERE table_schema = 'public' AND ((table_name = 'availability_responses' AND column_name IN ('expires_at', 'delivery_claim_id', 'delivery_claimed_at')) OR (table_name = 'notifications' AND column_name IN ('dedupe_key', 'read_at')))")" = "dedupe_key,delivery_claim_id,delivery_claimed_at,expires_at,read_at"
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('availability_responses_response_supported', 'availability_responses_state_consistent', 'availability_responses_token_format', 'availability_responses_claim_consistent', 'notifications_type_supported') AND convalidated")" = "5"
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class WHERE relname IN ('availability_responses_token_unique', 'notifications_dedupe_key_unique', 'auth_users_push_token_unique')")" = "3"
+          TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate5-communications.test.js
 
       - name: Unit and contract tests
         run: npm test

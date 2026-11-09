@@ -1,51 +1,141 @@
+import { sql } from "@/app/api/utils/db";
+import { isValidExpoPushToken } from "@/app/api/utils/push-token";
+
+const EXPO_ENDPOINT = "https://exp.host/--/api/v2/push/send";
+const PUSH_TIMEOUT_MS = 10_000;
+
+async function clearStoredToken(token) {
+  if (typeof token !== "string" || token.length > 256) return false;
+  try {
+    await sql`
+      UPDATE auth_users
+      SET push_token = NULL
+      WHERE push_token = ${token}
+    `;
+    return true;
+  } catch (error) {
+    console.error("Push token cleanup failed", { code: error?.code || "UNKNOWN" });
+    return false;
+  }
+}
+
+function providerFailure(message, retryable = true) {
+  return {
+    status: "provider_error",
+    accepted: false,
+    retryable,
+    message,
+  };
+}
+
 /**
- * Sends push notifications via the Expo Push API.
- * No SDK required — plain HTTP to https://exp.host/--/api/v2/push/send
- *
- * @param {Array<{ token: string, title: string, body: string, data?: object }>} messages
- * @returns {Promise<void>}
+ * Sends a batch to Expo and returns one sanitized result per input message.
+ * Invalid and permanently rejected tokens are cleared from auth_users.
  */
 export async function sendPushNotifications(messages) {
-  if (!messages || messages.length === 0) return;
+  if (!Array.isArray(messages) || messages.length === 0) return [];
 
-  // Filter out null/undefined tokens
-  const valid = messages.filter(
-    (m) => m.token && m.token.startsWith("ExponentPushToken")
-  );
-  if (valid.length === 0) return;
+  const results = new Array(messages.length);
+  const valid = [];
 
-  const payload = valid.map((m) => ({
-    to: m.token,
-    title: m.title,
-    body: m.body,
-    data: m.data || {},
-    sound: "default",
-    priority: "high",
-  }));
+  for (const [index, message] of messages.entries()) {
+    if (!isValidExpoPushToken(message?.token)) {
+      results[index] = {
+        status: "invalid_token",
+        accepted: false,
+        retryable: false,
+        message: "The stored push token is invalid",
+      };
+      results[index].tokenCleared = await clearStoredToken(message?.token);
+      continue;
+    }
+    valid.push({ index, message });
+  }
+
+  if (valid.length === 0) return results;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PUSH_TIMEOUT_MS);
 
   try {
-    const res = await fetch("https://exp.host/--/api/v2/push/send", {
+    const response = await fetch(EXPO_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
         "Accept-Encoding": "gzip, deflate",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(valid.map(({ message }) => ({
+        to: message.token,
+        title: message.title,
+        body: message.body,
+        data: message.data || {},
+        sound: "default",
+        priority: "high",
+      }))),
+      signal: controller.signal,
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("Expo push error:", text);
+    if (!response.ok) {
+      const retryable = response.status === 429 || response.status >= 500;
+      for (const { index } of valid) {
+        results[index] = providerFailure("The push provider rejected the request", retryable);
+      }
+      return results;
     }
-  } catch (err) {
-    console.error("Failed to send push notifications:", err);
+
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    const tickets = Array.isArray(payload?.data) ? payload.data : [];
+
+    for (const [position, { index, message }] of valid.entries()) {
+      const ticket = tickets[position];
+      if (ticket?.status === "ok") {
+        results[index] = {
+          status: "accepted",
+          accepted: true,
+          retryable: false,
+          ticketId: typeof ticket.id === "string" ? ticket.id : null,
+        };
+        continue;
+      }
+
+      if (ticket?.details?.error === "DeviceNotRegistered") {
+        const tokenCleared = await clearStoredToken(message.token);
+        results[index] = {
+          status: "invalid_token",
+          accepted: false,
+          retryable: false,
+          message: "The device is no longer registered",
+          tokenCleared,
+        };
+        continue;
+      }
+
+      results[index] = providerFailure(
+        "The push provider did not accept the notification",
+        ticket?.details?.error === "MessageRateExceeded",
+      );
+    }
+  } catch (error) {
+    const message = error?.name === "AbortError"
+      ? "The push provider timed out"
+      : "The push provider is unavailable";
+    for (const { index } of valid) {
+      results[index] = providerFailure(message, true);
+    }
+  } finally {
+    clearTimeout(timeout);
   }
+
+  return results;
 }
 
-/**
- * Convenience wrapper for a single push notification.
- */
 export async function sendPush(token, title, body, data = {}) {
-  return sendPushNotifications([{ token, title, body, data }]);
+  const [result] = await sendPushNotifications([{ token, title, body, data }]);
+  return result;
 }

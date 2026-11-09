@@ -53,25 +53,34 @@ export async function PATCH(request) {
     const { notificationId, markAllRead } = await request.json();
 
     if (markAllRead) {
-      await sql`
+      const updated = await sql`
         UPDATE notifications
-        SET read = TRUE
+        SET read = TRUE,
+            read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
         WHERE user_id = ${session.user.id}
+          AND read = FALSE
+        RETURNING id
       `;
       return Response.json({
         success: true,
         message: "All notifications marked as read",
+        updated: updated.length,
       });
     }
 
     if (notificationId) {
       if (!UUID_RE.test(notificationId))
         return Response.json({ error: "Invalid notificationId" }, { status: 400 });
-      await sql`
+      const updated = await sql`
         UPDATE notifications
-        SET read = TRUE
+        SET read = TRUE,
+            read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
         WHERE id = ${notificationId} AND user_id = ${session.user.id}
+        RETURNING id
       `;
+      if (updated.length === 0) {
+        return Response.json({ error: "Notification not found" }, { status: 404 });
+      }
       return Response.json({ success: true });
     }
 

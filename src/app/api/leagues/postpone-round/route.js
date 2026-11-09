@@ -12,6 +12,7 @@ import {
 import { addDaysToLocalDate, formatLocalFixtureDate } from "@/utils/scheduling";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { sendPush } from "@/app/api/utils/send-push";
+import { NOTIFICATION_TYPES } from "@/constants/notification-types";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -227,7 +228,7 @@ export async function POST(request) {
           INSERT INTO notifications (user_id, type, title, message)
           VALUES (
             ${captain.id},
-            'round_postponed',
+            ${NOTIFICATION_TYPES.ROUND_POSTPONED},
             ${notifTitle},
             ${notifMessage}
           )
@@ -238,7 +239,7 @@ export async function POST(request) {
             captain.push_token,
             `📅 Round ${round_number}+ Postponed`,
             `${league.name} — All rounds from ${round_number} shifted by 7 days. Check fixtures for new dates.`,
-            { type: "round_postponed" }
+            { type: NOTIFICATION_TYPES.ROUND_POSTPONED }
           );
         }
 
