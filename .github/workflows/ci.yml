@@ -117,7 +117,8 @@ jobs:
 
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0009_gate4b_league_lifecycle.sql
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "SELECT result_type, nova_planned_date(match_date) FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'"
-          TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate2_routes
+          TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate2_routes' npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js
 
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f tests/fixtures/gate5-production-facts.sql
           createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate5_bad_notification
