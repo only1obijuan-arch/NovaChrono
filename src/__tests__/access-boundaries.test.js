@@ -163,8 +163,8 @@ describe("D3 registration", () => {
   it("rejects duplicate active team", async () => { duplicate = true; expect((await register(request(body()))).status).toBe(409); expect(writes()).toEqual([]); });
   it("rejects invalid identifiers", async () => { expect((await register(request({ ...body(), leagueId: "invalid" }))).status).toBe(400); });
   it.each([true, false])("rejects signed bearer without active session (jti=%s)", async hasJti => {
-    mocks.auth.mockResolvedValue(null); vi.stubEnv("AUTH_SECRET", "isolated-test-secret");
-    let signer = new SignJWT({ id: CAPTAIN, role: "captain" }).setProtectedHeader({ alg: "HS256" }).setExpirationTime("5m");
+    mocks.auth.mockResolvedValue(null); vi.stubEnv("AUTH_SECRET", "isolated-test-secret-at-least-32-characters");
+    let signer = new SignJWT({ id: CAPTAIN, role: "captain" }).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("5m");
     if (hasJti) signer = signer.setJti("revoked-session");
     const token = await signer.sign(new TextEncoder().encode(process.env.AUTH_SECRET));
     const req = request(body()); req.headers.set("authorization", "Bearer " + token);
@@ -176,10 +176,10 @@ afterEach(() => vi.unstubAllEnvs());
 
 it("D3 accepts a currently active bearer session using live captain identity", async () => {
   mocks.auth.mockResolvedValue(null);
-  vi.stubEnv("AUTH_SECRET", "isolated-test-secret");
+  vi.stubEnv("AUTH_SECRET", "isolated-test-secret-at-least-32-characters");
   const normal = mocks.query.getMockImplementation();
   mocks.query.mockImplementation(async (q, p) => q.includes("mobile_sessions") ? { rows: [{ id: CAPTAIN, role: "captain" }], rowCount: 1 } : normal(q, p));
-  const token = await new SignJWT({ id: CAPTAIN, role: "captain" }).setProtectedHeader({ alg: "HS256" }).setJti("active-session").setExpirationTime("5m").sign(new TextEncoder().encode(process.env.AUTH_SECRET));
+  const token = await new SignJWT({ id: CAPTAIN, role: "captain" }).setProtectedHeader({ alg: "HS256" }).setJti("active-session").setIssuedAt().setExpirationTime("5m").sign(new TextEncoder().encode(process.env.AUTH_SECRET));
   const req = request({ leagueId: LEAGUE, teamName: "Team", joinCode: "ABC12345" });
   req.headers.set("authorization", "Bearer " + token);
   expect((await register(req)).status).toBe(200);

@@ -8,6 +8,7 @@ import { verifyEmail } from "@/emails/verifyEmail";
 import crypto from "crypto";
 import { z } from "zod";
 import { canonicalizeEmail } from "@/app/api/utils/email";
+import { getTrustedClientIp } from "@/app/api/utils/client-ip";
 
 const signupSchema = z.object({
   joinCode: z.string().trim().refine(isValidJoinCode, "League code must be 6 or 8 letters or digits"),
@@ -19,7 +20,7 @@ const signupSchema = z.object({
 
 export async function POST(request) {
   try {
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+    const ip = getTrustedClientIp(request);
     const { allowed } = await rateLimit(`signup:${ip}`, { max: 5, windowMinutes: 60 });
     if (!allowed) {
       return Response.json({ error: "Too many signup attempts. Try again later." }, { status: 429 });

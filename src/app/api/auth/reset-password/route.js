@@ -4,6 +4,7 @@ import { rateLimit } from "@/app/api/utils/rate-limit";
 import crypto from "crypto";
 import { z } from "zod";
 import { invalidateUserSessions } from "@/app/api/utils/session-security";
+import { getTrustedClientIp } from "@/app/api/utils/client-ip";
 
 const resetPasswordSchema = z.object({
   token: z.string().min(1).max(512),
@@ -51,7 +52,7 @@ export async function POST(request) {
     }
     const { token, password } = parsed.data;
 
-    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = getTrustedClientIp(request);
     const { allowed } = await rateLimit(`reset-attempt:${ip}`, { max: 10, windowMinutes: 15 });
     if (!allowed) {
       return Response.json({ error: "Too many attempts. Try again later." }, { status: 429 });

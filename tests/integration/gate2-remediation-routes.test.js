@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SignJWT } from "jose";
+import { hash } from "argon2";
 
 const authState = vi.hoisted(() => ({ actorId: null }));
 vi.mock("@/auth", () => ({
@@ -10,10 +11,14 @@ vi.mock("@/app/api/utils/send-push", () => ({ sendPush: vi.fn(async () => ({ suc
 
 import { pool } from "@/app/api/utils/db";
 import { withTransaction } from "@/app/api/utils/sql";
+import { invalidateUserSessions } from "@/app/api/utils/session-security";
 import { DELETE as deleteReferee, POST as createReferee } from "@/app/api/admin/referees/route";
 import { DELETE as deleteUser } from "@/app/api/super-admin/users/route";
 import { GET as getTeams, POST as teamCommand } from "@/app/api/teams/route";
 import { POST as refreshMobile } from "@/app/api/auth/mobile-refresh/route";
+import { POST as signinMobile } from "@/app/api/auth/mobile-signin/route";
+import { POST as signoutMobile } from "@/app/api/auth/mobile-signout/route";
+import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 import { GET as getMatches, POST as matchCommand } from "@/app/api/matches/route";
 import { GET as getStats } from "@/app/api/stats/route";
 import { GET as getLeague, POST as leagueCommand } from "@/app/api/leagues/route";
@@ -53,6 +58,9 @@ const IDS = {
   match3: "70000000-0000-4000-8000-000000000004",
   match4: "70000000-0000-4000-8000-000000000005",
 };
+
+const MOBILE_PASSWORD = "MobilePass123!";
+const MOBILE_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$TP1Qjuf766qmEjOHcIU9ig$0jEaDYYexUffI4pY/gq5VFjQA4sqhNydE35iFWYkqXU";
 
 const request = (url, method = "GET", body) => new Request(`https://example.test${url}`, {
   method,
@@ -764,6 +772,11 @@ async function seed() {
     IDS.captain, IDS.referee, IDS.protectedReferee, IDS.mobile,
     IDS.venueA, IDS.orgA, IDS.venueB, IDS.orgB, IDS.foreignReferee,
   ]);
+  await pool.query(
+    `INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)
+     VALUES ($1, 'credentials', 'credentials', $2, $3)`,
+    [IDS.mobile, IDS.mobile, MOBILE_PASSWORD_HASH],
+  );
   await pool.query(`
     INSERT INTO leagues
       (id, venue_id, name, day_of_week, match_format, match_duration_minutes,
@@ -923,6 +936,317 @@ describe("mobile refresh rotation", () => {
     const sessions = await pool.query("SELECT jti FROM mobile_sessions WHERE user_id = $1", [IDS.mobile]);
     expect(sessions.rowCount).toBe(1);
     expect(sessions.rows[0].jti).not.toBe(oldJti);
+  });
+});
+
+describe("Gate 6A mobile authentication boundary", () => {
+  const signin = (body, headers = {}) => signinMobile(new Request(
+    "https://example.test/api/auth/mobile-signin",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    },
+  ));
+
+  const bearerRequest = (path, token) => new Request(`https://example.test${path}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+  });
+
+  const issueToken = ({ jti, issuedAt = Math.floor(Date.now() / 1000), expiresAt = "1h", claims = {} }) =>
+    new SignJWT({ id: IDS.mobile, ...claims })
+      .setProtectedHeader({ alg: "HS256" })
+      .setJti(jti)
+      .setIssuedAt(issuedAt)
+      .setExpirationTime(expiresAt)
+      .sign(new TextEncoder().encode(process.env.AUTH_SECRET));
+
+  // Resolves once another backend is parked on a lock, so a test can interleave
+  // deterministically instead of racing on timing.
+  const waitForLockWaiter = async () => {
+    for (let waited = 0; waited < 5000; waited += 25) {
+      const { rows } = await pool.query(
+        "SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()",
+      );
+      if (rows[0].n > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error("expected a backend to be waiting on a lock");
+  };
+
+  it.each([
+    ["missing credentials", {}],
+    ["missing password", { email: "mobile@example.test" }],
+    ["invalid email", { email: "not-an-email", password: "x" }],
+    ["unexpected fields", { email: "mobile@example.test", password: "x", role: "super_admin" }],
+  ])("rejects %s as an invalid request", async (_label, body) => {
+    const response = await signin(body);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid request" });
+  });
+
+  it("rejects malformed JSON without surfacing an internal error", async () => {
+    const response = await signinMobile(new Request(
+      "https://example.test/api/auth/mobile-signin",
+      { method: "POST", headers: { "content-type": "application/json" }, body: "{" },
+    ));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid request" });
+  });
+
+  it("returns the same public error for an unknown account and a bad password", async () => {
+    const unknown = await signin({ email: "missing@example.test", password: "wrong" });
+    const invalid = await signin({ email: "mobile@example.test", password: "wrong" });
+    expect(unknown.status).toBe(401);
+    expect(invalid.status).toBe(401);
+    expect(await unknown.json()).toEqual({ error: "Invalid email or password" });
+    expect(await invalid.json()).toEqual({ error: "Invalid email or password" });
+  });
+
+  it("requires email verification after valid credential verification", async () => {
+    await pool.query('UPDATE auth_users SET "emailVerified" = NULL WHERE id = $1', [IDS.mobile]);
+    const response = await signin({ email: "mobile@example.test", password: MOBILE_PASSWORD });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Please verify your email before signing in." });
+  });
+
+  it("rate-limits repeated attempts for the canonical email", async () => {
+    const responses = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      responses.push(await signin({ email: " MOBILE@EXAMPLE.TEST ", password: "wrong" }));
+    }
+    expect(responses.slice(0, 5).every((response) => response.status === 401)).toBe(true);
+    expect(responses[5].status).toBe(429);
+  });
+
+  it("authenticates valid credentials and ignores arbitrary app-secret headers", async () => {
+    const response = await signin(
+      { email: "mobile@example.test", password: MOBILE_PASSWORD },
+      { "x-mobile-secret": "attacker-chosen-value" },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.user).toMatchObject({ id: IDS.mobile, role: "captain" });
+    expect(await verifyMobileToken(bearerRequest("/api/protected", body.token))).toMatchObject({
+      id: IDS.mobile,
+      role: "captain",
+    });
+  });
+
+  it("cannot create a session from credentials superseded by a concurrent reset", async () => {
+    const replacementHash = await hash("ReplacementPass123!");
+    const lock = await pool.connect();
+    try {
+      await lock.query("BEGIN");
+      await lock.query("SELECT id FROM auth_users WHERE id = $1 FOR UPDATE", [IDS.mobile]);
+
+      const pendingSignin = signin({
+        email: "mobile@example.test",
+        password: MOBILE_PASSWORD,
+      });
+      // Sign-in must park on the user-row lock before the reset commits; without
+      // its own FOR UPDATE it would read the old credentials and win this race.
+      await waitForLockWaiter();
+      await lock.query(
+        `UPDATE auth_accounts
+         SET password = $1
+         WHERE "userId" = $2 AND provider = 'credentials'`,
+        [replacementHash, IDS.mobile],
+      );
+      await lock.query(
+        "UPDATE auth_users SET sessions_valid_after = NOW() WHERE id = $1",
+        [IDS.mobile],
+      );
+      await lock.query("DELETE FROM mobile_sessions WHERE user_id = $1", [IDS.mobile]);
+      await lock.query("COMMIT");
+
+      const response = await pendingSignin;
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "Invalid email or password" });
+      expect((await pool.query(
+        "SELECT count(*) FROM mobile_sessions WHERE user_id = $1",
+        [IDS.mobile],
+      )).rows[0].count).toBe("0");
+    } catch (error) {
+      await lock.query("ROLLBACK");
+      throw error;
+    } finally {
+      lock.release();
+    }
+  });
+
+  it("rejects invalid signatures, expired tokens, and missing session JTIs", async () => {
+    const invalidSignature = await new SignJWT({ id: IDS.mobile })
+      .setProtectedHeader({ alg: "HS256" })
+      .setJti("invalid-signature")
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(new TextEncoder().encode("different-integration-secret-at-least-32-characters"));
+    const expired = await issueToken({
+      jti: "expired-session",
+      issuedAt: Math.floor(Date.now() / 1000) - 7200,
+      expiresAt: Math.floor(Date.now() / 1000) - 3600,
+    });
+    const missingSession = await issueToken({ jti: "missing-session" });
+
+    await expect(verifyMobileToken(bearerRequest("/api/protected", invalidSignature))).resolves.toBeNull();
+    await expect(verifyMobileToken(bearerRequest("/api/protected", expired))).resolves.toBeNull();
+    await expect(verifyMobileToken(bearerRequest("/api/protected", missingSession))).resolves.toBeNull();
+  });
+
+  it("rejects a session issued before the user's revocation boundary", async () => {
+    const jti = "revoked-by-session-epoch";
+    const issuedAt = Math.floor(Date.now() / 1000) - 60;
+    await pool.query(
+      "INSERT INTO mobile_sessions (jti, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 hour')",
+      [jti, IDS.mobile],
+    );
+    await pool.query(
+      "UPDATE auth_users SET sessions_valid_after = NOW() WHERE id = $1",
+      [IDS.mobile],
+    );
+    const token = await issueToken({ jti, issuedAt });
+    await expect(verifyMobileToken(bearerRequest("/api/protected", token))).resolves.toBeNull();
+  });
+
+  it("uses the live database role instead of a signed or client-supplied role claim", async () => {
+    const jti = "forged-role-claim";
+    await pool.query(
+      "INSERT INTO mobile_sessions (jti, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 hour')",
+      [jti, IDS.mobile],
+    );
+    const token = await issueToken({ jti, claims: { role: "super_admin" } });
+    authState.actorId = null;
+    const privilegedRequest = new Request(
+      `https://example.test/api/super-admin/users?id=${IDS.captain}`,
+      { method: "DELETE", headers: { authorization: `Bearer ${token}` } },
+    );
+    expect((await deleteUser(privilegedRequest)).status).toBe(403);
+    expect(Number((await pool.query(
+      "SELECT count(*) FROM auth_users WHERE id = $1",
+      [IDS.captain],
+    )).rows[0].count)).toBe(1);
+  });
+
+  it("rejects refresh replay after the old JTI has been exchanged", async () => {
+    const jti = "refresh-replay";
+    await pool.query(
+      "INSERT INTO mobile_sessions (jti, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 hour')",
+      [jti, IDS.mobile],
+    );
+    const token = await issueToken({ jti });
+    expect((await refreshMobile(bearerRequest("/api/auth/mobile-refresh", token))).status).toBe(200);
+    expect((await refreshMobile(bearerRequest("/api/auth/mobile-refresh", token))).status).toBe(401);
+  });
+
+  it("does not let a refresh in flight leave a session that survives a password reset", async () => {
+    const jti = "refresh-vs-reset";
+    await pool.query(
+      "INSERT INTO mobile_sessions (jti, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 hour')",
+      [jti, IDS.mobile],
+    );
+    const token = await issueToken({ jti });
+    const replacementHash = await hash("ReplacementPass123!");
+
+    // Hold the refresh transaction just before it inserts the replacement JTI
+    // (pool.query itself calls pool.connect, so settle it before spying).
+    await pool.query("SELECT 1");
+    const realConnect = pool.connect.bind(pool);
+    let openGate;
+    const gate = new Promise((resolve) => { openGate = resolve; });
+    let reachedGate;
+    const atGate = new Promise((resolve) => { reachedGate = resolve; });
+    const connectSpy = vi.spyOn(pool, "connect").mockImplementationOnce(async () => {
+      const client = await realConnect();
+      const realQuery = client.query.bind(client);
+      client.query = async (...args) => {
+        if (typeof args[0] === "string" && args[0].includes("INSERT INTO mobile_sessions")) {
+          client.query = realQuery;
+          reachedGate();
+          await gate;
+        }
+        return realQuery(...args);
+      };
+      return client;
+    });
+
+    try {
+      const refreshing = refreshMobile(bearerRequest("/api/auth/mobile-refresh", token));
+      await atGate;
+
+      // The reset's own transaction shape (password change, then the session
+      // boundary and JTI delete) starts while the refresh is still open.
+      const resetting = withTransaction(async (txSql) => {
+        await txSql`
+          UPDATE auth_accounts SET password = ${replacementHash}
+          WHERE "userId" = ${IDS.mobile} AND provider = 'credentials'`;
+        await invalidateUserSessions(txSql, IDS.mobile);
+      });
+      await waitForLockWaiter();
+
+      openGate();
+      const refreshResponse = await refreshing;
+      await resetting;
+
+      expect(refreshResponse.status).toBe(200);
+      expect(Number((await pool.query(
+        "SELECT count(*) FROM mobile_sessions WHERE user_id = $1",
+        [IDS.mobile],
+      )).rows[0].count)).toBe(0);
+      const { token: replacement } = await refreshResponse.json();
+      await expect(verifyMobileToken(bearerRequest("/api/protected", replacement))).resolves.toBeNull();
+    } finally {
+      openGate();
+      connectSpy.mockRestore();
+    }
+  });
+
+  it("accepts only HS256 tokens that carry iat, exp and jti on every bearer route", async () => {
+    const jti = "claims-pinned";
+    await pool.query(
+      "INSERT INTO mobile_sessions (jti, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 hour')",
+      [jti, IDS.mobile],
+    );
+    const key = new TextEncoder().encode(process.env.AUTH_SECRET);
+    const now = Math.floor(Date.now() / 1000);
+    const build = ({ alg = "HS256", id = jti, iat = true, exp = true } = {}) => {
+      let signer = new SignJWT({ id: IDS.mobile }).setProtectedHeader({ alg });
+      if (id) signer = signer.setJti(id);
+      if (iat) signer = signer.setIssuedAt(now);
+      if (exp) signer = signer.setExpirationTime("1h");
+      return signer.sign(key);
+    };
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const rejected = [
+      await build({ alg: "HS384" }),
+      await build({ alg: "HS512" }),
+      await build({ iat: false }),
+      await build({ exp: false }),
+      await build({ id: null }),
+      `${encode({ alg: "none", typ: "JWT" })}.${encode({ id: IDS.mobile, jti, iat: now, exp: now + 3600 })}.`,
+    ];
+
+    for (const bad of rejected) {
+      await expect(verifyMobileToken(bearerRequest("/api/protected", bad))).resolves.toBeNull();
+      expect((await refreshMobile(bearerRequest("/api/auth/mobile-refresh", bad))).status).toBe(401);
+      expect((await signoutMobile(bearerRequest("/api/auth/mobile-signout", bad))).status).toBe(401);
+    }
+    // None of the rejected calls may have consumed or revoked the live session.
+    expect(Number((await pool.query(
+      "SELECT count(*) FROM mobile_sessions WHERE jti = $1",
+      [jti],
+    )).rows[0].count)).toBe(1);
+    // Control: the same claims with HS256 are accepted.
+    await expect(verifyMobileToken(bearerRequest("/api/protected", await build()))).resolves.toMatchObject({ id: IDS.mobile });
+  });
+
+  it("revokes the session on logout and rejects the token afterwards", async () => {
+    const signinResponse = await signin({ email: "mobile@example.test", password: MOBILE_PASSWORD });
+    const { token } = await signinResponse.json();
+    expect((await signoutMobile(bearerRequest("/api/auth/mobile-signout", token))).status).toBe(200);
+    await expect(verifyMobileToken(bearerRequest("/api/protected", token))).resolves.toBeNull();
+    expect((await refreshMobile(bearerRequest("/api/auth/mobile-refresh", token))).status).toBe(401);
   });
 });
 

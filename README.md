@@ -60,7 +60,7 @@ The Playwright suite starts a local web server and uses browser-level mocked API
 
 The authoritative variable-name baseline is .env.example. Important groups are:
 
-- Database/authentication: DATABASE_URL, AUTH_SECRET, MOBILE_SECRET
+- Database/authentication: DATABASE_URL, AUTH_SECRET
 - Public URLs/mobile: NEXT_PUBLIC_APP_URL, EXPO_PUBLIC_BASE_URL
 - Providers: RESEND_API_KEY, RESEND_FROM_EMAIL, OPENWEATHER_API_KEY
 - Scheduled jobs: CRON_SECRET
@@ -68,6 +68,7 @@ The authoritative variable-name baseline is .env.example. Important groups are:
 - Release identity: APP_VERSION or platform commit-SHA variables
 
 EXPO_PUBLIC_* values are embedded in the mobile application and are not secrets. Never commit real credentials or production exports.
+Mobile sign-in is authenticated by user credentials and server-side abuse controls; distributed app bundles must never contain a shared authentication secret.
 
 ## Database and schema truth
 
