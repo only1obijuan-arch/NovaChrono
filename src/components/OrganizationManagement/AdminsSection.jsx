@@ -1,6 +1,6 @@
-import { Plus, Users, Trash2 } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 
-export function AdminsSection({ usersData, hasVenues, onAddAdmin, onDeleteUser }) {
+export function AdminsSection({ usersData, hasVenues, onAddAdmin }) {
   return (
     <div className="om-section">
       <div className="om-section-header">
@@ -28,7 +28,7 @@ export function AdminsSection({ usersData, hasVenues, onAddAdmin, onDeleteUser }
                 <th>NAME</th>
                 <th>EMAIL</th>
                 <th>VENUE</th>
-                <th style={{ textAlign: "right" }}>ACTIONS</th>
+                <th style={{ textAlign: "right" }}>STATUS</th>
               </tr>
             </thead>
             <tbody>
@@ -38,12 +38,7 @@ export function AdminsSection({ usersData, hasVenues, onAddAdmin, onDeleteUser }
                   <td>{admin.email}</td>
                   <td>{admin.venue_name || "—"}</td>
                   <td style={{ textAlign: "right" }}>
-                    <button
-                      className="om-icon-btn delete"
-                      onClick={() => onDeleteUser(admin.id, admin.name)}
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                    {admin.account_status?.replaceAll("_", " ") || "active"}
                   </td>
                 </tr>
               ))}

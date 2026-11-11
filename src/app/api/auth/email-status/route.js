@@ -19,7 +19,7 @@ export async function GET(request) {
     const [user] = await sql`
       SELECT "emailVerified"
       FROM auth_users
-      WHERE lower(email) = ${email}
+      WHERE lower(email) = ${email} AND account_status = 'active'
     `;
 
     // Only return true when the account exists AND is not yet verified.

@@ -149,6 +149,16 @@ export async function requestPasswordReset(email) {
   return data;
 }
 
+export async function requestAccountDeletion(password) {
+  const res = await apiFetch("/api/account/deletion", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Deletion request failed");
+  return data;
+}
+
 // Captain sign-up — creates account + team and joins a league.
 export async function captainSignUp({ joinCode, name, email, password, teamName }) {
   const res = await fetch(`${BASE_URL}/api/account/signup`, {

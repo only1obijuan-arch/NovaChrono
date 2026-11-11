@@ -4,7 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import { useUser } from "@/utils/auth/useUser";
 import { useAuth } from "@/utils/auth/useAuth";
 import { useRouter } from "expo-router";
-import { MapPin, LogOut, User as UserIcon } from "lucide-react-native";
+import { MapPin, LogOut, Trash2, User as UserIcon } from "lucide-react-native";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -263,6 +263,16 @@ export default function Profile() {
             </View>
           </View>
         </View>
+
+        {/* Account deletion */}
+        <TouchableOpacity
+          onPress={() => router.push("/account/delete")}
+          activeOpacity={0.7}
+          style={{ flexDirection:"row", alignItems:"center", justifyContent:"center", borderWidth:1, borderColor:"rgba(255,120,120,.16)", borderRadius:10, padding:16, gap:12, marginBottom:12 }}
+        >
+          <Trash2 size={18} color="rgba(255,120,120,.65)" />
+          <Text style={{ fontFamily:F.mono, fontSize:12, color:"rgba(255,120,120,.65)", letterSpacing:2 }}>DELETE ACCOUNT</Text>
+        </TouchableOpacity>
 
         {/* Sign out */}
         <TouchableOpacity

@@ -44,6 +44,7 @@ export async function POST(request) {
          FROM mobile_sessions ms
          JOIN auth_users u ON u.id = ms.user_id
          WHERE ms.jti = $1
+           AND u.account_status = 'active'
          FOR UPDATE OF u`,
         [payload.jti]
       );
@@ -54,6 +55,7 @@ export async function POST(request) {
          USING auth_users AS u
          WHERE ms.jti = $1
            AND u.id = ms.user_id
+           AND u.account_status = 'active'
            AND ms.expires_at > NOW()
            AND to_timestamp($2) >= date_trunc('second', u.sessions_valid_after)
          RETURNING u.id, u.role, u.venue_id, u.organization_id, u.email, u.name`,

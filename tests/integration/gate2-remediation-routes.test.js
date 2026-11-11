@@ -848,18 +848,20 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe("FK-safe user deletion", () => {
-  it("deletes a referee and preserves the match by nulling its assignment", async () => {
+describe("Gate 6A lifecycle boundary for legacy destructive routes", () => {
+  it("refuses direct referee deletion and preserves assignment and identity", async () => {
     const response = await deleteReferee(request(`/api/admin/referees?id=${IDS.referee}`, "DELETE"));
-    expect(response.status).toBe(200);
-    expect((await pool.query("SELECT count(*)::int AS count FROM auth_users WHERE id = $1", [IDS.referee])).rows[0].count).toBe(0);
-    expect((await pool.query("SELECT referee_id FROM matches WHERE id = $1", [IDS.match])).rows[0].referee_id).toBeNull();
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("LIFECYCLE_REQUIRED");
+    expect((await pool.query("SELECT count(*)::int AS count FROM auth_users WHERE id = $1", [IDS.referee])).rows[0].count).toBe(1);
+    expect((await pool.query("SELECT referee_id FROM matches WHERE id = $1", [IDS.match])).rows[0].referee_id).toBe(IDS.referee);
   });
 
-  it("deletes a captain and preserves the team by nulling its captain", async () => {
+  it("refuses direct captain deletion and preserves team ownership", async () => {
     const response = await deleteUser(request(`/api/super-admin/users?id=${IDS.captain}`, "DELETE"));
-    expect(response.status).toBe(200);
-    expect((await pool.query("SELECT captain_user_id FROM teams WHERE id = $1", [IDS.team])).rows[0].captain_user_id).toBeNull();
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("LIFECYCLE_REQUIRED");
+    expect((await pool.query("SELECT captain_user_id FROM teams WHERE id = $1", [IDS.team])).rows[0].captain_user_id).toBe(IDS.captain);
   });
 
   it("returns 409 for protected history and rolls back the match update", async () => {
@@ -869,9 +871,9 @@ describe("FK-safe user deletion", () => {
     expect((await pool.query("SELECT count(*)::int AS count FROM auth_users WHERE id = $1", [IDS.protectedReferee])).rows[0].count).toBe(1);
   });
 
-  it("blocks self-deletion even when the UUID uses uppercase hex", async () => {
+  it("blocks direct self-deletion even when the UUID uses uppercase hex", async () => {
     const response = await deleteUser(request(`/api/super-admin/users?id=${IDS.super.toUpperCase()}`, "DELETE"));
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(409);
     expect((await pool.query("SELECT count(*)::int AS count FROM auth_users WHERE id = $1", [IDS.super])).rows[0].count).toBe(1);
   });
 });

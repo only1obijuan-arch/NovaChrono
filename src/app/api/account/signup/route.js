@@ -8,6 +8,7 @@ import { verifyEmail } from "@/emails/verifyEmail";
 import crypto from "crypto";
 import { z } from "zod";
 import { canonicalizeEmail } from "@/app/api/utils/email";
+import { isReservedLifecycleEmail } from "@/app/api/utils/account-lifecycle";
 import { getTrustedClientIp } from "@/app/api/utils/client-ip";
 
 const signupSchema = z.object({
@@ -32,6 +33,9 @@ export async function POST(request) {
     }
     const { joinCode, name, password, teamName } = parsed.data;
     const email = canonicalizeEmail(parsed.data.email);
+    if (isReservedLifecycleEmail(email)) {
+      return Response.json({ error: "This email domain is reserved" }, { status: 400 });
+    }
 
     // Cheap validation only; registration status is authoritatively rechecked
     // under the league lock in the transaction below.

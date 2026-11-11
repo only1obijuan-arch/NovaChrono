@@ -4,6 +4,7 @@ import { sendEmail } from "@/app/api/utils/send-email";
 import { hash } from "argon2";
 import { createHash } from "crypto";
 import { canonicalizeEmail } from "@/app/api/utils/email";
+import { isReservedLifecycleEmail } from "@/app/api/utils/account-lifecycle";
 
 export async function POST(request) {
   try {
@@ -42,6 +43,11 @@ export async function POST(request) {
       }
 
       const email = canonicalizeEmail(invite.email);
+      if (isReservedLifecycleEmail(email)) {
+        const error = new Error("Invalid invitation email");
+        error.code = "INVALID_INVITE";
+        throw error;
+      }
       const [existing] = await txSql`
         SELECT id FROM auth_users WHERE lower(email) = ${email}
       `;

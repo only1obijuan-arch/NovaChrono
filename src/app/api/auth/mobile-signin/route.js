@@ -75,6 +75,12 @@ export async function POST(request) {
       }
       const user = userResult.rows[0];
 
+      if (user.account_status !== "active") {
+        await verify(NON_ACCOUNT_PASSWORD_HASH, password);
+        await client.query("ROLLBACK");
+        return invalidCredentials();
+      }
+
       const accountResult = await client.query(
         `SELECT * FROM auth_accounts WHERE "userId" = $1 AND provider = 'credentials'`,
         [user.id],

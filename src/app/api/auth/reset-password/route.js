@@ -14,9 +14,12 @@ const resetPasswordSchema = z.object({
 async function fetchResetToken(token) {
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
   const [row] = await sql`
-    SELECT id, user_id, expires_at, used
+    SELECT password_reset_tokens.id, password_reset_tokens.user_id,
+           password_reset_tokens.expires_at, password_reset_tokens.used
     FROM password_reset_tokens
-    WHERE token = ${tokenHash}
+    JOIN auth_users ON auth_users.id = password_reset_tokens.user_id
+    WHERE password_reset_tokens.token = ${tokenHash}
+      AND auth_users.account_status = 'active'
     LIMIT 1
   `;
   return row ?? null;
@@ -62,6 +65,29 @@ export async function POST(request) {
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
     await withTransaction(async (txSql) => {
+      const [candidate] = await txSql`
+        SELECT user_id
+        FROM password_reset_tokens
+        WHERE token = ${tokenHash}
+          AND used = FALSE
+          AND expires_at > NOW()
+      `;
+      if (!candidate) {
+        const error = new Error("Invalid, expired, or already used reset token");
+        error.code = "INVALID_RESET_TOKEN";
+        throw error;
+      }
+      const [user] = await txSql`
+        SELECT id, account_status
+        FROM auth_users
+        WHERE id = ${candidate.user_id}
+        FOR UPDATE
+      `;
+      if (!user || user.account_status !== 'active') {
+        const error = new Error("Invalid, expired, or already used reset token");
+        error.code = "INVALID_RESET_TOKEN";
+        throw error;
+      }
       const [resetToken] = await txSql`
         UPDATE password_reset_tokens
         SET used = TRUE

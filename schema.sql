@@ -65,10 +65,45 @@ CREATE TABLE auth_users (
   push_token      TEXT,                                    -- Expo push token for mobile notifications
   sessions_valid_after TIMESTAMPTZ NOT NULL DEFAULT TIMESTAMPTZ '1970-01-01 00:00:00+00',
   image           TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  account_status  TEXT        NOT NULL DEFAULT 'active',
+  deletion_request_id UUID,
+  deletion_requested_at TIMESTAMPTZ,
+  deidentified_at TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT auth_users_account_status_supported
+    CHECK (account_status IN ('active','pending_deletion','deidentified')),
+  CONSTRAINT auth_users_lifecycle_state_consistent
+    CHECK (
+      (account_status = 'active'
+        AND deletion_request_id IS NULL
+        AND deletion_requested_at IS NULL
+        AND deidentified_at IS NULL)
+      OR
+      (account_status = 'pending_deletion'
+        AND deletion_request_id IS NOT NULL
+        AND deletion_requested_at IS NOT NULL
+        AND deidentified_at IS NULL)
+      OR
+      (account_status = 'deidentified'
+        AND deletion_request_id IS NOT NULL
+        AND deletion_requested_at IS NOT NULL
+        AND deidentified_at IS NOT NULL)
+    ),
+  CONSTRAINT auth_users_lifecycle_email_consistent
+    CHECK (
+      (account_status = 'deidentified'
+        AND LOWER(email) = 'deidentified+' || REPLACE(id::text, '-', '') || '@account.invalid')
+      OR
+      (account_status IN ('active','pending_deletion')
+        AND LOWER(email) NOT LIKE '%@account.invalid')
+    )
 );
 
 CREATE UNIQUE INDEX auth_users_email_lower_unique ON auth_users (LOWER(email));
+CREATE UNIQUE INDEX auth_users_deletion_request_unique
+  ON auth_users (deletion_request_id) WHERE deletion_request_id IS NOT NULL;
+CREATE INDEX auth_users_active_role_idx
+  ON auth_users (role, id) WHERE account_status = 'active';
 
 -- One row per user for password-based auth (NextAuth credentials provider).
 -- Column names follow NextAuth conventions (camelCase with double-quotes).

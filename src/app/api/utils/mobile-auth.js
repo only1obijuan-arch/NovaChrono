@@ -33,6 +33,7 @@ export async function verifyMobileToken(request) {
      JOIN auth_users u ON u.id = ms.user_id
      WHERE ms.jti = $1
        AND ms.expires_at > NOW()
+       AND u.account_status = 'active'
        AND to_timestamp($2) >= date_trunc('second', u.sessions_valid_after)`,
     [payload.jti, payload.iat]
   );

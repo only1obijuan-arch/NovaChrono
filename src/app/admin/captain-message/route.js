@@ -15,7 +15,7 @@ export async function POST(request) {
     const [league] = await sql`SELECT id, name, venue_id FROM leagues WHERE id = ${league_id}`;
     if (!league) return Response.json({ error: "League not found" }, { status: 404 });
     if (!canAdministerVenue(user, league.venue_id)) return Response.json({ error: "Access denied" }, { status: 403 });
-    const captains = await sql`SELECT DISTINCT au.id, au.email, au.push_token FROM teams t JOIN league_slots ls ON t.slot_id = ls.id JOIN auth_users au ON au.id = t.captain_user_id WHERE ls.league_id = ${league_id} AND t.status = 'active'`;
+    const captains = await sql`SELECT DISTINCT au.id, au.email, au.push_token FROM teams t JOIN league_slots ls ON t.slot_id = ls.id JOIN auth_users au ON au.id = t.captain_user_id WHERE ls.league_id = ${league_id} AND t.status = 'active' AND au.account_status = 'active'`;
     const summary = {
       inApp: { sent: 0, failed: 0 },
       push: { sent: 0, failed: 0, skipped: 0 },

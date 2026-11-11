@@ -14,6 +14,7 @@ import {
   FileText,
   LogOut,
   Trophy,
+  Trash2,
 } from "lucide-react-native";
 import { useAuth } from "@/utils/auth/useAuth";
 
@@ -264,6 +265,16 @@ export default function More() {
           <Text style={{ fontSize: 13, color: C, letterSpacing: 2, fontWeight: "600" }}>
             JOIN NEW LEAGUE
           </Text>
+        </TouchableOpacity>
+
+        {/* Account deletion */}
+        <TouchableOpacity
+          onPress={() => router.push("/account/delete")}
+          activeOpacity={0.7}
+          style={{ flexDirection:"row", alignItems:"center", justifyContent:"center", borderWidth:1, borderColor:"rgba(255,120,120,.16)", borderRadius:10, padding:16, gap:12, marginBottom:12 }}
+        >
+          <Trash2 size={18} color="rgba(255,120,120,.65)" />
+          <Text style={{ fontFamily:F.mono, fontSize:12, color:"rgba(255,120,120,.65)", letterSpacing:2 }}>DELETE ACCOUNT</Text>
         </TouchableOpacity>
 
         {/* Sign out */}

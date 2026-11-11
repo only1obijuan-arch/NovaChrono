@@ -5,7 +5,10 @@ import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
 export async function resolveCurrentUser(request) {
   const session = await auth();
   if (session?.user?.id) {
-    const [user] = await sql`SELECT * FROM auth_users WHERE id = ${session.user.id}`;
+    const [user] = await sql`
+      SELECT * FROM auth_users
+      WHERE id = ${session.user.id} AND account_status = 'active'
+    `;
     return user ?? null;
   }
 

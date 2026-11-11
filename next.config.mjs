@@ -39,6 +39,7 @@ export default withSentryConfig(nextConfig, {
   org: process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
   authToken: process.env.SENTRY_AUTH_TOKEN,
+  telemetry: process.env.SENTRY_BUILD_TELEMETRY !== "0",
   silent: !process.env.CI,
   disableLogger: true,
   sourcemaps: {

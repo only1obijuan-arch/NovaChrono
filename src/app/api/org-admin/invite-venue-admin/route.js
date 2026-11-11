@@ -5,6 +5,7 @@ import { randomBytes, createHash } from "crypto";
 import { z } from "zod";
 import { requireRole } from "@/app/api/utils/auth";
 import { canonicalizeEmail } from "@/app/api/utils/email";
+import { isReservedLifecycleEmail } from "@/app/api/utils/account-lifecycle";
 
 const inviteVenueAdminSchema = z.object({
   email: z.string().email().max(254),
@@ -36,6 +37,9 @@ export async function POST(request) {
     }
     const { venueId } = parsed.data;
     const email = canonicalizeEmail(parsed.data.email);
+    if (isReservedLifecycleEmail(email)) {
+      return Response.json({ error: "This email domain is reserved" }, { status: 400 });
+    }
 
     const [venue] = await sql`
       SELECT * FROM venues WHERE id = ${venueId} AND organization_id = ${inviter.organization_id}

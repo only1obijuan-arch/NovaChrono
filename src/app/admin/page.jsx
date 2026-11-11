@@ -106,19 +106,6 @@ export default function AdminDashboard() {
     },
   });
 
-  const deleteRefMutation = useMutation({
-    mutationFn: async (refId) => {
-      const res = await fetch(`/api/admin/referees?id=${refId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["referees", venueId] });
-    },
-  });
-
   const sendAlertMutation = useMutation({
     mutationFn: async ({ league_id, alert_type, message }) => {
       const res = await fetch("/api/weather/alert", {
@@ -319,7 +306,6 @@ export default function AdminDashboard() {
             referees={referees}
             isLoading={refsLoading}
             onAddReferee={() => setShowRefModal(true)}
-            onDeleteReferee={(refId) => deleteRefMutation.mutate(refId)}
             onShowCredentials={async (fieldNumber) => {
               try {
                 const result = await createRefMutation.mutateAsync({

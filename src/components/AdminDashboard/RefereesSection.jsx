@@ -1,7 +1,7 @@
 import { Shield } from "lucide-react";
 import { RefereeCard } from "./RefereeCard";
 
-export function RefereesSection({ referees, isLoading, onAddReferee, onDeleteReferee, onShowCredentials }) {
+export function RefereesSection({ referees, isLoading, onAddReferee, onShowCredentials }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -29,7 +29,7 @@ export function RefereesSection({ referees, isLoading, onAddReferee, onDeleteRef
       ) : (
         <div className="ad-refs-grid">
           {referees.map((ref, i) => (
-            <RefereeCard key={ref.id} referee={ref} index={i} onDelete={onDeleteReferee} onShowCredentials={onShowCredentials} />
+            <RefereeCard key={ref.id} referee={ref} index={i} onShowCredentials={onShowCredentials} />
           ))}
         </div>
       )}

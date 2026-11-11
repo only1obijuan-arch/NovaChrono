@@ -1,6 +1,7 @@
 import sql from "@/app/api/utils/sql";
 import { requireRole } from "@/app/api/utils/auth";
 import { canonicalizeEmail } from "@/app/api/utils/email";
+import { isReservedLifecycleEmail } from "@/app/api/utils/account-lifecycle";
 import { sendEmail } from "@/app/api/utils/send-email";
 import { inviteOrgAdminEmail } from "@/emails/inviteOrgAdminEmail";
 import { randomBytes, createHash } from "crypto";
@@ -27,6 +28,9 @@ export async function POST(request) {
     }
     const { organizationId, role } = parsed.data;
     const email = canonicalizeEmail(parsed.data.email);
+    if (isReservedLifecycleEmail(email)) {
+      return Response.json({ error: "This email domain is reserved" }, { status: 400 });
+    }
 
     // Reject if account already exists
     const [existingUser] = await sql`

@@ -42,15 +42,19 @@ beforeEach(() => {
   mocks.limit.mockResolvedValue({ allowed: true });
   mocks.query.mockImplementation(async (sql) => {
     let rows = [];
-    if (sql.includes("SELECT * FROM auth_users WHERE id")) rows = [{ id: USER, role: "venue_admin", venue_id: VENUE }];
+    if (sql.includes("SELECT * FROM auth_users") && sql.includes("id = $1")) rows = [{ id: USER, role: "venue_admin", venue_id: VENUE, account_status: "active" }];
     else if (sql.includes("SELECT * FROM venues")) rows = [{ id: VENUE, name: "Arena", organization_id: "10000000-0000-4000-8000-000000000001" }];
-    else if (sql.includes("SELECT au.*")) rows = [{ id: "30000000-0000-4000-8000-000000000009", name: "Referee", email: "ref-field1@arena.novachrono.com", role: "referee", venue_id: existingVenue }];
+    else if (sql.includes("SELECT au.*")) rows = [{ id: "30000000-0000-4000-8000-000000000009", name: "Referee", email: "ref-field1@arena.novachrono.com", role: "referee", venue_id: existingVenue, account_status: "active" }];
     else throw new Error(`Unexpected SQL: ${sql}`);
     return { rows, rowCount: rows.length };
   });
   mocks.tx.mockImplementation(async (sql) => {
     let rows = [];
-    if (sql.includes("UPDATE password_reset_tokens")) {
+    if (sql.includes("SELECT user_id") && sql.includes("password_reset_tokens")) {
+      rows = resetAvailable ? [{ user_id: USER }] : [];
+    } else if (sql.includes("SELECT id, account_status") && sql.includes("auth_users")) {
+      rows = [{ id: USER, account_status: "active" }];
+    } else if (sql.includes("UPDATE password_reset_tokens")) {
       rows = resetAvailable ? [{ id: "reset", user_id: USER }] : [];
       resetAvailable = false;
     }

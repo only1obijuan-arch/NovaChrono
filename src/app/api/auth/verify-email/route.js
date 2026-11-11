@@ -1,4 +1,4 @@
-import sql from "@/app/api/utils/sql";
+import sql, { withTransaction } from "@/app/api/utils/sql";
 import crypto from "crypto";
 import { canonicalizeEmail } from "@/app/api/utils/email";
 
@@ -31,14 +31,34 @@ export async function GET(request) {
       return Response.redirect(new URL("/account/verify?error=expired_token", request.url));
     }
 
-    await sql`
-      UPDATE auth_users
-      SET "emailVerified" = NOW()
-      WHERE lower(email) = ${email}
-      AND "emailVerified" IS NULL
-    `;
+    const verified = await withTransaction(async (txSql) => {
+      const [user] = await txSql`
+        SELECT id, account_status
+        FROM auth_users
+        WHERE lower(email) = ${email}
+        FOR UPDATE
+      `;
+      if (!user || user.account_status !== 'active') {
+        await txSql`DELETE FROM auth_verification_token WHERE token = ${tokenHash}`;
+        return false;
+      }
+      const consumed = await txSql`
+        DELETE FROM auth_verification_token
+        WHERE token = ${tokenHash} AND expires > NOW()
+        RETURNING token
+      `;
+      if (consumed.length === 0) return false;
+      await txSql`
+        UPDATE auth_users
+        SET "emailVerified" = NOW()
+        WHERE id = ${user.id} AND "emailVerified" IS NULL
+      `;
+      return true;
+    });
 
-    await sql`DELETE FROM auth_verification_token WHERE token = ${tokenHash}`;
+    if (!verified) {
+      return Response.redirect(new URL("/account/verify?error=invalid_token", request.url));
+    }
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
     return Response.redirect(new URL("/account/signin?verified=true", appUrl));

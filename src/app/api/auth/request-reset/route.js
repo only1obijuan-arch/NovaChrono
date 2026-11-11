@@ -23,6 +23,7 @@ export async function POST(request) {
       SELECT id, email, name, role
       FROM auth_users
       WHERE lower(email) = ${email}
+        AND account_status = 'active'
     `;
 
     // Always return success even if user not found (security best practice)

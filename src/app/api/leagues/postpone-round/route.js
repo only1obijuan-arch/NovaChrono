@@ -212,6 +212,7 @@ export async function POST(request) {
       JOIN league_slots ls ON t.slot_id = ls.id
       JOIN auth_users au ON t.captain_user_id = au.id
       WHERE ls.league_id = ${league_id} AND t.status = 'active'
+        AND au.account_status = 'active'
     `;
 
     const newDate = formatLocalFixtureDate(updatedMatches[0].match_date, "en-GB");
