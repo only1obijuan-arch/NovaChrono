@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 
 export default function AccountSettingsPage() {
@@ -8,6 +8,16 @@ export default function AccountSettingsPage() {
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [available, setAvailable] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/account/deletion")
+      .then(async (response) => (response.ok ? response.json() : { available: false }))
+      .then((result) => { if (mounted) setAvailable(Boolean(result.available)); })
+      .catch(() => { if (mounted) setAvailable(false); });
+    return () => { mounted = false; };
+  }, []);
 
   async function requestDeletion(event) {
     event.preventDefault();
@@ -47,7 +57,14 @@ export default function AccountSettingsPage() {
           Active team ownership, future referee fixtures or administrator
           responsibilities must be resolved before de-identification completes.
         </div>
-        <form onSubmit={requestDeletion}>
+        {available === false && (
+          <p className="unavailable" role="status">
+            Account deletion requests are not currently available. No account
+            state has been changed.
+          </p>
+        )}
+        {available === null && <p className="unavailable">Checking availability...</p>}
+        {available === true && <form onSubmit={requestDeletion}>
           <label htmlFor="current-password">Current password</label>
           <input
             id="current-password"
@@ -71,7 +88,7 @@ export default function AccountSettingsPage() {
           <button type="submit" disabled={busy || confirmation !== "DELETE"}>
             {busy ? "SUBMITTING..." : "REQUEST ACCOUNT DELETION"}
           </button>
-        </form>
+        </form>}
       </section>
       <style jsx>{`
         .account-settings { min-height:100vh; background:#091833; color:#f4f4f9; display:grid; place-items:center; padding:24px; }
@@ -88,6 +105,7 @@ export default function AccountSettingsPage() {
         button { margin-top:14px; min-height:50px; border-radius:5px; border:1px solid rgba(255,80,80,.55); background:rgba(255,50,50,.1); color:#ff7777; font-weight:700; cursor:pointer; }
         button:disabled { opacity:.4; cursor:not-allowed; }
         .error { color:#ff8b8b; font-size:13px; }
+        .unavailable { color:rgba(210,220,235,.75); border:1px solid rgba(255,255,255,.12); padding:14px; border-radius:5px; }
       `}</style>
     </main>
   );

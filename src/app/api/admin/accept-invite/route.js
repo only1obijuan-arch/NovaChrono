@@ -26,6 +26,32 @@ export async function POST(request) {
     const tokenHash = createHash("sha256").update(token).digest("hex");
     const hashedPassword = await hash(password);
     const result = await withTransaction(async (txSql) => {
+      const [candidate] = await txSql`
+        SELECT invited_by
+        FROM invite_tokens
+        WHERE token = ${tokenHash}
+          AND used = FALSE
+          AND expires_at > NOW()
+      `;
+      if (!candidate) {
+        const error = new Error("Invalid or expired invite link. Please request a new invite.");
+        error.code = "INVALID_INVITE";
+        throw error;
+      }
+      // User-first locking serializes redemption with the issuer's transition
+      // to pending deletion. Once that transition commits, the invitation is
+      // gone and cannot be resurrected by cancellation.
+      const [inviter] = await txSql`
+        SELECT id, account_status
+        FROM auth_users
+        WHERE id = ${candidate.invited_by}
+        FOR SHARE
+      `;
+      if (!inviter || inviter.account_status !== "active") {
+        const error = new Error("Invalid or expired invite link. Please request a new invite.");
+        error.code = "INVALID_INVITE";
+        throw error;
+      }
       // The conditional UPDATE is the claim. Concurrent consumers cannot both
       // receive a row, and any later failure rolls the claim back.
       const [invite] = await txSql`
@@ -34,6 +60,7 @@ export async function POST(request) {
         WHERE token = ${tokenHash}
           AND used = FALSE
           AND expires_at > NOW()
+          AND invited_by = ${candidate.invited_by}
         RETURNING *
       `;
       if (!invite) {

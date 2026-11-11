@@ -92,7 +92,7 @@ All blockers are accumulated and returned together; the system must not partiall
 2. The UI explains what will be deleted, what may be retained, active-responsibility blockers, expected timing, and the external request route.
 3. User confirms intent and re-enters their password. The server performs Argon2 verification; a normal authenticated session alone is insufficient.
 4. Web cookie requests must pass an Origin/Host CSRF check in addition to Auth.js SameSite protections. Mobile requests require a valid live bearer session plus the same recent credential confirmation.
-5. The server locks the user, rechecks live status/role/responsibilities, advances `sessions_valid_after`, deletes mobile sessions and reset/verification credentials, and records a pending request. Ordinary auth immediately fails closed.
+5. The server locks the user, rechecks live status/role/responsibilities, advances `sessions_valid_after`, deletes mobile sessions and reset/verification credentials, permanently revokes unused invitations issued by or addressed to the account, and records a pending request. Ordinary auth immediately fails closed.
 6. If blockers exist, the response returns a stable request ID and a complete, non-sensitive list of required handovers. No sporting row is changed automatically.
 7. Once approved blockers and retention decisions are satisfied, one transaction deletes credentials, notifications and approved transient data; de-identifies direct identity fields; preserves approved tombstone references; and writes one minimal `ACCOUNT_DEIDENTIFIED` audit event without name/email.
 8. Repeating a pending or completed request returns the existing state. It never creates duplicate events or repeats a transfer.
@@ -102,7 +102,22 @@ Concurrent API operations must re-read an active account row and authorised role
 
 ### Release control
 
-All account-lifecycle mutations are fail-closed unless `ACCOUNT_LIFECYCLE_MUTATIONS_ENABLED` is exactly `true`. The same switch gates user deletion requests, cancellation, succession/custody actions, fixture reassignment and irreversible de-identification at both the HTTP route boundary and the service layer. This single release switch prevents production from accepting a request that would strand an account in `pending_deletion` while completion is disabled. It must remain unset until the required legal, operational, migration and release approvals are complete. Read-only pending-request inspection remains available to authorised super administrators.
+`ACCOUNT_LIFECYCLE_MUTATIONS_ENABLED` is the primary kill switch. Unless it is exactly `true`, every lifecycle mutation fails closed at both the HTTP route and service boundaries. Read-only scoped inspection remains available to active venue, organisation and super administrators.
+
+`ACCOUNT_LIFECYCLE_COMPLETION_ENABLED` is a separate approval for irreversible de-identification. It is also required before a new user deletion request is accepted, preventing the application from deliberately creating pending requests while completion is unavailable. Succession and assisted withdrawal require only the primary switch, so an authorised operator can recover existing pending requests without enabling irreversible completion.
+
+Both flags default to disabled. Neither flag is set by source code, migration or build configuration.
+
+### Controlled recovery procedure
+
+1. **Before initial release:** keep both flags unset. Confirm migration `0011`, operational ownership, privacy review and the administrator queue before enabling anything.
+2. **Normal controlled release:** enable the primary switch, then enable completion only after the separate irreversible-operation approval. Verify both through the authenticated availability endpoint before exposing deletion navigation.
+3. **Emergency pause with pending requests:** disable completion first. This blocks new requests and completion while leaving scoped succession and assisted withdrawal available if the primary switch remains enabled.
+4. **Full emergency stop:** disable the primary switch. All mutations stop. Read-only inspection remains available for impact assessment.
+5. **Assisted withdrawal:** an authorised super administrator completes the approved external identity-verification process, temporarily enables only the primary switch if required, records a meaningful audit reason and cancels the pending request. Revoked invitations are not resurrected.
+6. **Re-enable completion:** an authorised operator confirms the pending queue, blockers, migration state, backup/incident status and legal approval, records the operational change, then explicitly enables completion.
+
+The application does not yet send a completion-confirmation email because the approved sender, privacy contact, wording and retention details are unresolved. No placeholder public contact or compliance claim may be invented.
 
 ## E. Migration assessment
 

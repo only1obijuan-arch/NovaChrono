@@ -4,6 +4,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   tx: vi.fn(),
   verify: vi.fn(),
+  requireRole: vi.fn(),
+  resolveCurrentUser: vi.fn(),
+  rateLimit: vi.fn(),
 }));
 
 vi.mock("argon2", () => ({ verify: mocks.verify }));
@@ -11,15 +14,16 @@ vi.mock("@/app/api/utils/sql", () => ({
   withTransaction: vi.fn(async (operation) => operation(mocks.tx)),
 }));
 vi.mock("@/app/api/utils/auth", () => ({
-  requireRole: vi.fn(),
-  resolveCurrentUser: vi.fn(),
+  requireRole: mocks.requireRole,
+  resolveCurrentUser: mocks.resolveCurrentUser,
 }));
 vi.mock("@/app/api/utils/rate-limit", () => ({
-  rateLimit: vi.fn(),
+  rateLimit: mocks.rateLimit,
 }));
 
 import {
   accountLifecycleMutationsEnabled,
+  accountLifecycleCompletionEnabled,
   completeAccountDeidentification,
   deidentifiedEmailForUserId,
   historicalAccountLabel,
@@ -33,6 +37,7 @@ import { PATCH as lifecyclePatch } from "@/app/api/admin/account-lifecycle/route
 const USER = "30000000-0000-4000-8000-000000000001";
 const ADMIN = "30000000-0000-4000-8000-000000000002";
 const originalLifecycleFlag = process.env.ACCOUNT_LIFECYCLE_MUTATIONS_ENABLED;
+const originalCompletionFlag = process.env.ACCOUNT_LIFECYCLE_COMPLETION_ENABLED;
 
 function queryText(strings) {
   return strings.join("?").replace(/\s+/g, " ").trim();
@@ -57,7 +62,11 @@ describe("Gate 6A.2 account lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.verify.mockResolvedValue(true);
+    mocks.resolveCurrentUser.mockResolvedValue(activeUser());
+    mocks.requireRole.mockResolvedValue(activeUser({ id: ADMIN, role: "super_admin" }));
+    mocks.rateLimit.mockResolvedValue({ allowed: true });
     process.env.ACCOUNT_LIFECYCLE_MUTATIONS_ENABLED = "true";
+    process.env.ACCOUNT_LIFECYCLE_COMPLETION_ENABLED = "true";
   });
 
   afterAll(() => {
@@ -66,9 +75,14 @@ describe("Gate 6A.2 account lifecycle", () => {
     } else {
       process.env.ACCOUNT_LIFECYCLE_MUTATIONS_ENABLED = originalLifecycleFlag;
     }
+    if (originalCompletionFlag === undefined) {
+      delete process.env.ACCOUNT_LIFECYCLE_COMPLETION_ENABLED;
+    } else {
+      process.env.ACCOUNT_LIFECYCLE_COMPLETION_ENABLED = originalCompletionFlag;
+    }
   });
 
-  it("fails closed at service and route boundaries until the single release switch is enabled", async () => {
+  it("fails closed at service and route boundaries until both request controls are enabled", async () => {
     delete process.env.ACCOUNT_LIFECYCLE_MUTATIONS_ENABLED;
     expect(accountLifecycleMutationsEnabled()).toBe(false);
 
@@ -87,17 +101,64 @@ describe("Gate 6A.2 account lifecycle", () => {
     }));
     expect(adminResponse.status).toBe(503);
     expect(await adminResponse.json()).toMatchObject({ code: "LIFECYCLE_DISABLED" });
+
+    process.env.ACCOUNT_LIFECYCLE_MUTATIONS_ENABLED = "true";
+    delete process.env.ACCOUNT_LIFECYCLE_COMPLETION_ENABLED;
+    expect(accountLifecycleCompletionEnabled()).toBe(false);
+    await expect(requestAccountDeletion({ userId: USER, password: "correct-password" }))
+      .rejects.toMatchObject({ code: "LIFECYCLE_COMPLETION_DISABLED", status: 503 });
+    const completionDisabled = await deletionPost(new Request("https://example.test/api/account/deletion", {
+      method: "POST",
+    }));
+    expect(completionDisabled.status).toBe(503);
+    expect(await completionDisabled.json()).toMatchObject({ code: "LIFECYCLE_COMPLETION_DISABLED" });
+  });
+
+  it("rejects missing/cross-origin cookie mutations and accepts the bearer request shape", async () => {
+    const missingOrigin = await deletionPost(new Request("https://example.test/api/account/deletion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }));
+    expect(missingOrigin.status).toBe(403);
+
+    const crossOrigin = await deletionPost(new Request("https://example.test/api/account/deletion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://attacker.test" },
+      body: "{}",
+    }));
+    expect(crossOrigin.status).toBe(403);
+
+    const bearer = await deletionPost(new Request("https://example.test/api/account/deletion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer valid-mobile-shape" },
+      body: "{}",
+    }));
+    expect(bearer.status).toBe(400);
+    expect(mocks.resolveCurrentUser).toHaveBeenCalled();
+  });
+
+  it("returns a client error for malformed lifecycle JSON", async () => {
+    const response = await lifecyclePatch(new Request("https://example.test/api/admin/account-lifecycle", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Origin: "https://example.test" },
+      body: "{",
+    }));
+    expect(response.status).toBe(400);
   });
 
   it("provides functional web and mobile deletion initiation paths", () => {
     const webSettings = readFileSync("src/app/account/settings/page.jsx", "utf8");
     const mobileSettings = readFileSync("mobile/src/app/account/delete.jsx", "utf8");
     const mobileApi = readFileSync("mobile/src/utils/api.js", "utf8");
+    const adminPanel = readFileSync("src/app/account/lifecycle-admin/page.jsx", "utf8");
 
     expect(webSettings).toContain('fetch("/api/account/deletion"');
     expect(webSettings).toContain("body: JSON.stringify({ password })");
     expect(mobileSettings).toContain("await requestAccountDeletion(password)");
     expect(mobileApi).toContain('apiFetch("/api/account/deletion"');
+    expect(mobileApi).toContain("getAccountLifecycleAvailability");
+    expect(adminPanel).toContain("Pending deletion requests");
   });
 
   it("uses an irreversible, deterministic non-deliverable replacement email", () => {
@@ -177,7 +238,8 @@ describe("Gate 6A.2 account lifecycle", () => {
     const actor = activeUser({ id: ADMIN, role: "super_admin" });
     mocks.tx.mockImplementation(async (strings) => {
       const text = queryText(strings);
-      if (text.includes("WHERE id IN") && text.includes("FOR UPDATE")) return [actor, target];
+      if (text.includes("WHERE role = 'super_admin'") && text.includes("FOR UPDATE")) return [actor];
+      if (text.includes("WHERE id =") && text.includes("deletion_request_id") && text.includes("FOR UPDATE")) return [target];
       if (text.includes("FROM teams")) return [{ id: "team", name: "History FC", venue_id: "venue" }];
       if (text.includes("FROM matches")) return [];
       return [];
@@ -205,7 +267,8 @@ describe("Gate 6A.2 account lifecycle", () => {
     mocks.tx.mockImplementation(async (strings) => {
       const text = queryText(strings);
       statements.push(text);
-      if (text.includes("WHERE id IN") && text.includes("FOR UPDATE")) return [actor, target];
+      if (text.includes("WHERE role = 'super_admin'") && text.includes("FOR UPDATE")) return [actor];
+      if (text.includes("WHERE id =") && text.includes("deletion_request_id") && text.includes("FOR UPDATE")) return [target];
       if (text.includes("FROM teams") || text.includes("FROM matches")) return [];
       if (text.includes("to_regclass('public.auth_sessions')")) return [{ exists: false }];
       return [];

@@ -52,6 +52,15 @@ beforeEach(() => {
     let rows = [];
     if (sql.includes("SELECT user_id") && sql.includes("password_reset_tokens")) {
       rows = resetAvailable ? [{ user_id: USER }] : [];
+    } else if (sql.includes("SELECT id, name, email, role, venue_id, account_status")) {
+      rows = [{
+        id: "30000000-0000-4000-8000-000000000009",
+        name: "Referee",
+        email: "ref-field1@arena.novachrono.com",
+        role: "referee",
+        venue_id: VENUE,
+        account_status: "active",
+      }];
     } else if (sql.includes("SELECT id, account_status") && sql.includes("auth_users")) {
       rows = [{ id: USER, account_status: "active" }];
     } else if (sql.includes("UPDATE password_reset_tokens")) {

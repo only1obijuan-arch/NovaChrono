@@ -541,7 +541,7 @@ describe("Gate 5 deterministic PostgreSQL concurrency A-J", () => {
     `, [ID.match, ID.teamA]);
     for (let attempt = 0; Date.now() <= new Date(firstFinalized.last_reminder_at).getTime(); attempt += 1) {
       if (attempt >= 500) throw new Error("Wall clock did not advance after first finalization");
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 1));
     }
     const second = await sendReminderForTeam({
       matchId: ID.match,

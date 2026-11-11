@@ -95,20 +95,49 @@ export async function POST(request) {
       const newPassword = generatePassword(fieldNumber, venueSlug);
       const hashedPassword = await hash(newPassword);
 
-      await withTransaction(async (txSql) => {
+      const reset = await withTransaction(async (txSql) => {
+        // Hashing is intentionally outside the transaction. The authoritative
+        // decision is made only after locking and re-reading the user row, so a
+        // concurrent lifecycle completion cannot recreate credentials.
+        const [lockedReferee] = await txSql`
+          SELECT id, name, email, role, venue_id, account_status
+          FROM auth_users
+          WHERE id = ${existing.id}
+          FOR UPDATE
+        `;
+        if (!lockedReferee || lockedReferee.account_status !== "active") {
+          return {
+            response: Response.json(
+              { error: "This referee account is not active" },
+              { status: 409 },
+            ),
+          };
+        }
+        if (lockedReferee.role !== "referee"
+            || lockedReferee.venue_id !== venueId
+            || canonicalizeEmail(lockedReferee.email) !== email) {
+          return {
+            response: Response.json(
+              { error: "Generated referee identity is already assigned elsewhere" },
+              { status: 409 },
+            ),
+          };
+        }
         await txSql`
           INSERT INTO auth_accounts ("userId", type, provider, "providerAccountId", password)
-          VALUES (${existing.id}, 'credentials', 'credentials', ${email}, ${hashedPassword})
+          VALUES (${lockedReferee.id}, 'credentials', 'credentials', ${email}, ${hashedPassword})
           ON CONFLICT ("userId", provider)
           DO UPDATE SET password = EXCLUDED.password
         `;
-        await invalidateUserSessions(txSql, existing.id);
+        await invalidateUserSessions(txSql, lockedReferee.id);
+        return { referee: lockedReferee };
       });
+      if (reset.response) return reset.response;
 
       return Response.json({
         referee: {
-          id: existing.id,
-          name: existing.name,
+          id: reset.referee.id,
+          name: reset.referee.name,
           email,
           fieldNumber,
           password: newPassword,

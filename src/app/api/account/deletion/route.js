@@ -2,33 +2,35 @@ import { z } from "zod";
 import { resolveCurrentUser } from "@/app/api/utils/auth";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 import {
+  accountLifecycleCompletionEnabled,
   accountLifecycleMutationsEnabled,
   LifecycleError,
   requestAccountDeletion,
 } from "@/app/api/utils/account-lifecycle";
+import { sameOriginOrBearer } from "@/app/api/utils/request-security";
 
 const requestSchema = z.object({
   password: z.string().min(1).max(128),
 }).strict();
 
-function sameOriginOrBearer(request) {
-  const authorization = request.headers.get("authorization") ?? "";
-  if (authorization.startsWith("Bearer ")) return true;
-
-  const origin = request.headers.get("origin");
-  if (!origin) return false;
-  try {
-    return new URL(origin).origin === new URL(request.url).origin;
-  } catch {
-    return false;
-  }
+export async function GET(request) {
+  const user = await resolveCurrentUser(request);
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  return Response.json({
+    available: accountLifecycleMutationsEnabled() && accountLifecycleCompletionEnabled(),
+  });
 }
 
 export async function POST(request) {
   try {
-    if (!accountLifecycleMutationsEnabled()) {
+    if (!accountLifecycleMutationsEnabled() || !accountLifecycleCompletionEnabled()) {
       return Response.json(
-        { error: "Account lifecycle requests are not currently available", code: "LIFECYCLE_DISABLED" },
+        {
+          error: "Account lifecycle requests are not currently available",
+          code: accountLifecycleMutationsEnabled()
+            ? "LIFECYCLE_COMPLETION_DISABLED"
+            : "LIFECYCLE_DISABLED",
+        },
         { status: 503 },
       );
     }

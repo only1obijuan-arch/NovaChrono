@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -5,6 +6,7 @@ import { useUser } from "@/utils/auth/useUser";
 import { useAuth } from "@/utils/auth/useAuth";
 import { useRouter } from "expo-router";
 import { MapPin, LogOut, Trash2, User as UserIcon } from "lucide-react-native";
+import { getAccountLifecycleAvailability } from "@/utils/api";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -20,6 +22,15 @@ export default function Profile() {
   const router = useRouter();
   const { user } = useUser();
   const { signOut } = useAuth();
+  const [deletionAvailable, setDeletionAvailable] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    getAccountLifecycleAvailability()
+      .then(({ available }) => { if (mounted) setDeletionAvailable(Boolean(available)); })
+      .catch(() => { if (mounted) setDeletionAvailable(false); });
+    return () => { mounted = false; };
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#091833" }}>
@@ -264,15 +275,17 @@ export default function Profile() {
           </View>
         </View>
 
-        {/* Account deletion */}
-        <TouchableOpacity
-          onPress={() => router.push("/account/delete")}
-          activeOpacity={0.7}
-          style={{ flexDirection:"row", alignItems:"center", justifyContent:"center", borderWidth:1, borderColor:"rgba(255,120,120,.16)", borderRadius:10, padding:16, gap:12, marginBottom:12 }}
-        >
-          <Trash2 size={18} color="rgba(255,120,120,.65)" />
-          <Text style={{ fontFamily:F.mono, fontSize:12, color:"rgba(255,120,120,.65)", letterSpacing:2 }}>DELETE ACCOUNT</Text>
-        </TouchableOpacity>
+        {/* Account deletion is shown only when both server release controls allow requests. */}
+        {deletionAvailable && (
+          <TouchableOpacity
+            onPress={() => router.push("/account/delete")}
+            activeOpacity={0.7}
+            style={{ flexDirection:"row", alignItems:"center", justifyContent:"center", borderWidth:1, borderColor:"rgba(255,120,120,.16)", borderRadius:10, padding:16, gap:12, marginBottom:12 }}
+          >
+            <Trash2 size={18} color="rgba(255,120,120,.65)" />
+            <Text style={{ fontFamily:F.mono, fontSize:12, color:"rgba(255,120,120,.65)", letterSpacing:2 }}>DELETE ACCOUNT</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Sign out */}
         <TouchableOpacity

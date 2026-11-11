@@ -1,4 +1,4 @@
-import { Home, Users, Timer, LogOut } from "lucide-react";
+import { Home, Users, Timer, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 import Link from "next/link";
 
@@ -22,6 +22,12 @@ export function Navigation({ userRole }) {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <NotificationBell accentColor="#FF00CC" />
+        <Link href="/account/settings" className="ad-nav-link">
+          <Settings size={14} /> ACCOUNT
+        </Link>
+        <Link href="/account/lifecycle-admin" className="ad-nav-link">
+          <ShieldCheck size={14} /> LIFECYCLE
+        </Link>
         <a href="/account/logout" className="ad-signout">
           <LogOut size={14} /> SIGN OUT
         </a>

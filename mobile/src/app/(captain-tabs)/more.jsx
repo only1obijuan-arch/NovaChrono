@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -17,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react-native";
 import { useAuth } from "@/utils/auth/useAuth";
+import { getAccountLifecycleAvailability } from "@/utils/api";
 
 const F = {
   orbitron: "Orbitron_900Black",
@@ -31,6 +33,15 @@ export default function More() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signOut } = useAuth();
+  const [deletionAvailable, setDeletionAvailable] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    getAccountLifecycleAvailability()
+      .then(({ available }) => { if (mounted) setDeletionAvailable(Boolean(available)); })
+      .catch(() => { if (mounted) setDeletionAvailable(false); });
+    return () => { mounted = false; };
+  }, []);
 
   const { selectedTeam: team } = useCaptainTeam();
 
@@ -267,15 +278,17 @@ export default function More() {
           </Text>
         </TouchableOpacity>
 
-        {/* Account deletion */}
-        <TouchableOpacity
-          onPress={() => router.push("/account/delete")}
-          activeOpacity={0.7}
-          style={{ flexDirection:"row", alignItems:"center", justifyContent:"center", borderWidth:1, borderColor:"rgba(255,120,120,.16)", borderRadius:10, padding:16, gap:12, marginBottom:12 }}
-        >
-          <Trash2 size={18} color="rgba(255,120,120,.65)" />
-          <Text style={{ fontFamily:F.mono, fontSize:12, color:"rgba(255,120,120,.65)", letterSpacing:2 }}>DELETE ACCOUNT</Text>
-        </TouchableOpacity>
+        {/* Account deletion is shown only when both server release controls allow requests. */}
+        {deletionAvailable && (
+          <TouchableOpacity
+            onPress={() => router.push("/account/delete")}
+            activeOpacity={0.7}
+            style={{ flexDirection:"row", alignItems:"center", justifyContent:"center", borderWidth:1, borderColor:"rgba(255,120,120,.16)", borderRadius:10, padding:16, gap:12, marginBottom:12 }}
+          >
+            <Trash2 size={18} color="rgba(255,120,120,.65)" />
+            <Text style={{ fontFamily:F.mono, fontSize:12, color:"rgba(255,120,120,.65)", letterSpacing:2 }}>DELETE ACCOUNT</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Sign out */}
         <TouchableOpacity

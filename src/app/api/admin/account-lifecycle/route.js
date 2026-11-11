@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireRole } from "@/app/api/utils/auth";
 import {
+  accountLifecycleCompletionEnabled,
   accountLifecycleMutationsEnabled,
   cancelPendingDeletion,
   completeAccountDeidentification,
@@ -9,19 +10,20 @@ import {
   resolveRefereeResponsibility,
   resolveTeamResponsibility,
 } from "@/app/api/utils/account-lifecycle";
+import { sameOriginOrBearer } from "@/app/api/utils/request-security";
 
 const reason = z.string().trim().min(10).max(500);
 const uuid = () => z.string().uuid();
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("complete"), userId: uuid(), reason }).strict(),
-  z.object({ action: z.literal("cancel"), userId: uuid(), reason, identityVerified: z.literal(true) }).strict(),
+  z.object({ action: z.literal("cancel"), userId: uuid(), reason }).strict(),
   z.object({ action: z.literal("resolve_team"), userId: uuid(), teamId: uuid(), successorUserId: uuid().nullable().optional(), reason }).strict(),
   z.object({ action: z.literal("resolve_fixture"), userId: uuid(), matchId: uuid(), successorUserId: uuid().nullable().optional(), reason }).strict(),
 ]);
 
 export async function GET(request) {
   try {
-    const actor = await requireRole(request, "super_admin");
+    const actor = await requireRole(request, "venue_admin", "super_admin");
     if (!actor) return Response.json({ error: "Unauthorized" }, { status: 403 });
     return Response.json({ requests: await listPendingLifecycleRequests({ actorId: actor.id }) });
   } catch (error) {
@@ -42,10 +44,20 @@ export async function PATCH(request) {
       );
     }
 
+    if (!sameOriginOrBearer(request)) {
+      return Response.json({ error: "Invalid request origin" }, { status: 403 });
+    }
+
     const actor = await requireRole(request, "venue_admin", "org_admin", "super_admin");
     if (!actor) return Response.json({ error: "Unauthorized" }, { status: 403 });
 
-    const parsed = actionSchema.safeParse(await request.json());
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+    const parsed = actionSchema.safeParse(body);
     if (!parsed.success) {
       return Response.json({ error: "Invalid lifecycle action" }, { status: 400 });
     }
@@ -88,6 +100,12 @@ export async function PATCH(request) {
     }
 
     if (actor.role !== "super_admin") return Response.json({ error: "Forbidden" }, { status: 403 });
+    if (!accountLifecycleCompletionEnabled()) {
+      return Response.json(
+        { error: "Account deletion completion is not currently authorised", code: "LIFECYCLE_COMPLETION_DISABLED" },
+        { status: 503 },
+      );
+    }
 
     const result = await completeAccountDeidentification({
       actorId: actor.id,

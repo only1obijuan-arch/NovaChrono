@@ -1,8 +1,16 @@
 import sql from "@/app/api/utils/sql";
 import { auth } from "@/auth";
 import { verifyMobileToken } from "@/app/api/utils/mobile-auth";
+import { hasBearerAuthorization } from "@/app/api/utils/request-security";
 
 export async function resolveCurrentUser(request) {
+  // A supplied bearer token is authoritative for that request. Never fall
+  // back to a browser cookie when an invalid bearer header is present, which
+  // would turn a syntactic Authorization header into a CSRF bypass.
+  if (hasBearerAuthorization(request)) {
+    return verifyMobileToken(request);
+  }
+
   const session = await auth();
   if (session?.user?.id) {
     const [user] = await sql`
@@ -11,8 +19,7 @@ export async function resolveCurrentUser(request) {
     `;
     return user ?? null;
   }
-
-  return verifyMobileToken(request);
+  return null;
 }
 
 // Every privileged decision is based on the current database row, never a

@@ -159,6 +159,12 @@ export async function requestAccountDeletion(password) {
   return data;
 }
 
+export async function getAccountLifecycleAvailability() {
+  const res = await apiFetch("/api/account/deletion");
+  if (!res.ok) return { available: false };
+  return res.json();
+}
+
 // Captain sign-up — creates account + team and joins a league.
 export async function captainSignUp({ joinCode, name, email, password, teamName }) {
   const res = await fetch(`${BASE_URL}/api/account/signup`, {

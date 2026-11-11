@@ -2,6 +2,10 @@ import { randomUUID } from "crypto";
 import { verify } from "argon2";
 import { withTransaction } from "@/app/api/utils/sql";
 import { invalidateUserSessions } from "@/app/api/utils/session-security";
+import {
+  findRefereeConflict,
+  lockRefereeSchedule,
+} from "@/app/api/matches/scheduling";
 
 export const ACCOUNT_STATUS = Object.freeze({
   ACTIVE: "active",
@@ -22,12 +26,26 @@ export function accountLifecycleMutationsEnabled() {
   return process.env.ACCOUNT_LIFECYCLE_MUTATIONS_ENABLED === "true";
 }
 
+export function accountLifecycleCompletionEnabled() {
+  return process.env.ACCOUNT_LIFECYCLE_COMPLETION_ENABLED === "true";
+}
+
 export function requireAccountLifecycleMutationsEnabled() {
   if (!accountLifecycleMutationsEnabled()) {
     throw new LifecycleError(
       "LIFECYCLE_DISABLED",
       503,
       "Account lifecycle requests are not currently available",
+    );
+  }
+}
+
+export function requireAccountLifecycleCompletionEnabled() {
+  if (!accountLifecycleCompletionEnabled()) {
+    throw new LifecycleError(
+      "LIFECYCLE_COMPLETION_DISABLED",
+      503,
+      "Account deletion completion is not currently authorised",
     );
   }
 }
@@ -61,16 +79,6 @@ async function deleteLegacyWebSessions(txSql, userId) {
   if (state?.exists) {
     await txSql`DELETE FROM auth_sessions WHERE "userId"::text = ${String(userId)}`;
   }
-}
-
-async function lockActiveSuperAdmins(txSql) {
-  return txSql`
-    SELECT id
-    FROM auth_users
-    WHERE role = 'super_admin' AND account_status = 'active'
-    ORDER BY id
-    FOR UPDATE
-  `;
 }
 
 async function lockAllSuperAdministrators(txSql) {
@@ -143,6 +151,10 @@ export async function getLifecycleBlockers(txSql, user) {
 
 export async function requestAccountDeletion({ userId, password }) {
   requireAccountLifecycleMutationsEnabled();
+  // New requests are accepted only when the separately authorised completion
+  // path is available. If completion is later paused, administrators can keep
+  // the primary switch enabled solely to assist withdrawal of pending requests.
+  requireAccountLifecycleCompletionEnabled();
   return withTransaction(async (txSql) => {
     // Lock the complete super-admin set first for every request. Besides making
     // the final-admin count atomic, this closes the race where a target's role
@@ -212,6 +224,13 @@ export async function requestAccountDeletion({ userId, password }) {
       DELETE FROM auth_verification_token
       WHERE lower(identifier) = lower(${user.email})
     `;
+    // Revocation is permanent. Cancelling a deletion request does not recreate
+    // invitations that were issued by, or addressed to, the departing account.
+    await txSql`
+      DELETE FROM invite_tokens
+      WHERE used = FALSE
+        AND (invited_by = ${user.id} OR lower(email) = lower(${user.email}))
+    `;
     await txSql`
       INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value, reason)
       VALUES (
@@ -233,17 +252,23 @@ export async function requestAccountDeletion({ userId, password }) {
 
 export async function completeAccountDeidentification({ actorId, targetUserId, reason }) {
   requireAccountLifecycleMutationsEnabled();
+  requireAccountLifecycleCompletionEnabled();
   return withTransaction(async (txSql) => {
-    const locked = await txSql`
+    // Match requestAccountDeletion's global super-admin-first lock hierarchy.
+    // This avoids actor/target inversions when a non-super account completes
+    // while another super administrator starts a deletion request.
+    const lockedSuperAdmins = await lockAllSuperAdministrators(txSql);
+    const actor = lockedSuperAdmins.find((row) => String(row.id) === String(actorId));
+    let target = lockedSuperAdmins.find((row) => String(row.id) === String(targetUserId));
+    if (!target) {
+      [target] = await txSql`
       SELECT id, email, role, venue_id, organization_id, account_status,
              deletion_request_id, deletion_requested_at
       FROM auth_users
-      WHERE id IN (${actorId}, ${targetUserId})
-      ORDER BY id
+      WHERE id = ${targetUserId}
       FOR UPDATE
     `;
-    const actor = locked.find((row) => String(row.id) === String(actorId));
-    const target = locked.find((row) => String(row.id) === String(targetUserId));
+    }
     if (!actor || actor.account_status !== ACCOUNT_STATUS.ACTIVE || actor.role !== "super_admin") {
       throw new LifecycleError("FORBIDDEN", 403, "An active super administrator is required");
     }
@@ -256,7 +281,9 @@ export async function completeAccountDeidentification({ actorId, targetUserId, r
     }
 
     if (target.role === "super_admin") {
-      const activeSuperAdmins = await lockActiveSuperAdmins(txSql);
+      const activeSuperAdmins = lockedSuperAdmins.filter(
+        (row) => row.account_status === ACCOUNT_STATUS.ACTIVE,
+      );
       if (activeSuperAdmins.length < 1) {
         throw new LifecycleError("FINAL_SUPER_ADMIN", 409, "Verified succession is required");
       }
@@ -281,6 +308,23 @@ export async function completeAccountDeidentification({ actorId, targetUserId, r
     await txSql`DELETE FROM mobile_sessions WHERE user_id = ${target.id}`;
     await txSql`DELETE FROM notifications WHERE user_id = ${target.id}`;
     await txSql`DELETE FROM invite_tokens WHERE invited_by = ${target.id} AND used = FALSE`;
+    await txSql`DELETE FROM invite_tokens WHERE lower(email) = lower(${target.email}) AND used = FALSE`;
+    await txSql`
+      UPDATE invite_tokens
+      SET email = ${replacementEmail}
+      WHERE lower(email) = lower(${target.email})
+    `;
+    await txSql`
+      DELETE FROM auth_rate_limits
+      WHERE lower(identifier) = lower(${target.email})
+    `;
+    await txSql`
+      DELETE FROM api_rate_limits
+      WHERE identifier IN (
+        ${`mobile-signin:email:${String(target.email).trim().toLowerCase()}`},
+        ${`reset:${String(target.email).trim().toLowerCase()}`}
+      )
+    `;
     await txSql`
       UPDATE auth_users
       SET name = ${replacementName},
@@ -312,15 +356,17 @@ export async function completeAccountDeidentification({ actorId, targetUserId, r
 export async function cancelPendingDeletion({ actorId, targetUserId, reason }) {
   requireAccountLifecycleMutationsEnabled();
   return withTransaction(async (txSql) => {
-    const locked = await txSql`
+    const lockedSuperAdmins = await lockAllSuperAdministrators(txSql);
+    const actor = lockedSuperAdmins.find((row) => String(row.id) === String(actorId));
+    let target = lockedSuperAdmins.find((row) => String(row.id) === String(targetUserId));
+    if (!target) {
+      [target] = await txSql`
       SELECT id, role, account_status, deletion_request_id
       FROM auth_users
-      WHERE id IN (${actorId}, ${targetUserId})
-      ORDER BY id
+      WHERE id = ${targetUserId}
       FOR UPDATE
     `;
-    const actor = locked.find((row) => String(row.id) === String(actorId));
-    const target = locked.find((row) => String(row.id) === String(targetUserId));
+    }
     if (!actor || actor.role !== "super_admin" || actor.account_status !== ACCOUNT_STATUS.ACTIVE) {
       throw new LifecycleError("FORBIDDEN", 403, "An active super administrator is required");
     }
@@ -367,6 +413,25 @@ export async function resolveTeamResponsibility({
 }) {
   requireAccountLifecycleMutationsEnabled();
   return withTransaction(async (txSql) => {
+    // League -> team -> users matches the accepted team-operation hierarchy.
+    const [scope] = await txSql`
+      SELECT l.id AS league_id, l.venue_id, v.organization_id
+      FROM leagues l
+      JOIN teams t ON t.league_id = l.id
+      JOIN venues v ON v.id = l.venue_id
+      WHERE t.id = ${teamId}
+      FOR UPDATE OF l
+    `;
+    if (!scope) {
+      throw new LifecycleError("TEAM_NOT_OWNED", 409, "Active team responsibility was not found");
+    }
+    const [team] = await txSql`
+      SELECT id, name, league_id, captain_user_id, status
+      FROM teams
+      WHERE id = ${teamId}
+      FOR UPDATE
+    `;
+
     const ids = [actorId, targetUserId, successorUserId].filter(Boolean);
     const users = await txSql`
       SELECT id, role, venue_id, organization_id, account_status
@@ -387,19 +452,10 @@ export async function resolveTeamResponsibility({
       throw new LifecycleError("NOT_PENDING", 409, "Account is not pending deletion");
     }
 
-    const [team] = await txSql`
-      SELECT t.id, t.name, t.league_id, t.captain_user_id, t.status,
-             l.venue_id, v.organization_id
-      FROM teams t
-      JOIN leagues l ON l.id = t.league_id
-      JOIN venues v ON v.id = l.venue_id
-      WHERE t.id = ${teamId}
-      FOR UPDATE OF t
-    `;
     if (!team || team.status !== "active" || String(team.captain_user_id) !== String(target.id)) {
       throw new LifecycleError("TEAM_NOT_OWNED", 409, "Active team responsibility was not found");
     }
-    if (!canAdministerScope(actor, team.venue_id, team.organization_id)) {
+    if (!canAdministerScope(actor, scope.venue_id, scope.organization_id)) {
       throw new LifecycleError("FORBIDDEN", 403, "Administrator is outside this team scope");
     }
     if (successorUserId) {
@@ -428,7 +484,7 @@ export async function resolveTeamResponsibility({
       VALUES (
         ${actor.id}, ${team.id}, 'ACCOUNT_TEAM_SUCCESSION',
         jsonb_build_object('captain_user_id', ${target.id}::text),
-        jsonb_build_object('captain_user_id', ${successor?.id ?? null}::text, 'custody', ${successor ? "successor" : "administrator"}),
+        jsonb_build_object('captain_user_id', ${successor?.id ?? null}::text, 'custody', ${successor ? "successor" : "administrator"}::text),
         ${reason}
       )
     `;
@@ -449,6 +505,19 @@ export async function resolveRefereeResponsibility({
 }) {
   requireAccountLifecycleMutationsEnabled();
   return withTransaction(async (txSql) => {
+    // Fixture-first ordering is shared with ASSIGN_REFEREE. Holding this row
+    // before any user lock prevents the former user->fixture inversion.
+    const [match] = await txSql`
+      SELECT m.id, m.referee_id, m.status,
+             to_char(nova_planned_date(m.match_date), 'YYYY-MM-DD') AS schedule_date,
+             m.time_slot, l.venue_id, v.organization_id
+      FROM matches m
+      JOIN leagues l ON l.id = m.league_id
+      JOIN venues v ON v.id = l.venue_id
+      WHERE m.id = ${matchId}
+      FOR UPDATE OF m
+    `;
+
     const ids = [actorId, targetUserId, successorUserId].filter(Boolean);
     const users = await txSql`
       SELECT id, role, venue_id, organization_id, account_status
@@ -469,14 +538,6 @@ export async function resolveRefereeResponsibility({
       throw new LifecycleError("NOT_PENDING", 409, "Account is not pending deletion");
     }
 
-    const [match] = await txSql`
-      SELECT m.id, m.referee_id, m.status, l.venue_id, v.organization_id
-      FROM matches m
-      JOIN leagues l ON l.id = m.league_id
-      JOIN venues v ON v.id = l.venue_id
-      WHERE m.id = ${matchId}
-      FOR UPDATE OF m
-    `;
     if (!match || !["scheduled", "live", "postponed"].includes(match.status)
         || String(match.referee_id) !== String(target.id)) {
       throw new LifecycleError("FIXTURE_NOT_ASSIGNED", 409, "Future referee responsibility was not found");
@@ -493,18 +554,31 @@ export async function resolveRefereeResponsibility({
       throw new LifecycleError("INVALID_SUCCESSOR", 409, "Successor must be an active referee at this venue");
     }
 
-    try {
-      await txSql`
-        UPDATE matches
-        SET referee_id = ${successor?.id ?? null}
-        WHERE id = ${match.id} AND referee_id = ${target.id}
-      `;
-    } catch (error) {
-      if (error?.code === "23505") {
+    if (match.status === "live") {
+      throw new LifecycleError(
+        "LIVE_FIXTURE",
+        409,
+        "A live fixture must finish or be formally postponed before referee responsibility changes",
+      );
+    }
+
+    if (successor && match.status === "scheduled") {
+      const schedule = {
+        refereeId: successor.id,
+        matchDate: match.schedule_date,
+        timeSlot: match.time_slot,
+      };
+      await lockRefereeSchedule(txSql, schedule);
+      if (await findRefereeConflict(txSql, schedule, match.id)) {
         throw new LifecycleError("REFEREE_CONFLICT", 409, "Successor has a conflicting fixture");
       }
-      throw error;
     }
+
+    await txSql`
+      UPDATE matches
+      SET referee_id = ${successor?.id ?? null}
+      WHERE id = ${match.id} AND referee_id = ${target.id}
+    `;
     await txSql`
       INSERT INTO audit_logs (action_by, target_id, action_type, old_value, new_value, reason)
       VALUES (
@@ -525,19 +599,61 @@ export async function resolveRefereeResponsibility({
 export async function listPendingLifecycleRequests({ actorId }) {
   return withTransaction(async (txSql) => {
     const [actor] = await txSql`
-      SELECT id, role, account_status
+      SELECT id, role, venue_id, organization_id, account_status
       FROM auth_users
       WHERE id = ${actorId}
       FOR SHARE
     `;
-    if (!actor || actor.role !== "super_admin" || actor.account_status !== ACCOUNT_STATUS.ACTIVE) {
-      throw new LifecycleError("FORBIDDEN", 403, "An active super administrator is required");
+    if (!actor || !["venue_admin", "org_admin", "super_admin"].includes(actor.role)
+        || actor.account_status !== ACCOUNT_STATUS.ACTIVE) {
+      throw new LifecycleError("FORBIDDEN", 403, "An active administrator is required");
     }
     const pending = await txSql`
       SELECT id, name, role, venue_id, organization_id, account_status,
              deletion_request_id, deletion_requested_at
       FROM auth_users
       WHERE account_status = 'pending_deletion'
+        AND (
+          ${actor.role === "super_admin"}
+          OR (
+            ${actor.role === "venue_admin"}
+            AND (
+              venue_id = ${actor.venue_id}
+              OR EXISTS (
+                SELECT 1 FROM teams t JOIN leagues l ON l.id = t.league_id
+                WHERE t.captain_user_id = auth_users.id AND t.status = 'active'
+                  AND l.venue_id = ${actor.venue_id}
+              )
+              OR EXISTS (
+                SELECT 1 FROM matches m JOIN leagues l ON l.id = m.league_id
+                WHERE m.referee_id = auth_users.id
+                  AND m.status IN ('scheduled', 'live', 'postponed')
+                  AND l.venue_id = ${actor.venue_id}
+              )
+            )
+          )
+          OR (
+            ${actor.role === "org_admin"}
+            AND (
+              organization_id = ${actor.organization_id}
+              OR EXISTS (
+                SELECT 1 FROM teams t
+                JOIN leagues l ON l.id = t.league_id
+                JOIN venues v ON v.id = l.venue_id
+                WHERE t.captain_user_id = auth_users.id AND t.status = 'active'
+                  AND v.organization_id = ${actor.organization_id}
+              )
+              OR EXISTS (
+                SELECT 1 FROM matches m
+                JOIN leagues l ON l.id = m.league_id
+                JOIN venues v ON v.id = l.venue_id
+                WHERE m.referee_id = auth_users.id
+                  AND m.status IN ('scheduled', 'live', 'postponed')
+                  AND v.organization_id = ${actor.organization_id}
+              )
+            )
+          )
+        )
       ORDER BY deletion_requested_at, id
       FOR SHARE
     `;

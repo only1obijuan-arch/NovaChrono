@@ -32,9 +32,9 @@ function errorResponse(error, status) {
 
 async function lockActor(txSql, identityId) {
   const [actor] = await txSql`
-    SELECT id, role, venue_id, organization_id
+    SELECT id, role, venue_id, organization_id, account_status
     FROM auth_users
-    WHERE id = ${identityId}
+    WHERE id = ${identityId} AND account_status = 'active'
     FOR SHARE
   `;
   return actor ?? null;
@@ -153,7 +153,11 @@ export async function POST(request) {
         if (!canAdministerVenue(actor, league.venue_id, league.organization_id)) return errorResponse("Forbidden", 403);
         if (league.status !== "registration") return errorResponse("Teams can only be added during registration", 409);
         if (captainUserId) {
-          const [captain] = await txSql`SELECT id FROM auth_users WHERE id = ${captainUserId} AND role = 'captain' FOR SHARE`;
+          const [captain] = await txSql`
+            SELECT id FROM auth_users
+            WHERE id = ${captainUserId} AND role = 'captain' AND account_status = 'active'
+            FOR SHARE
+          `;
           if (!captain) return errorResponse("Captain not found", 404);
           const [existing] = await txSql`
             SELECT id FROM teams
@@ -266,7 +270,11 @@ export async function POST(request) {
         const [activeOccupant] = await txSql`SELECT id FROM teams WHERE slot_id = ${priorTeam.slot_id} AND status = 'active' FOR SHARE`;
         if (activeOccupant) return errorResponse("This slot already has an active team", 409);
         if (captainUserId) {
-          const [captain] = await txSql`SELECT id FROM auth_users WHERE id = ${captainUserId} AND role = 'captain' FOR SHARE`;
+          const [captain] = await txSql`
+            SELECT id FROM auth_users
+            WHERE id = ${captainUserId} AND role = 'captain' AND account_status = 'active'
+            FOR SHARE
+          `;
           if (!captain) return errorResponse("Captain not found", 404);
         }
         const [newTeam] = await txSql`

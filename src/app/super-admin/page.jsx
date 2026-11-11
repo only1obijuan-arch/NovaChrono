@@ -17,6 +17,8 @@ import {
   Info,
   X,
   Mail,
+  Settings,
+  ShieldCheck,
 } from "lucide-react";
 
 export default function SuperAdminDashboard() {
@@ -262,6 +264,12 @@ export default function SuperAdminDashboard() {
               <a href="/admin" className="sa-nav-link">
                 <Users size={14} /> ADMIN VIEW
               </a>
+              <Link href="/account/lifecycle-admin" className="sa-nav-link">
+                <ShieldCheck size={14} /> LIFECYCLE
+              </Link>
+              <Link href="/account/settings" className="sa-nav-link">
+                <Settings size={14} /> ACCOUNT
+              </Link>
             </div>
             <a href="/account/logout" className="sa-signout">
               <LogOut size={14} /> SIGN OUT

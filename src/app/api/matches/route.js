@@ -116,9 +116,9 @@ async function lockLeague(txSql, leagueId) {
 
 async function authorizeLockedMatch(txSql, identityId, match, roles = WRITE_ROLES) {
   const [actor] = await txSql`
-    SELECT id, role, venue_id, organization_id
+    SELECT id, role, venue_id, organization_id, account_status
     FROM auth_users
-    WHERE id = ${identityId}
+    WHERE id = ${identityId} AND account_status = 'active'
     FOR SHARE
   `;
   if (!actor) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
@@ -136,9 +136,9 @@ async function authorizeLockedMatch(txSql, identityId, match, roles = WRITE_ROLE
 
 async function authorizeLockedLeague(txSql, identityId, league) {
   const [actor] = await txSql`
-    SELECT id, role, venue_id, organization_id
+    SELECT id, role, venue_id, organization_id, account_status
     FROM auth_users
-    WHERE id = ${identityId}
+    WHERE id = ${identityId} AND account_status = 'active'
     FOR SHARE
   `;
   if (!actor) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
@@ -199,12 +199,13 @@ async function resolveActiveParticipantTeams(txSql, leagueId, homeSlotId, awaySl
 async function validateReferee(txSql, refereeId, venueId) {
   if (refereeId == null) return null;
   const [referee] = await txSql`
-    SELECT id, venue_id, role
+    SELECT id, venue_id, role, account_status
     FROM auth_users
     WHERE id = ${refereeId}
     FOR SHARE
   `;
   if (!referee || referee.role !== "referee") return { error: "Referee not found", status: 404 };
+  if (referee.account_status !== "active") return { error: "Referee account is not active", status: 409 };
   if (referee.venue_id !== venueId) return { error: "Referee does not belong to this venue", status: 403 };
   return null;
 }
