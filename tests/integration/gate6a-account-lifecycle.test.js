@@ -542,6 +542,7 @@ describe("Gate 6A.2 account lifecycle integration", () => {
       actorId: IDS.super,
       targetUserId: IDS.mobile,
       reason: "Verified request cancellation",
+      identityVerified: true,
     });
     expect(Number((await pool.query("SELECT count(*) FROM invite_tokens WHERE token = $1", [tokenHash])).rows[0].count))
       .toBe(0);

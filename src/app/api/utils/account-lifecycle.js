@@ -92,13 +92,18 @@ async function lockAllSuperAdministrators(txSql) {
   `;
 }
 
+// The COMPLETE blocker set. This is the only input to completion decisions, so
+// it is never filtered by who is looking. Records carry organization_id for
+// scope filtering; use toPublicBlockers / scopeBlockersForActor for anything
+// that leaves the service.
 export async function getLifecycleBlockers(txSql, user) {
   const blockers = [];
 
   const activeTeams = await txSql`
-    SELECT t.id, t.name, l.venue_id
+    SELECT t.id, t.name, l.venue_id, v.organization_id
     FROM teams t
     JOIN leagues l ON l.id = t.league_id
+    LEFT JOIN venues v ON v.id = l.venue_id
     WHERE t.captain_user_id = ${user.id}
       AND t.status = 'active'
     ORDER BY t.id
@@ -106,9 +111,10 @@ export async function getLifecycleBlockers(txSql, user) {
   if (activeTeams.length) blockers.push({ type: "active_teams", records: activeTeams });
 
   const futureFixtures = await txSql`
-    SELECT m.id, m.status, m.match_date, l.venue_id
+    SELECT m.id, m.status, m.match_date, l.venue_id, v.organization_id
     FROM matches m
     JOIN leagues l ON l.id = m.league_id
+    LEFT JOIN venues v ON v.id = l.venue_id
     WHERE m.referee_id = ${user.id}
       AND m.status IN ('scheduled', 'live', 'postponed')
     ORDER BY m.id
@@ -149,6 +155,63 @@ export async function getLifecycleBlockers(txSql, user) {
   return blockers;
 }
 
+const sameId = (a, b) => a != null && b != null && String(a) === String(b);
+
+// One scope rule for the pending-list projection and the succession actions.
+// Null never matches null: an unscoped administrator administers nothing.
+function isWithinAdminScope(actor, venueId, organizationId) {
+  if (actor.role === "super_admin") return true;
+  if (actor.role === "venue_admin") return sameId(actor.venue_id, venueId);
+  if (actor.role === "org_admin") return sameId(actor.organization_id, organizationId);
+  return false;
+}
+
+// Whitelist projection of a blocker record. organization_id and any other
+// internal column never leave the service.
+function publicRecord(type, record) {
+  return type === "active_teams"
+    ? { id: record.id, name: record.name, venue_id: record.venue_id }
+    : { id: record.id, status: record.status, match_date: record.match_date, venue_id: record.venue_id };
+}
+
+// Unfiltered but whitelisted: for the account holder's own request and for the
+// super-administrator completion check, which are entitled to the full set.
+export function toPublicBlockers(blockers) {
+  return blockers.map((blocker) => ({
+    type: blocker.type,
+    records: blocker.records.map((record) => publicRecord(blocker.type, record)),
+  }));
+}
+
+// DISPLAY projection for the pending list: only what the viewing administrator
+// is authorised to act on. It is derived from, and never replaces, the complete
+// set returned by getLifecycleBlockers; completion never reads this output.
+export function scopeBlockersForActor(blockers, actor, target) {
+  const visible = [];
+  for (const blocker of blockers) {
+    if (blocker.type === "venue_admin_coverage") {
+      if (isWithinAdminScope(actor, target.venue_id, target.organization_id)) {
+        visible.push({ type: blocker.type, records: [] });
+      }
+      continue;
+    }
+    if (blocker.type === "organization_admin_coverage") {
+      if (actor.role === "super_admin"
+          || (actor.role === "org_admin" && sameId(actor.organization_id, target.organization_id))) {
+        visible.push({ type: blocker.type, records: [] });
+      }
+      continue;
+    }
+    const records = blocker.records.filter((record) => (
+      isWithinAdminScope(actor, record.venue_id, record.organization_id)
+    ));
+    if (records.length) {
+      visible.push({ type: blocker.type, records: records.map((record) => publicRecord(blocker.type, record)) });
+    }
+  }
+  return visible;
+}
+
 export async function requestAccountDeletion({ userId, password }) {
   requireAccountLifecycleMutationsEnabled();
   // New requests are accepted only when the separately authorised completion
@@ -175,7 +238,7 @@ export async function requestAccountDeletion({ userId, password }) {
       return {
         status: user.account_status,
         requestId: user.deletion_request_id,
-        blockers: await getLifecycleBlockers(txSql, user),
+        blockers: toPublicBlockers(await getLifecycleBlockers(txSql, user)),
       };
     }
     if (user.account_status !== ACCOUNT_STATUS.ACTIVE) {
@@ -245,7 +308,7 @@ export async function requestAccountDeletion({ userId, password }) {
     return {
       status: ACCOUNT_STATUS.PENDING,
       requestId,
-      blockers: await getLifecycleBlockers(txSql, pendingUser),
+      blockers: toPublicBlockers(await getLifecycleBlockers(txSql, pendingUser)),
     };
   });
 }
@@ -291,7 +354,14 @@ export async function completeAccountDeidentification({ actorId, targetUserId, r
 
     const blockers = await getLifecycleBlockers(txSql, target);
     if (blockers.length) {
-      throw new LifecycleError("LIFECYCLE_BLOCKED", 409, "Account responsibilities remain unresolved", blockers);
+      // Only an active super administrator reaches this point, so the complete
+      // (whitelisted) set is returned.
+      throw new LifecycleError(
+        "LIFECYCLE_BLOCKED",
+        409,
+        "Account responsibilities remain unresolved",
+        toPublicBlockers(blockers),
+      );
     }
 
     const replacementEmail = deidentifiedEmailForUserId(target.id);
@@ -353,8 +423,18 @@ export async function completeAccountDeidentification({ actorId, targetUserId, r
   });
 }
 
-export async function cancelPendingDeletion({ actorId, targetUserId, reason }) {
+// Assisted withdrawal follows an external identity check. The route validates
+// the operator's attestation and the service refuses to run without it, so no
+// other caller can skip the control; the attestation is recorded in the audit event.
+export async function cancelPendingDeletion({ actorId, targetUserId, reason, identityVerified }) {
   requireAccountLifecycleMutationsEnabled();
+  if (identityVerified !== true) {
+    throw new LifecycleError(
+      "IDENTITY_ATTESTATION_REQUIRED",
+      400,
+      "Assisted withdrawal requires the operator's identity-verification attestation",
+    );
+  }
   return withTransaction(async (txSql) => {
     const lockedSuperAdmins = await lockAllSuperAdministrators(txSql);
     const actor = lockedSuperAdmins.find((row) => String(row.id) === String(actorId));
@@ -390,7 +470,7 @@ export async function cancelPendingDeletion({ actorId, targetUserId, reason }) {
       VALUES (
         ${actor.id}, ${target.id}, 'ACCOUNT_DELETION_CANCELLED',
         jsonb_build_object('account_status', 'pending_deletion', 'request_id', ${requestId}::text),
-        jsonb_build_object('account_status', 'active'),
+        jsonb_build_object('account_status', 'active', 'identity_verified', TRUE),
         ${reason}
       )
     `;
@@ -398,11 +478,7 @@ export async function cancelPendingDeletion({ actorId, targetUserId, reason }) {
   });
 }
 
-function canAdministerScope(actor, venueId, organizationId) {
-  return actor.role === "super_admin"
-    || (actor.role === "venue_admin" && String(actor.venue_id) === String(venueId))
-    || (actor.role === "org_admin" && String(actor.organization_id) === String(organizationId));
-}
+const canAdministerScope = isWithinAdminScope;
 
 export async function resolveTeamResponsibility({
   actorId,
@@ -665,7 +741,9 @@ export async function listPendingLifecycleRequests({ actorId }) {
         role: user.role,
         requestId: user.deletion_request_id,
         requestedAt: user.deletion_requested_at,
-        blockers: await getLifecycleBlockers(txSql, user),
+        // Display projection only: out-of-scope records are removed here and
+        // nowhere else, so completion still sees every unresolved responsibility.
+        blockers: scopeBlockersForActor(await getLifecycleBlockers(txSql, user), actor, user),
       });
     }
     return requests;

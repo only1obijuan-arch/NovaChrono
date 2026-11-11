@@ -54,7 +54,7 @@ The migration command is never an implicit startup step. Production migrations r
     npm run test:e2e
     npm audit --omit=dev
 
-The Playwright suite starts a local web server and uses browser-level mocked API fixtures. It verifies that the main shells render without requiring or mutating a database. It is intentionally a small Gate 1 smoke suite, not complete business-flow coverage.
+The Playwright suite starts local production servers. Most specs use browser-level mocked API fixtures to verify that the main shells render without a database. The account-lifecycle journeys (`tests/e2e/account-lifecycle.spec.js`) are different: they use no browser mocks and drive the real routes against an isolated, migrated PostgreSQL database, so they only run when `PLAYWRIGHT_DATABASE_URL` is set. It is not complete business-flow coverage.
 
 ## Environment variables
 

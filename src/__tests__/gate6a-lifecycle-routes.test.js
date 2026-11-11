@@ -117,7 +117,13 @@ describe("Gate 6A.2 administrator lifecycle route", () => {
 
     const accepted = await adminPatch(patchRequest(adminPath, { action: "cancel", userId: TARGET, reason: REASON, identityVerified: true }));
     expect(accepted.status).toBe(200);
-    expect(mocks.cancel).toHaveBeenCalledWith({ actorId: ACTOR, targetUserId: TARGET, reason: REASON });
+    // The validated attestation is forwarded so the service can enforce and audit it.
+    expect(mocks.cancel).toHaveBeenCalledWith({
+      actorId: ACTOR,
+      targetUserId: TARGET,
+      reason: REASON,
+      identityVerified: true,
+    });
   });
 
   it("restricts withdrawal and completion to super administrators", async () => {

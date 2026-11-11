@@ -293,6 +293,31 @@ test.describe("lifecycle enabled: primary switch and completion approval on", ()
     expect(malformed.status()).toBe(400);
   });
 
+  test("a freshly signed cookie is refused on every route once its account is pending or de-identified", async ({ context }) => {
+    // The cookie is minted AFTER the status change, so it is newer than the session
+    // boundary: only the account-status check can reject it. /api/profile is
+    // authenticated by Auth.js alone; /api/account/deletion also re-reads the row.
+    await signInAs(context, ID.captainFree, ENABLED_URL);
+    expect((await api(context, ENABLED_URL, "GET", "/api/profile")).status).toBe(200);
+
+    await markPending(ID.captainFree);
+    await signInAs(context, ID.captainFree, ENABLED_URL);
+    for (const path of ["/api/profile", "/api/notifications", "/api/account/deletion"]) {
+      expect((await api(context, ENABLED_URL, "GET", path)).status, `pending ${path}`).toBe(401);
+    }
+
+    await q(
+      `UPDATE auth_users SET account_status = 'deidentified', deidentified_at = NOW(), "emailVerified" = NULL,
+         name = 'Former captain', email = 'deidentified+' || replace(id::text, '-', '') || '@account.invalid'
+       WHERE id = $1`,
+      [ID.captainFree],
+    );
+    await signInAs(context, ID.captainFree, ENABLED_URL);
+    for (const path of ["/api/profile", "/api/notifications", "/api/account/deletion"]) {
+      expect((await api(context, ENABLED_URL, "GET", path)).status, `de-identified ${path}`).toBe(401);
+    }
+  });
+
   test("venue administrator rejects a conflicting successor, then reassigns the fixture", async ({ context, page }) => {
     await signInAs(context, ID.refTarget, ENABLED_URL);
     const requested = await api(context, ENABLED_URL, "POST", "/api/account/deletion", { password: PASSWORD });

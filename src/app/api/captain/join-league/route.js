@@ -23,7 +23,10 @@ export async function POST(request) {
       if (!league || league.status !== "registration") {
         return Response.json({ error: "Invalid, expired, or closed league code" }, { status: 409 });
       }
-      const [actor] = await txSql`SELECT id, role FROM auth_users WHERE id = ${user.id} FOR SHARE`;
+      const [actor] = await txSql`
+        SELECT id, role FROM auth_users
+        WHERE id = ${user.id} AND account_status = 'active' FOR SHARE
+      `;
       if (!actor || actor.role !== "captain") {
         return Response.json({ error: "Captain access required" }, { status: 403 });
       }

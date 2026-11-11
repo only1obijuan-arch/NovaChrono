@@ -75,6 +75,7 @@ export async function PATCH(request) {
         actorId: actor.id,
         targetUserId: userId,
         reason: parsed.data.reason,
+        identityVerified: parsed.data.identityVerified,
       });
       return Response.json(result);
     }

@@ -202,7 +202,9 @@ jobs:
           createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate2_routes
           TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate2_routes' npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js
           TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate5-communications.test.js
-          TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate6a-account-lifecycle.test.js
+          # Every gate6a-* suite (lifecycle, tenant isolation, non-active accounts,
+          # session/JWT, service gates) against the production-shaped schema.
+          TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate6a-
 
       - name: Unit and contract tests
         run: npm test
