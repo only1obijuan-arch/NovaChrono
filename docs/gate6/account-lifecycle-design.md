@@ -91,7 +91,7 @@ All blockers are accumulated and returned together; the system must not partiall
 1. User opens Account settings on web or mobile and selects “Delete account”.
 2. The UI explains what will be deleted, what may be retained, active-responsibility blockers, expected timing, and the external request route.
 3. User confirms intent and re-enters their password. The server performs Argon2 verification; a normal authenticated session alone is insufficient.
-4. Web cookie requests must pass an Origin/Host CSRF check in addition to Auth.js SameSite protections. Mobile requests require a valid live bearer session plus the same recent credential confirmation.
+4. Web cookie requests must pass an Origin/Host CSRF check in addition to Auth.js SameSite protections: the request's `Origin` host must equal the host the client addressed (`X-Forwarded-Host`, otherwise `Host`), the same rule Next.js applies to Server Actions. `request.url` is deliberately not used, because Next derives it from its configured listener (for example `localhost:PORT`) unless it is told to trust the Host header, which would reject genuine same-origin requests. The comparison is host-and-port, independent of scheme. A request that presents a bearer credential is exempt because that credential is not ambient. Mobile requests require a valid live bearer session plus the same recent credential confirmation; when a bearer header is present it is authoritative and the browser cookie is never consulted.
 5. The server locks the user, rechecks live status/role/responsibilities, advances `sessions_valid_after`, deletes mobile sessions and reset/verification credentials, permanently revokes unused invitations issued by or addressed to the account, and records a pending request. Ordinary auth immediately fails closed.
 6. If blockers exist, the response returns a stable request ID and a complete, non-sensitive list of required handovers. No sporting row is changed automatically.
 7. Once approved blockers and retention decisions are satisfied, one transaction deletes credentials, notifications and approved transient data; de-identifies direct identity fields; preserves approved tombstone references; and writes one minimal `ACCOUNT_DEIDENTIFIED` audit event without name/email.
@@ -114,8 +114,18 @@ Both flags default to disabled. Neither flag is set by source code, migration or
 2. **Normal controlled release:** enable the primary switch, then enable completion only after the separate irreversible-operation approval. Verify both through the authenticated availability endpoint before exposing deletion navigation.
 3. **Emergency pause with pending requests:** disable completion first. This blocks new requests and completion while leaving scoped succession and assisted withdrawal available if the primary switch remains enabled.
 4. **Full emergency stop:** disable the primary switch. All mutations stop. Read-only inspection remains available for impact assessment.
-5. **Assisted withdrawal:** an authorised super administrator completes the approved external identity-verification process, temporarily enables only the primary switch if required, records a meaningful audit reason and cancels the pending request. Revoked invitations are not resurrected.
+5. **Assisted withdrawal:** an authorised super administrator completes the approved external identity-verification process, temporarily enables only the primary switch if required, records a meaningful audit reason and cancels the pending request. The API rejects the request unless it carries `identityVerified: true`, and the administrator screen enables the action only after an explicit identity-verification checkbox is ticked. Revoked invitations are not resurrected.
 6. **Re-enable completion:** an authorised operator confirms the pending queue, blockers, migration state, backup/incident status and legal approval, records the operational change, then explicitly enables completion.
+
+### Pre-enable verification (required before either flag is set in production)
+
+These are operator steps; none is performed by the repository and neither flag is enabled by it.
+
+1. Apply and verify migration `0011` on a restored copy of production first (the CI rehearsal covers the schema shape, not production data).
+2. On the real domain, confirm that the deployment forwards the original host (`Host` or `X-Forwarded-Host`) so the Origin/Host rule above accepts genuine requests: submit a request from the web settings page with a disposable account while the flags are enabled only in a staging environment.
+3. Confirm the availability endpoint reports `available: true` only when both flags are enabled, and that no deletion navigation appears on web or mobile otherwise.
+4. Confirm the administrator queue is staffed and that irreversible completion has its own recorded approval.
+5. Irreversible completion is a distinct, confirmed action in the administrator screen (a browser confirmation precedes the request) and an unresolved responsibility blocker keeps it disabled.
 
 The application does not yet send a completion-confirmation email because the approved sender, privacy contact, wording and retention details are unresolved. No placeholder public contact or compliance claim may be invented.
 

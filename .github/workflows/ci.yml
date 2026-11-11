@@ -117,8 +117,8 @@ jobs:
 
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0009_gate4b_league_lifecycle.sql
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "SELECT result_type, nova_planned_date(match_date) FROM matches WHERE id = '70000000-0000-4000-8000-000000000001'"
-          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate2_routes
-          TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate2_routes' npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js
+          # The route integration suites run once, after the final migration: the
+          # application authenticates against auth_users.account_status (0011).
 
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f tests/fixtures/gate5-production-facts.sql
           createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate5_bad_notification
@@ -166,7 +166,6 @@ jobs:
           test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns WHERE table_schema = 'public' AND ((table_name = 'availability_responses' AND column_name IN ('expires_at', 'delivery_claim_id', 'delivery_claimed_at')) OR (table_name = 'notifications' AND column_name IN ('dedupe_key', 'read_at')))")" = "dedupe_key,delivery_claim_id,delivery_claimed_at,expires_at,read_at"
           test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('availability_responses_response_supported', 'availability_responses_state_consistent', 'availability_responses_token_format', 'availability_responses_claim_consistent', 'notifications_type_supported') AND convalidated")" = "5"
           test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class WHERE relname IN ('availability_responses_token_unique', 'notifications_dedupe_key_unique', 'auth_users_push_token_unique')")" = "3"
-          TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate5-communications.test.js
 
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS schema_migrations (id serial PRIMARY KEY, name text NOT NULL UNIQUE, applied_at timestamptz NOT NULL DEFAULT NOW()); INSERT INTO schema_migrations (name) SELECT format('%s_recorded.sql', generate_series) FROM generate_series(1, 9); INSERT INTO schema_migrations (name) VALUES ('0010_gate5_availability_notifications.sql')"
           createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate6a_missing_0010
@@ -197,6 +196,12 @@ jobs:
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0011_gate6a_account_lifecycle.sql
           test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('auth_users_account_status_supported', 'auth_users_lifecycle_state_consistent', 'auth_users_lifecycle_email_consistent') AND convalidated")" = "3"
           test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class WHERE relname IN ('auth_users_deletion_request_unique', 'auth_users_active_role_idx')")" = "2"
+
+          # Route and concurrency suites run against the final production-shaped
+          # schema because every authenticated request reads auth_users.account_status.
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate2_routes
+          TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate2_routes' npx vitest run --config vitest.integration.config.js tests/integration/gate2-remediation-routes.test.js
+          TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate5-communications.test.js
           TEST_DATABASE_URL="$production_shape_url" npx vitest run --config vitest.integration.config.js tests/integration/gate6a-account-lifecycle.test.js
 
       - name: Unit and contract tests

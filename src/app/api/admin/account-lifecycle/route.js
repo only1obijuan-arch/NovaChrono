@@ -16,7 +16,9 @@ const reason = z.string().trim().min(10).max(500);
 const uuid = () => z.string().uuid();
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("complete"), userId: uuid(), reason }).strict(),
-  z.object({ action: z.literal("cancel"), userId: uuid(), reason }).strict(),
+  // Assisted withdrawal follows an external identity check, so the operator must
+  // attest to it explicitly; the request is rejected without the attestation.
+  z.object({ action: z.literal("cancel"), userId: uuid(), reason, identityVerified: z.literal(true) }).strict(),
   z.object({ action: z.literal("resolve_team"), userId: uuid(), teamId: uuid(), successorUserId: uuid().nullable().optional(), reason }).strict(),
   z.object({ action: z.literal("resolve_fixture"), userId: uuid(), matchId: uuid(), successorUserId: uuid().nullable().optional(), reason }).strict(),
 ]);

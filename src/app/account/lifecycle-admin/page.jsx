@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 
 const ADMIN_ROLES = new Set(["venue_admin", "org_admin", "super_admin"]);
+const IDENTITY_ATTESTATION = "External identity verification completed for this request";
 
 async function fetchLifecycleRequests(endpoint) {
   const response = await fetch(endpoint);
@@ -22,6 +23,7 @@ export default function LifecycleAdminPage() {
   const [requests, setRequests] = useState([]);
   const [reason, setReason] = useState("");
   const [successors, setSuccessors] = useState({});
+  const [verified, setVerified] = useState({});
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -58,6 +60,14 @@ export default function LifecycleAdminPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function completeRequest(request) {
+    // De-identification is irreversible, so it always needs a second, explicit step.
+    const confirmed = window.confirm(
+      `Complete irreversible de-identification of ${request.name}? This cannot be undone.`,
+    );
+    if (confirmed) mutate({ action: "complete", userId: request.id });
   }
 
   if (status === "loading") return <main className="lifecycle-page">Loading...</main>;
@@ -121,10 +131,24 @@ export default function LifecycleAdminPage() {
             ))}
             {role === "super_admin" && (
               <div className="super-actions">
-                <button disabled={busy} onClick={() => mutate({ action: "cancel", userId: request.id })}>
+                <label className="attest">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(verified[request.id])}
+                    onChange={(event) => setVerified((current) => ({
+                      ...current,
+                      [request.id]: event.target.checked,
+                    }))}
+                  />
+                  {IDENTITY_ATTESTATION}
+                </label>
+                <button
+                  disabled={busy || !verified[request.id]}
+                  onClick={() => mutate({ action: "cancel", userId: request.id, identityVerified: true })}
+                >
                   ASSISTED WITHDRAWAL
                 </button>
-                <button disabled={busy || request.blockers.length > 0} onClick={() => mutate({ action: "complete", userId: request.id })}>
+                <button disabled={busy || request.blockers.length > 0} onClick={() => completeRequest(request)}>
                   COMPLETE DE-IDENTIFICATION
                 </button>
               </div>
@@ -133,7 +157,7 @@ export default function LifecycleAdminPage() {
         ))}
       </section>
       <style jsx>{`
-        .lifecycle-page{min-height:100vh;background:#091833;color:#f4f4f9;padding:32px;font-family:Arial,sans-serif}.panel{max-width:900px;margin:auto;background:#0d1b2e;border:1px solid rgba(0,245,212,.2);border-radius:10px;padding:30px}nav{margin-bottom:24px}nav a,.eyebrow,label,button{font-family:monospace;letter-spacing:2px}.eyebrow{color:#00f5d4;font-size:10px}h1{margin:8px 0 12px}.help,.empty{color:rgba(210,220,235,.7);line-height:1.5}label{display:block;font-size:10px;margin:20px 0 8px}textarea,input{width:100%;background:#09162a;border:1px solid rgba(255,255,255,.15);color:#fff;border-radius:5px;padding:12px}textarea{min-height:80px}.message{color:#ffd27a}.request-card{margin-top:22px;padding:20px;border:1px solid rgba(255,255,255,.12);border-radius:7px}h2 span{font:10px monospace;color:#00f5d4}.request-id{font:11px monospace;color:rgba(210,220,235,.5)}.blocker{margin-top:15px;padding:14px;background:rgba(255,180,0,.05)}.record{display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:center;margin-top:10px}.super-actions{display:flex;gap:10px;margin-top:18px}button{border:1px solid rgba(0,245,212,.35);background:rgba(0,245,212,.08);color:#00f5d4;border-radius:4px;padding:11px;cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.record{grid-template-columns:1fr}.super-actions{flex-direction:column}}
+        .lifecycle-page{min-height:100vh;background:#091833;color:#f4f4f9;padding:32px;font-family:Arial,sans-serif}.panel{max-width:900px;margin:auto;background:#0d1b2e;border:1px solid rgba(0,245,212,.2);border-radius:10px;padding:30px}nav{margin-bottom:24px}nav a,.eyebrow,label,button{font-family:monospace;letter-spacing:2px}.eyebrow{color:#00f5d4;font-size:10px}h1{margin:8px 0 12px}.help,.empty{color:rgba(210,220,235,.7);line-height:1.5}label{display:block;font-size:10px;margin:20px 0 8px}textarea,input{width:100%;background:#09162a;border:1px solid rgba(255,255,255,.15);color:#fff;border-radius:5px;padding:12px}textarea{min-height:80px}.message{color:#ffd27a}.request-card{margin-top:22px;padding:20px;border:1px solid rgba(255,255,255,.12);border-radius:7px}h2 span{font:10px monospace;color:#00f5d4}.request-id{font:11px monospace;color:rgba(210,220,235,.5)}.blocker{margin-top:15px;padding:14px;background:rgba(255,180,0,.05)}.record{display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:center;margin-top:10px}.super-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:18px}.attest{display:flex;align-items:center;gap:8px;width:100%;margin:0;font-size:11px;letter-spacing:1px;color:rgba(210,220,235,.85)}.attest input{width:auto;padding:0}button{border:1px solid rgba(0,245,212,.35);background:rgba(0,245,212,.08);color:#00f5d4;border-radius:4px;padding:11px;cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}@media(max-width:700px){.record{grid-template-columns:1fr}.super-actions{flex-direction:column}}
       `}</style>
     </main>
   );

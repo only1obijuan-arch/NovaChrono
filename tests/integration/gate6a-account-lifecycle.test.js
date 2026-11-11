@@ -34,6 +34,7 @@ import {
 import { POST as mobileSignin } from "@/app/api/auth/mobile-signin/route";
 import { POST as mobileRefresh } from "@/app/api/auth/mobile-refresh/route";
 import { POST as matchCommand } from "@/app/api/matches/route";
+import { refereeScheduleKey } from "@/app/api/matches/scheduling";
 import { POST as teamCommand } from "@/app/api/teams/route";
 import { POST as provisionReferee } from "@/app/api/admin/referees/route";
 import { POST as acceptInvite } from "@/app/api/admin/accept-invite/route";
@@ -651,4 +652,189 @@ describe("Gate 6A.2 account lifecycle integration", () => {
     }));
     expect(deidentifiedReferee.status).toBe(409);
   });
+
+  it("rejects ineligible successors without changing any responsibility", async () => {
+    await addLifecycleActors();
+    const outsider = "33000000-0000-4000-8000-00000000000a";
+    const otherVenue = "22000000-0000-4000-8000-000000000002";
+    await pool.query(
+      "INSERT INTO venues (id, organization_id, name) VALUES ($1, $2, 'Other Venue')",
+      [otherVenue, IDS.org],
+    );
+    await pool.query(`
+      INSERT INTO auth_users
+        (id, name, email, role, venue_id, organization_id, field_number, "emailVerified")
+      VALUES ($1, 'Other Venue Referee', 'gate6-outsider@example.test', 'referee', $2, $3, 4, NOW())
+    `, [outsider, otherVenue, IDS.org]);
+    await pool.query(
+      "UPDATE teams SET status = 'active', captain_user_id = $1 WHERE id = $2",
+      [IDS.mobile, IDS.teamA],
+    );
+    await pool.query(
+      "UPDATE teams SET status = 'active', captain_user_id = $1 WHERE id = $2",
+      [IDS.captainSuccessor, IDS.teamB],
+    );
+    await insertFutureMatch({ id: IDS.match2 });
+    await requestAccountDeletion({ userId: IDS.mobile, password: PASSWORD });
+    await requestAccountDeletion({ userId: IDS.referee, password: PASSWORD });
+
+    const team = (successorUserId) => resolveTeamResponsibility({
+      actorId: IDS.venueAdmin,
+      targetUserId: IDS.mobile,
+      teamId: IDS.teamA,
+      successorUserId,
+      reason: "Successor eligibility check",
+    });
+    const fixture = (successorUserId) => resolveRefereeResponsibility({
+      actorId: IDS.venueAdmin,
+      targetUserId: IDS.referee,
+      matchId: IDS.match2,
+      successorUserId,
+      reason: "Successor eligibility check",
+    });
+    const rejected = (promise, code) => expect(promise).rejects.toMatchObject({ code, status: 409 });
+    const unknown = "99000000-0000-4000-8000-000000000001";
+
+    // Wrong role, wrong venue, unknown account.
+    await rejected(team(IDS.refereeSuccessor), "INVALID_SUCCESSOR");
+    await rejected(team(IDS.venueAdmin), "INVALID_SUCCESSOR");
+    await rejected(team(unknown), "INVALID_SUCCESSOR");
+    await rejected(fixture(IDS.captainSuccessor), "INVALID_SUCCESSOR");
+    await rejected(fixture(outsider), "INVALID_SUCCESSOR");
+    await rejected(fixture(unknown), "INVALID_SUCCESSOR");
+    // A successor who already captains an active team in the same league.
+    await rejected(team(IDS.captainSuccessor), "SUCCESSOR_CONFLICT");
+
+    // Pending deletion, then de-identified.
+    await pool.query(`
+      UPDATE auth_users
+      SET account_status = 'pending_deletion',
+          deletion_request_id = gen_random_uuid(),
+          deletion_requested_at = NOW()
+      WHERE id IN ($1, $2)
+    `, [IDS.inactiveCaptain, IDS.inactiveReferee]);
+    await rejected(team(IDS.inactiveCaptain), "INVALID_SUCCESSOR");
+    await rejected(fixture(IDS.inactiveReferee), "INVALID_SUCCESSOR");
+    await pool.query(`
+      UPDATE auth_users
+      SET account_status = 'deidentified',
+          deidentified_at = NOW(),
+          email = CASE id
+            WHEN $1 THEN 'deidentified+33000000000040008000000000000008@account.invalid'
+            ELSE 'deidentified+33000000000040008000000000000009@account.invalid'
+          END,
+          name = CASE role WHEN 'captain' THEN 'Former captain' ELSE 'Former referee' END,
+          "emailVerified" = NULL
+      WHERE id IN ($1, $2)
+    `, [IDS.inactiveCaptain, IDS.inactiveReferee]);
+    await rejected(team(IDS.inactiveCaptain), "INVALID_SUCCESSOR");
+    await rejected(fixture(IDS.inactiveReferee), "INVALID_SUCCESSOR");
+
+    expect((await pool.query("SELECT captain_user_id FROM teams WHERE id = $1", [IDS.teamA])).rows[0])
+      .toEqual({ captain_user_id: IDS.mobile });
+    expect((await pool.query("SELECT referee_id FROM matches WHERE id = $1", [IDS.match2])).rows[0])
+      .toEqual({ referee_id: IDS.referee });
+    expect(Number((await pool.query(
+      "SELECT count(*) FROM audit_logs WHERE action_type IN ('ACCOUNT_TEAM_SUCCESSION','ACCOUNT_REFEREE_SUCCESSION')",
+    )).rows[0].count)).toBe(0);
+  }, 30_000);
+
+  it("keeps succession inside the administrator's own venue or organisation", async () => {
+    await addLifecycleActors();
+    const ids = {
+      otherOrg: "11000000-0000-4000-8000-000000000002",
+      otherVenue: "22000000-0000-4000-8000-000000000002",
+      otherVenueAdmin: "33000000-0000-4000-8000-00000000000b",
+      otherOrgAdmin: "33000000-0000-4000-8000-00000000000c",
+      ownOrgAdmin: "33000000-0000-4000-8000-00000000000d",
+    };
+    await pool.query("INSERT INTO organizations (id, name) VALUES ($1, 'Other Org')", [ids.otherOrg]);
+    await pool.query(
+      "INSERT INTO venues (id, organization_id, name) VALUES ($1, $2, 'Other Venue')",
+      [ids.otherVenue, ids.otherOrg],
+    );
+    await pool.query(`
+      INSERT INTO auth_users
+        (id, name, email, role, venue_id, organization_id, field_number, "emailVerified")
+      VALUES
+        ($1, 'Other Venue Admin', 'gate6-other-venue@example.test', 'venue_admin', $4, $5, NULL, NOW()),
+        ($2, 'Other Org Admin', 'gate6-other-org@example.test', 'org_admin', NULL, $5, NULL, NOW()),
+        ($3, 'Own Org Admin', 'gate6-own-org@example.test', 'org_admin', NULL, $6, NULL, NOW())
+    `, [ids.otherVenueAdmin, ids.otherOrgAdmin, ids.ownOrgAdmin, ids.otherVenue, ids.otherOrg, IDS.org]);
+    await pool.query(
+      "UPDATE teams SET status = 'active', captain_user_id = $1 WHERE id = $2",
+      [IDS.mobile, IDS.teamA],
+    );
+    await insertFutureMatch({ id: IDS.match2 });
+    await requestAccountDeletion({ userId: IDS.mobile, password: PASSWORD });
+    await requestAccountDeletion({ userId: IDS.referee, password: PASSWORD });
+
+    // A venue administrator or organisation administrator elsewhere, and users
+    // who are not administrators at all, can resolve neither kind of responsibility.
+    for (const actorId of [
+      ids.otherVenueAdmin,
+      ids.otherOrgAdmin,
+      IDS.captainSuccessor,
+      IDS.refereeSuccessor,
+    ]) {
+      await expect(resolveTeamResponsibility({
+        actorId, targetUserId: IDS.mobile, teamId: IDS.teamA, reason: "Out-of-scope team attempt",
+      })).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+      await expect(resolveRefereeResponsibility({
+        actorId, targetUserId: IDS.referee, matchId: IDS.match2, reason: "Out-of-scope fixture attempt",
+      })).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    }
+    expect((await pool.query("SELECT captain_user_id FROM teams WHERE id = $1", [IDS.teamA])).rows[0])
+      .toEqual({ captain_user_id: IDS.mobile });
+    expect((await pool.query("SELECT referee_id FROM matches WHERE id = $1", [IDS.match2])).rows[0])
+      .toEqual({ referee_id: IDS.referee });
+
+    // The owning organisation's administrator is in scope for both.
+    await expect(resolveTeamResponsibility({
+      actorId: ids.ownOrgAdmin, targetUserId: IDS.mobile, teamId: IDS.teamA, reason: "Own organisation custody",
+    })).resolves.toMatchObject({ resolution: "administrator_custody" });
+    await expect(resolveRefereeResponsibility({
+      actorId: ids.ownOrgAdmin, targetUserId: IDS.referee, matchId: IDS.match2, reason: "Own organisation unassign",
+    })).resolves.toMatchObject({ resolution: "referee_unassigned" });
+  }, 30_000);
+
+  it("takes the referee schedule lock that reschedules use before checking a successor", async () => {
+    await addLifecycleActors();
+    await insertFutureMatch({ id: IDS.match2 });
+    await insertFutureMatch({ id: IDS.match3, refereeId: IDS.refereeSuccessor, date: "2031-01-08", round: 3 });
+    await requestAccountDeletion({ userId: IDS.referee, password: PASSWORD });
+
+    // A reschedule keeps its referee and so never locks that referee's user row;
+    // the per-referee kickoff advisory lock is the only thing serialising it.
+    const holder = await pool.connect();
+    let settled = false;
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        refereeScheduleKey({ refereeId: IDS.refereeSuccessor, matchDate: "2031-01-07", timeSlot: "18:00" }),
+      ]);
+      const pending = resolveRefereeResponsibility({
+        actorId: IDS.venueAdmin,
+        targetUserId: IDS.referee,
+        matchId: IDS.match2,
+        successorUserId: IDS.refereeSuccessor,
+        reason: "Wait for the concurrent reschedule",
+      }).finally(() => { settled = true; });
+      pending.catch(() => {});
+
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      expect(settled).toBe(false);
+
+      // The successor's other fixture moves into this kickoff and commits; the
+      // check must run after the lock and therefore see it.
+      await holder.query("UPDATE matches SET match_date = '2031-01-07' WHERE id = $1", [IDS.match3]);
+      await holder.query("COMMIT");
+      await expect(pending).rejects.toMatchObject({ code: "REFEREE_CONFLICT", status: 409 });
+    } finally {
+      await holder.query("ROLLBACK").catch(() => {});
+      holder.release();
+    }
+    expect((await pool.query("SELECT referee_id FROM matches WHERE id = $1", [IDS.match2])).rows[0])
+      .toEqual({ referee_id: IDS.referee });
+  }, 30_000);
 });
