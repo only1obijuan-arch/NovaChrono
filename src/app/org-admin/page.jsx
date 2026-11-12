@@ -13,6 +13,8 @@ import {
   Mail,
   X,
   Shield,
+  Settings,
+  ShieldCheck,
 } from "lucide-react";
 
 export default function OrgAdminDashboard() {
@@ -238,9 +240,17 @@ export default function OrgAdminDashboard() {
                 <p className="oa-nav-sub">ORG ADMIN PORTAL</p>
               </div>
             </div>
-            <a href="/account/logout" className="oa-signout">
-              <LogOut size={14} /> SIGN OUT
-            </a>
+            <div style={{ display: "flex", gap: 8 }}>
+              <a href="/account/settings" className="oa-signout">
+                <Settings size={14} /> ACCOUNT
+              </a>
+              <a href="/account/lifecycle-admin" className="oa-signout">
+                <ShieldCheck size={14} /> LIFECYCLE
+              </a>
+              <a href="/account/logout" className="oa-signout">
+                <LogOut size={14} /> SIGN OUT
+              </a>
+            </div>
           </nav>
 
           {/* Header */}

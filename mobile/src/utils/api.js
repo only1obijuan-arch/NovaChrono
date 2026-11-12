@@ -1,7 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 
 export const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL || "https://novachrono.app";
-export const MOBILE_SECRET = process.env.EXPO_PUBLIC_MOBILE_SECRET || "";
 
 const AUTH_KEY = "novachrono-jwt";
 const TWO_DAYS_S = 2 * 24 * 60 * 60;
@@ -101,10 +100,7 @@ export async function apiFetch(path, options = {}) {
 export async function signInWithCredentials(email, password) {
   const res = await fetch(`${BASE_URL}/api/auth/mobile-signin`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-mobile-secret": MOBILE_SECRET,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
   });
 
@@ -151,6 +147,22 @@ export async function requestPasswordReset(email) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Request failed");
   return data;
+}
+
+export async function requestAccountDeletion(password) {
+  const res = await apiFetch("/api/account/deletion", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Deletion request failed");
+  return data;
+}
+
+export async function getAccountLifecycleAvailability() {
+  const res = await apiFetch("/api/account/deletion");
+  if (!res.ok) return { available: false };
+  return res.json();
 }
 
 // Captain sign-up — creates account + team and joins a league.

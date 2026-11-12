@@ -52,6 +52,7 @@ export default function RootLayout() {
           <Stack.Screen name="referee/match/[id]" />
           <Stack.Screen name="players/manage" />
           <Stack.Screen name="rules/[leagueId]" />
+          <Stack.Screen name="account/delete" />
         </Stack>
       </GestureHandlerRootView>
     </QueryClientProvider>

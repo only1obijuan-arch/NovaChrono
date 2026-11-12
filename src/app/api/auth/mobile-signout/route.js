@@ -1,5 +1,6 @@
 import { jwtVerify } from "jose";
 import { pool } from "@/app/api/utils/db";
+import { getAuthSecretKey } from "@/app/api/utils/auth-secret";
 
 // Revokes the mobile session so the token cannot be used again.
 // The mobile app should call this on logout.
@@ -13,13 +14,16 @@ export async function POST(request) {
     const raw = authHeader.slice(7);
     let payload;
     try {
-      const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
-      ({ payload } = await jwtVerify(raw, secret));
+      const secret = getAuthSecretKey();
+      ({ payload } = await jwtVerify(raw, secret, {
+        algorithms: ["HS256"],
+        requiredClaims: ["iat", "exp", "jti"],
+      }));
     } catch {
       return Response.json({ error: "Invalid token" }, { status: 401 });
     }
 
-    if (!payload.jti) {
+    if (!payload.jti || !Number.isFinite(payload.iat)) {
       return Response.json({ error: "Invalid token" }, { status: 401 });
     }
 

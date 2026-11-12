@@ -329,6 +329,12 @@ export default function TeamDashboard({ params, searchParams }) {
               </button>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                 <button
+                  onClick={() => router.push("/account/settings")}
+                  style={{ fontFamily:"var(--font-code)", fontSize:10, color:"rgba(0,255,156,0.5)", letterSpacing:2, background:"none", border:"1px solid rgba(0,255,156,0.2)", borderRadius:2, padding:"6px 12px", cursor:"pointer" }}
+                >
+                  ACCOUNT
+                </button>
+                <button
                   onClick={() => router.push("/captain/team")}
                   style={{ fontFamily:"var(--font-code)", fontSize:10, color:"rgba(0,255,156,0.5)", letterSpacing:2, background:"none", border:"1px solid rgba(0,255,156,0.2)", borderRadius:2, padding:"6px 12px", cursor:"pointer" }}
                 >

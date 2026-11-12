@@ -199,6 +199,7 @@ async function consumeAvailability(token, response) {
       FROM auth_users
       WHERE venue_id = ${match.venue_id}
         AND role IN ('venue_admin', 'super_admin')
+        AND account_status = 'active'
       ORDER BY id
       FOR SHARE
     `;

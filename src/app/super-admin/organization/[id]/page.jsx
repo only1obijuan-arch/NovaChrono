@@ -105,20 +105,6 @@ export default function OrganizationManagementPage({ params }) {
     },
   });
 
-  const deleteUserMutation = useMutation({
-    mutationFn: async (userId) => {
-      const res = await fetch(`/api/super-admin/users?id=${userId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete user");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["super-admin-users", orgId] });
-      queryClient.invalidateQueries({ queryKey: ["super-admin-organizations"] });
-    },
-  });
-
   const inviteVenueAdminMutation = useMutation({
     mutationFn: async ({ email, venueId }) => {
       const res = await fetch("/api/super-admin/invite-venue-admin", {
@@ -186,12 +172,6 @@ export default function OrganizationManagementPage({ params }) {
     }
   };
 
-  const handleDeleteUser = (userId, userName) => {
-    if (confirm(`Delete admin "${userName}"?`)) {
-      deleteUserMutation.mutate(userId);
-    }
-  };
-
   return (
     <>
       <OrganizationStyles />
@@ -228,7 +208,6 @@ export default function OrganizationManagementPage({ params }) {
             usersData={usersData}
             hasVenues={venuesData?.venues?.length > 0}
             onAddAdmin={() => setShowAddAdmin(true)}
-            onDeleteUser={handleDeleteUser}
           />
         </div>
       </div>

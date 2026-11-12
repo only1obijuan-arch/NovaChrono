@@ -6,7 +6,8 @@ export async function assignPushToken(userId, token) {
       const locked = await txSql`
         SELECT id
         FROM auth_users
-        WHERE id = ${userId} OR push_token = ${token}
+        WHERE (id = ${userId} OR push_token = ${token})
+          AND account_status = 'active'
         ORDER BY id
         FOR UPDATE
       `;
@@ -19,7 +20,7 @@ export async function assignPushToken(userId, token) {
       await txSql`
         UPDATE auth_users
         SET push_token = ${token}
-        WHERE id = ${userId}
+        WHERE id = ${userId} AND account_status = 'active'
       `;
       return { status: "registered" };
     });

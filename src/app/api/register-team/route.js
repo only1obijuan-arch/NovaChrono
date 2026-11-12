@@ -17,7 +17,8 @@ export async function POST(request) {
       `;
       if (!league) return Response.json({ error: "League not found" }, { status: 404 });
       const [actor] = await txSql`
-        SELECT id, role, venue_id, organization_id FROM auth_users WHERE id = ${user.id} FOR SHARE
+        SELECT id, role, venue_id, organization_id, account_status
+        FROM auth_users WHERE id = ${user.id} AND account_status = 'active' FOR SHARE
       `;
       if (!actor) return Response.json({ error: "Unauthorized" }, { status: 401 });
       if (actor.role === "captain") {
@@ -30,7 +31,11 @@ export async function POST(request) {
       if (league.status !== "registration") {
         return Response.json({ error: "League registration is closed" }, { status: 409 });
       }
-      const [captain] = await txSql`SELECT id FROM auth_users WHERE id = ${captainUserId} AND role = 'captain' FOR SHARE`;
+      const [captain] = await txSql`
+        SELECT id FROM auth_users
+        WHERE id = ${captainUserId} AND role = 'captain' AND account_status = 'active'
+        FOR SHARE
+      `;
       if (!captain) return Response.json({ error: "Captain not found" }, { status: 404 });
       const [existing] = await txSql`
         SELECT id FROM teams WHERE league_id = ${leagueId} AND captain_user_id = ${captainUserId} AND status = 'active' FOR SHARE

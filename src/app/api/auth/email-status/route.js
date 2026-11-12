@@ -1,13 +1,11 @@
 import sql from "@/app/api/utils/sql";
 import { rateLimit } from "@/app/api/utils/rate-limit";
 import { canonicalizeEmail } from "@/app/api/utils/email";
+import { getTrustedClientIp } from "@/app/api/utils/client-ip";
 
 export async function GET(request) {
   try {
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip") ||
-      "unknown";
+    const ip = getTrustedClientIp(request);
     const { allowed } = await rateLimit(`email-status:${ip}`, {
       max: 30,
       windowMinutes: 5,
@@ -21,7 +19,7 @@ export async function GET(request) {
     const [user] = await sql`
       SELECT "emailVerified"
       FROM auth_users
-      WHERE lower(email) = ${email}
+      WHERE lower(email) = ${email} AND account_status = 'active'
     `;
 
     // Only return true when the account exists AND is not yet verified.

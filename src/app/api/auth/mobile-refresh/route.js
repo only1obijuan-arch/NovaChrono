@@ -1,6 +1,7 @@
 import { jwtVerify, SignJWT } from "jose";
 import { pool } from "@/app/api/utils/db";
 import { randomUUID } from "crypto";
+import { getAuthSecretKey } from "@/app/api/utils/auth-secret";
 
 // Silently exchanges a valid (non-expired, non-revoked) mobile token for a
 // fresh 7-day token. Call this before the token expires so the user is never
@@ -15,22 +16,38 @@ export async function POST(request) {
     const raw = authHeader.slice(7);
     let payload;
     try {
-      const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
-      ({ payload } = await jwtVerify(raw, secret));
+      const secret = getAuthSecretKey();
+      ({ payload } = await jwtVerify(raw, secret, {
+        algorithms: ["HS256"],
+        requiredClaims: ["iat", "exp", "jti"],
+      }));
     } catch {
       return Response.json({ error: "Invalid or expired token" }, { status: 401 });
     }
 
-    if (!payload.jti) {
+    if (!payload.jti || !Number.isFinite(payload.iat)) {
       return Response.json({ error: "Invalid token" }, { status: 401 });
     }
 
     const newJti = randomUUID();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
+    const secret = getAuthSecretKey();
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      // Lock the user row first, in the same order as mobile sign-in and
+      // password reset (user, then sessions). Without it a reset can commit
+      // between the claim below and the replacement INSERT: it deletes the old
+      // JTI but never sees the new one, so a session survives the reset.
+      await client.query(
+        `SELECT u.id
+         FROM mobile_sessions ms
+         JOIN auth_users u ON u.id = ms.user_id
+         WHERE ms.jti = $1
+           AND u.account_status = 'active'
+         FOR UPDATE OF u`,
+        [payload.jti]
+      );
       // DELETE ... RETURNING is the single-use claim. Concurrent refreshes
       // serialize on this row and only one can receive replacement credentials.
       const claimed = await client.query(
@@ -38,8 +55,9 @@ export async function POST(request) {
          USING auth_users AS u
          WHERE ms.jti = $1
            AND u.id = ms.user_id
+           AND u.account_status = 'active'
            AND ms.expires_at > NOW()
-           AND to_timestamp($2) >= u.sessions_valid_after
+           AND to_timestamp($2) >= date_trunc('second', u.sessions_valid_after)
          RETURNING u.id, u.role, u.venue_id, u.organization_id, u.email, u.name`,
         [payload.jti, payload.iat]
       );

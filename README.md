@@ -54,13 +54,13 @@ The migration command is never an implicit startup step. Production migrations r
     npm run test:e2e
     npm audit --omit=dev
 
-The Playwright suite starts a local web server and uses browser-level mocked API fixtures. It verifies that the main shells render without requiring or mutating a database. It is intentionally a small Gate 1 smoke suite, not complete business-flow coverage.
+The Playwright suite starts local production servers. Most specs use browser-level mocked API fixtures to verify that the main shells render without a database. The account-lifecycle journeys (`tests/e2e/account-lifecycle.spec.js`) are different: they use no browser mocks and drive the real routes against an isolated, migrated PostgreSQL database, so they only run when `PLAYWRIGHT_DATABASE_URL` is set. It is not complete business-flow coverage.
 
 ## Environment variables
 
 The authoritative variable-name baseline is .env.example. Important groups are:
 
-- Database/authentication: DATABASE_URL, AUTH_SECRET, MOBILE_SECRET
+- Database/authentication: DATABASE_URL, AUTH_SECRET
 - Public URLs/mobile: NEXT_PUBLIC_APP_URL, EXPO_PUBLIC_BASE_URL
 - Providers: RESEND_API_KEY, RESEND_FROM_EMAIL, OPENWEATHER_API_KEY
 - Scheduled jobs: CRON_SECRET
@@ -68,6 +68,7 @@ The authoritative variable-name baseline is .env.example. Important groups are:
 - Release identity: APP_VERSION or platform commit-SHA variables
 
 EXPO_PUBLIC_* values are embedded in the mobile application and are not secrets. Never commit real credentials or production exports.
+Mobile sign-in is authenticated by user credentials and server-side abuse controls; distributed app bundles must never contain a shared authentication secret.
 
 ## Database and schema truth
 

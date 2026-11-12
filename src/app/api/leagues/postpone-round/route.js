@@ -51,7 +51,7 @@ export async function POST(request) {
     const [earlyActor] = await sql`
       SELECT id, role, venue_id, organization_id
       FROM auth_users
-      WHERE id = ${user.id}
+      WHERE id = ${user.id} AND account_status = 'active'
     `;
     if (!earlyLeague || !earlyActor
       || !["venue_admin", "org_admin", "super_admin"].includes(earlyActor.role)
@@ -95,10 +95,13 @@ export async function POST(request) {
         WHERE l.id = ${league_id}
         FOR SHARE OF l
       `;
+      // The identity above was resolved before this transaction. Re-check the
+      // account status here, under the row lock and after the league lock, so a
+      // concurrent deletion request cannot be overtaken by a stale session.
       const [actor] = await txSql`
         SELECT id, role, venue_id, organization_id
         FROM auth_users
-        WHERE id = ${user.id}
+        WHERE id = ${user.id} AND account_status = 'active'
         FOR SHARE
       `;
       if (!league || !actor || !["venue_admin", "org_admin", "super_admin"].includes(actor.role)
@@ -212,6 +215,7 @@ export async function POST(request) {
       JOIN league_slots ls ON t.slot_id = ls.id
       JOIN auth_users au ON t.captain_user_id = au.id
       WHERE ls.league_id = ${league_id} AND t.status = 'active'
+        AND au.account_status = 'active'
     `;
 
     const newDate = formatLocalFixtureDate(updatedMatches[0].match_date, "en-GB");

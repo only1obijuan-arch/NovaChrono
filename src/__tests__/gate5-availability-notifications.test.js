@@ -14,7 +14,7 @@ import {
 import { matchReminderEmail } from "@/emails/matchReminderEmail";
 
 const root = resolve(import.meta.dirname, "../..");
-const read = (path) => readFileSync(resolve(root, path), "utf8");
+const read = (path) => readFileSync(resolve(root, path), "utf8").replace(/\r\n/g, "\n");
 const migration = read("migrations/0010_gate5_availability_notifications.sql");
 const availability = read("src/app/api/auth/confirm-availability/handler.js");
 const reminders = read("src/app/api/utils/match-reminders.js");

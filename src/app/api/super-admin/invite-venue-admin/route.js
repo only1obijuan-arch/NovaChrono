@@ -4,6 +4,7 @@ import { sendEmail } from "@/app/api/utils/send-email";
 import { randomBytes, createHash } from "crypto";
 import { requireRole } from "@/app/api/utils/auth";
 import { canonicalizeEmail } from "@/app/api/utils/email";
+import { isReservedLifecycleEmail } from "@/app/api/utils/account-lifecycle";
 
 export async function POST(request) {
   try {
@@ -12,6 +13,9 @@ export async function POST(request) {
 
     const { email: submittedEmail, venueId } = await request.json();
     const email = canonicalizeEmail(submittedEmail);
+    if (isReservedLifecycleEmail(email)) {
+      return Response.json({ error: "This email domain is reserved" }, { status: 400 });
+    }
     if (!email || !venueId) {
       return Response.json({ error: "Email and venue are required" }, { status: 400 });
     }

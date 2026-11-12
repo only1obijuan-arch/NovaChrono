@@ -31,7 +31,9 @@ export async function GET(request) {
 
     const referees = await sql`
       SELECT
-        au.id, au.name, au.email, au.field_number, au.role,
+        au.id, au.name,
+        CASE WHEN au.account_status = 'active' THEN au.email ELSE NULL END AS email,
+        au.field_number, au.role, au.account_status,
         v.name as venue_name
       FROM auth_users au
       LEFT JOIN venues v ON au.venue_id = v.id
@@ -77,6 +79,12 @@ export async function POST(request) {
     `;
 
     if (existing) {
+      if (existing.account_status !== "active") {
+        return Response.json(
+          { error: "This referee account is not active" },
+          { status: 409 },
+        );
+      }
       if (existing.role !== "referee" || existing.venue_id !== venueId) {
         return Response.json(
           { error: "Generated referee identity is already assigned elsewhere" },
@@ -87,20 +95,49 @@ export async function POST(request) {
       const newPassword = generatePassword(fieldNumber, venueSlug);
       const hashedPassword = await hash(newPassword);
 
-      await withTransaction(async (txSql) => {
+      const reset = await withTransaction(async (txSql) => {
+        // Hashing is intentionally outside the transaction. The authoritative
+        // decision is made only after locking and re-reading the user row, so a
+        // concurrent lifecycle completion cannot recreate credentials.
+        const [lockedReferee] = await txSql`
+          SELECT id, name, email, role, venue_id, account_status
+          FROM auth_users
+          WHERE id = ${existing.id}
+          FOR UPDATE
+        `;
+        if (!lockedReferee || lockedReferee.account_status !== "active") {
+          return {
+            response: Response.json(
+              { error: "This referee account is not active" },
+              { status: 409 },
+            ),
+          };
+        }
+        if (lockedReferee.role !== "referee"
+            || lockedReferee.venue_id !== venueId
+            || canonicalizeEmail(lockedReferee.email) !== email) {
+          return {
+            response: Response.json(
+              { error: "Generated referee identity is already assigned elsewhere" },
+              { status: 409 },
+            ),
+          };
+        }
         await txSql`
           INSERT INTO auth_accounts ("userId", type, provider, "providerAccountId", password)
-          VALUES (${existing.id}, 'credentials', 'credentials', ${email}, ${hashedPassword})
+          VALUES (${lockedReferee.id}, 'credentials', 'credentials', ${email}, ${hashedPassword})
           ON CONFLICT ("userId", provider)
           DO UPDATE SET password = EXCLUDED.password
         `;
-        await invalidateUserSessions(txSql, existing.id);
+        await invalidateUserSessions(txSql, lockedReferee.id);
+        return { referee: lockedReferee };
       });
+      if (reset.response) return reset.response;
 
       return Response.json({
         referee: {
-          id: existing.id,
-          name: existing.name,
+          id: reset.referee.id,
+          name: reset.referee.name,
           email,
           fieldNumber,
           password: newPassword,
@@ -158,35 +195,28 @@ export async function DELETE(request) {
     if (!UUID_RE.test(refereeId))
       return Response.json({ error: "Invalid id" }, { status: 400 });
 
-    await withTransaction(async (txSql) => {
-      const [referee] = await txSql`
-        SELECT id, venue_id
-        FROM auth_users
-        WHERE id = ${refereeId} AND role = 'referee'
-        FOR UPDATE
-      `;
-      if (!referee) throw routeError("REFEREE_NOT_FOUND");
-      if (admin.role !== "super_admin" && referee.venue_id !== admin.venue_id) {
-        throw routeError("REFEREE_FORBIDDEN");
-      }
-
-      await txSql`UPDATE matches SET referee_id = NULL WHERE referee_id = ${refereeId}`;
-      await txSql`DELETE FROM auth_users WHERE id = ${refereeId}`;
-    });
-
-    return Response.json({ success: true });
+    const [referee] = await sql`
+      SELECT id, venue_id
+      FROM auth_users
+      WHERE id = ${refereeId} AND role = 'referee'
+    `;
+    if (!referee) throw routeError("REFEREE_NOT_FOUND");
+    if (admin.role !== "super_admin" && referee.venue_id !== admin.venue_id) {
+      throw routeError("REFEREE_FORBIDDEN");
+    }
+    return Response.json(
+      {
+        error: "Direct deletion is disabled. Use the verified account lifecycle workflow.",
+        code: "LIFECYCLE_REQUIRED",
+      },
+      { status: 409 },
+    );
   } catch (error) {
     if (error.message === "REFEREE_NOT_FOUND") {
       return Response.json({ error: "Referee not found" }, { status: 404 });
     }
     if (error.message === "REFEREE_FORBIDDEN") {
       return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-    if (error.code === "23503") {
-      return Response.json(
-        { error: "Referee is retained by historical records" },
-        { status: 409 },
-      );
     }
     console.error(error);
     return Response.json({ error: "An unexpected error occurred." }, { status: 500 });

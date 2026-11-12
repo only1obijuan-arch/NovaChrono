@@ -53,6 +53,7 @@ export async function findAutomaticReminderCandidates() {
       AND home_team.status = 'active'
       AND away_team.status = 'active'
       AND target_team.status = 'active'
+      AND captain.account_status = 'active'
       AND captain.email IS NOT NULL
       AND btrim(captain.email) <> ''
       AND ar.responded_at IS NULL
@@ -118,7 +119,7 @@ async function claimReminder({
       const [actor] = await txSql`
         SELECT id, role, venue_id, organization_id
         FROM auth_users
-        WHERE id = ${actorId}
+        WHERE id = ${actorId} AND account_status = 'active'
         FOR SHARE
       `;
       if (!actor) return skipped("unauthorized");
@@ -151,7 +152,9 @@ async function claimReminder({
         captain.email AS captain_email,
         captain.push_token AS captain_push_token
       FROM teams t
-      LEFT JOIN auth_users captain ON captain.id = t.captain_user_id
+      LEFT JOIN auth_users captain
+        ON captain.id = t.captain_user_id
+       AND captain.account_status = 'active'
       WHERE t.id IN (${match.home_team_id}, ${match.away_team_id})
       ORDER BY t.id
       FOR SHARE OF t
@@ -435,6 +438,7 @@ async function claimMiddayAlert(candidate) {
       WHERE id = ${candidate.admin_id}
         AND venue_id = ${match.venue_id}
         AND role IN ('venue_admin', 'super_admin')
+        AND account_status = 'active'
       FOR SHARE
     `;
     if (!admin) return null;
@@ -479,6 +483,7 @@ export async function sendMiddayUnconfirmedAlerts() {
     JOIN auth_users admin
       ON admin.venue_id = l.venue_id
      AND admin.role IN ('venue_admin', 'super_admin')
+     AND admin.account_status = 'active'
     WHERE m.status = 'scheduled'
       AND l.status = 'active'
       AND home_team.status = 'active'

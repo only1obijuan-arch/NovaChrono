@@ -1,5 +1,6 @@
 import { jwtVerify } from "jose";
 import { pool } from "@/app/api/utils/db";
+import { getAuthSecretKey } from "@/app/api/utils/auth-secret";
 
 // Verifies the mobile Bearer token against the active-sessions table.
 // Returns live user data from DB (not stale JWT claims), or null if the
@@ -13,13 +14,16 @@ export async function verifyMobileToken(request) {
 
   let payload;
   try {
-    const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
-    ({ payload } = await jwtVerify(raw, secret));
+    const secret = getAuthSecretKey();
+    ({ payload } = await jwtVerify(raw, secret, {
+      algorithms: ["HS256"],
+      requiredClaims: ["iat", "exp", "jti"],
+    }));
   } catch {
     return null;
   }
 
-  if (!payload.jti) return null;
+  if (!payload.jti || !Number.isFinite(payload.iat)) return null;
 
   // Single query: confirm the session hasn't been revoked and return live
   // role/venue so a role change or deactivation takes effect immediately.
@@ -29,7 +33,8 @@ export async function verifyMobileToken(request) {
      JOIN auth_users u ON u.id = ms.user_id
      WHERE ms.jti = $1
        AND ms.expires_at > NOW()
-       AND to_timestamp($2) >= u.sessions_valid_after`,
+       AND u.account_status = 'active'
+       AND to_timestamp($2) >= date_trunc('second', u.sessions_valid_after)`,
     [payload.jti, payload.iat]
   );
 

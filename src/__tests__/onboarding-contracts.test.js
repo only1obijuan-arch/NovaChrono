@@ -42,7 +42,9 @@ beforeEach(() => {
   });
   mocks.tx.mockImplementation(async (q, p) => {
     let rows = [];
-    if (q.includes("UPDATE invite_tokens")) rows = invite ? [{ token: "hashed", email: "invitee@example.test", role: "venue_admin", venue_id: A, organization_id: B }] : [];
+    if (q.includes("SELECT invited_by") && q.includes("FROM invite_tokens")) rows = invite ? [{ invited_by: B }] : [];
+    else if (q.includes("SELECT id, account_status") && q.includes("FROM auth_users")) rows = [{ id: B, account_status: "active" }];
+    else if (q.includes("UPDATE invite_tokens")) rows = invite ? [{ token: "hashed", email: "invitee@example.test", role: "venue_admin", venue_id: A, organization_id: B, invited_by: B }] : [];
     else if (q.includes("FROM leagues") && q.includes("FOR UPDATE")) rows = [{ ...privateLeague, status: "registration" }];
     else if (q.includes("SELECT id FROM auth_users")) rows = [];
     else if (q.includes("SELECT name FROM organizations")) rows = [{ name: "Org" }];

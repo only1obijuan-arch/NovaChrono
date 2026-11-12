@@ -25,7 +25,7 @@ beforeEach(() => {
   mocks.query.mockImplementation(async q => {
     let rows = [];
     if (q.includes("FROM availability_responses")) rows = [{ team_name: payload, opponent_name: payload, match_date_label: "Tuesday, 1 January 2030", time_slot: payload, match_status: "scheduled", league_status: "active", team_status: "active", is_current_participant: true, expiry_matches_schedule: true, before_expiry: true, before_match_start: true, response: responded ? "yes" : null, responded_at: responded ? "2030-01-01" : null }];
-    else if (q.includes("SELECT * FROM auth_users WHERE id")) rows = [{ id: "admin", role: "venue_admin", venue_id: "venue" }];
+    else if (q.includes("SELECT * FROM auth_users") && q.includes("id =")) rows = [{ id: "admin", role: "venue_admin", venue_id: "venue", account_status: "active" }];
     else if (q.includes("SELECT email, name FROM auth_users")) rows = [{ email: "admin@example.test" }];
     else if (q.includes("FROM leagues")) rows = [{ id: UUID, name: payload, venue_id: "venue" }];
     else if (q.includes("SELECT DISTINCT au")) rows = [{ id: "captain", email: "captain@example.test", push_token: captainPushToken }];

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Timer, Home, LogOut } from "lucide-react";
+import { Timer, Home, LogOut, Settings } from "lucide-react";
 
 export default function RefereeMatchList() {
   const { data: session, status } = useSession();
@@ -126,9 +126,14 @@ export default function RefereeMatchList() {
             <Link href="/" className="ref-nav-link">
               <Home size={14} /> HOME
             </Link>
-            <a href="/account/logout" className="ref-signout">
-              <LogOut size={14} /> SIGN OUT
-            </a>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Link href="/account/settings" className="ref-nav-link">
+                <Settings size={14} /> ACCOUNT
+              </Link>
+              <a href="/account/logout" className="ref-signout">
+                <LogOut size={14} /> SIGN OUT
+              </a>
+            </div>
           </nav>
 
           {/* Header */}

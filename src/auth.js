@@ -22,7 +22,7 @@ function Adapter(client) {
     async getUser(id) {
       try {
         const result = await client.query(
-          "SELECT * FROM auth_users WHERE id = $1",
+          "SELECT * FROM auth_users WHERE id = $1 AND account_status = 'active'",
           [id]
         );
         return result.rowCount === 0 ? null : result.rows[0];
@@ -32,7 +32,7 @@ function Adapter(client) {
     },
     async getUserByEmail(email) {
       const result = await client.query(
-        "SELECT * FROM auth_users WHERE lower(email) = $1",
+        "SELECT * FROM auth_users WHERE lower(email) = $1 AND account_status = 'active'",
         [canonicalizeEmail(email)]
       );
       if (result.rowCount === 0) return null;
@@ -47,7 +47,8 @@ function Adapter(client) {
       const result = await client.query(
         `SELECT u.* FROM auth_users u
          JOIN auth_accounts a ON u.id = a."userId"
-         WHERE a.provider = $1 AND a."providerAccountId" = $2`,
+         WHERE a.provider = $1 AND a."providerAccountId" = $2
+           AND u.account_status = 'active'`,
         [provider, canonicalizeAccountIdentifier(provider, providerAccountId)]
       );
       return result.rowCount !== 0 ? result.rows[0] : null;
@@ -144,9 +145,7 @@ function Adapter(client) {
       );
     },
     async deleteUser(userId) {
-      await client.query("DELETE FROM auth_users WHERE id=$1", [userId]);
-      await client.query('DELETE FROM auth_sessions WHERE "userId"=$1', [userId]);
-      await client.query('DELETE FROM auth_accounts WHERE "userId"=$1', [userId]);
+      throw new Error(`Direct account deletion is disabled for ${userId}`);
     },
     async createVerificationToken({ identifier, expires, token }) {
       await client.query(
@@ -191,27 +190,48 @@ const nextAuth = NextAuth({
         const canonicalEmail = canonicalizeEmail(email);
         if (!(await reserveLoginAttempt(canonicalEmail))) return null;
 
-        const user = await Adapter(pool).getUserByEmail(canonicalEmail);
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          const userResult = await client.query(
+            `SELECT * FROM auth_users
+             WHERE lower(email) = $1
+             FOR UPDATE`,
+            [canonicalEmail],
+          );
+          const user = userResult.rows[0];
+          if (!user || user.account_status !== "active") {
+            await client.query("ROLLBACK");
+            return null;
+          }
 
-        // Signin flow
-        if (!user) return null;
+          const accountResult = await client.query(
+            `SELECT * FROM auth_accounts
+             WHERE "userId" = $1
+               AND provider IN ('credentials', 'credentials-signin', 'credentials-signup')
+             ORDER BY CASE WHEN provider = 'credentials' THEN 0 ELSE 1 END
+             LIMIT 1`,
+            [user.id],
+          );
+          const matchingAccount = accountResult.rows[0];
+          if (!matchingAccount?.password || !(await verify(matchingAccount.password, password))) {
+            await client.query("ROLLBACK");
+            return null;
+          }
+          if (!user.emailVerified) {
+            await client.query("ROLLBACK");
+            return null;
+          }
 
-        const matchingAccount = user.accounts?.find(
-          (a) => a.provider === "credentials" ||
-                 a.provider === "credentials-signin" ||
-                 a.provider === "credentials-signup"
-        );
-        if (!matchingAccount?.password) return null;
-
-        const isValid = await verify(matchingAccount.password, password);
-        if (!isValid) return null;
-
-        if (!user.emailVerified) {
-        return null;
+          await client.query("COMMIT");
+          await clearLoginAttempts(canonicalEmail);
+          return { ...user, session_issued_at: authenticationStartedAt };
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally {
+          client.release();
         }
-
-        await clearLoginAttempts(canonicalEmail);
-        return { ...user, session_issued_at: authenticationStartedAt };
       },
     }),
       ],
@@ -231,7 +251,8 @@ const nextAuth = NextAuth({
       let liveUser;
       try {
         const result = await pool.query(
-          `SELECT id, email, name, role, venue_id, organization_id, field_number, sessions_valid_after
+          `SELECT id, email, name, role, venue_id, organization_id, field_number,
+                  sessions_valid_after, account_status
            FROM auth_users WHERE id = $1`,
           [token.id]
         );
@@ -242,7 +263,8 @@ const nextAuth = NextAuth({
       }
 
       const issuedAtMs = token.session_issued_at;
-      if (!liveUser || !isSessionCurrent(issuedAtMs, liveUser.sessions_valid_after)) {
+      if (!liveUser || liveUser.account_status !== "active" ||
+          !isSessionCurrent(issuedAtMs, liveUser.sessions_valid_after)) {
         return revokedToken(token);
       }
 

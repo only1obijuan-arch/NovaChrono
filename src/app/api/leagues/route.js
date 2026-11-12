@@ -152,7 +152,8 @@ export async function POST(request) {
           return Response.json({ error: "League fixtures changed concurrently; retry completion" }, { status: 409 });
         }
         const [actor] = await txSql`
-          SELECT id, role, venue_id FROM auth_users WHERE id = ${user.id} FOR SHARE
+          SELECT id, role, venue_id FROM auth_users
+          WHERE id = ${user.id} AND account_status = 'active' FOR SHARE
         `;
         if (!actor || !["venue_admin", "super_admin"].includes(actor.role)) {
           return Response.json({ error: "Insufficient permissions" }, { status: 403 });
@@ -189,7 +190,8 @@ export async function POST(request) {
         const [parentLeague] = await txSql`SELECT * FROM leagues WHERE id = ${parentLeagueId} FOR UPDATE`;
         if (!parentLeague) return { response: Response.json({ error: "Parent league not found" }, { status: 404 }) };
         const [actor] = await txSql`
-          SELECT id, role, venue_id FROM auth_users WHERE id = ${user.id} FOR SHARE
+          SELECT id, role, venue_id FROM auth_users
+          WHERE id = ${user.id} AND account_status = 'active' FOR SHARE
         `;
         if (!actor || !["venue_admin", "super_admin"].includes(actor.role)) {
           return { response: Response.json({ error: "Insufficient permissions" }, { status: 403 }) };
@@ -249,7 +251,7 @@ export async function POST(request) {
         const [actor] = await txSql`
           SELECT id, role, venue_id
           FROM auth_users
-          WHERE id = ${user.id}
+          WHERE id = ${user.id} AND account_status = 'active'
           FOR SHARE
         `;
         if (!actor || !["venue_admin", "super_admin"].includes(actor.role)) {

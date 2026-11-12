@@ -2,6 +2,7 @@ import sql, { withTransaction } from "@/app/api/utils/sql";
 import { hash } from "argon2";
 import { requireRole } from "@/app/api/utils/auth";
 import { canonicalizeEmail } from "@/app/api/utils/email";
+import { isReservedLifecycleEmail } from "@/app/api/utils/account-lifecycle";
 
 const SUPPORTED_CREATED_ROLES = new Set(["captain", "referee", "venue_admin", "org_admin"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17,7 +18,10 @@ export async function GET(request) {
 
     const users = venueId
       ? await sql`
-          SELECT au.id, au.name, au.email, au.role, au.venue_id, au.organization_id,
+          SELECT au.id, au.name,
+                 CASE WHEN au.account_status = 'active' THEN au.email ELSE NULL END AS email,
+                 au.role, au.venue_id, au.organization_id, au.account_status,
+                 au.deletion_request_id, au.deletion_requested_at,
                  v.name AS venue_name, o.name AS organization_name
           FROM auth_users au
           LEFT JOIN venues        v ON au.venue_id        = v.id
@@ -27,7 +31,10 @@ export async function GET(request) {
         `
       : organizationId
       ? await sql`
-          SELECT au.id, au.name, au.email, au.role, au.venue_id, au.organization_id,
+          SELECT au.id, au.name,
+                 CASE WHEN au.account_status = 'active' THEN au.email ELSE NULL END AS email,
+                 au.role, au.venue_id, au.organization_id, au.account_status,
+                 au.deletion_request_id, au.deletion_requested_at,
                  v.name AS venue_name, o.name AS organization_name
           FROM auth_users au
           LEFT JOIN venues        v ON au.venue_id        = v.id
@@ -36,7 +43,10 @@ export async function GET(request) {
           ORDER BY au.name
         `
       : await sql`
-          SELECT au.id, au.name, au.email, au.role, au.venue_id, au.organization_id,
+          SELECT au.id, au.name,
+                 CASE WHEN au.account_status = 'active' THEN au.email ELSE NULL END AS email,
+                 au.role, au.venue_id, au.organization_id, au.account_status,
+                 au.deletion_request_id, au.deletion_requested_at,
                  v.name AS venue_name, o.name AS organization_name
           FROM auth_users au
           LEFT JOIN venues        v ON au.venue_id        = v.id
@@ -58,6 +68,9 @@ export async function POST(request) {
 
     const { email: submittedEmail, password, name, venueId, organizationId, role } = await request.json();
     const email = canonicalizeEmail(submittedEmail);
+    if (isReservedLifecycleEmail(email)) {
+      return Response.json({ error: "This email domain is reserved" }, { status: 400 });
+    }
     if (!email || !password || !name || !venueId || !organizationId) {
       return Response.json({ error: "All fields are required" }, { status: 400 });
     }
@@ -104,32 +117,14 @@ export async function DELETE(request) {
     if (!userId) return Response.json({ error: "User ID is required" }, { status: 400 });
     if (!UUID_RE.test(userId)) return Response.json({ error: "Invalid user ID" }, { status: 400 });
 
-    if (userId.toLowerCase() === actor.id.toString().toLowerCase()) {
-      return Response.json({ error: "Cannot delete your own account" }, { status: 400 });
-    }
-
-    const deleted = await withTransaction(async (txSql) => {
-      const [target] = await txSql`
-        SELECT id FROM auth_users WHERE id = ${userId} FOR UPDATE
-      `;
-      if (!target) return false;
-
-      await txSql`UPDATE teams SET captain_user_id = NULL WHERE captain_user_id = ${userId}`;
-      await txSql`UPDATE matches SET referee_id = NULL WHERE referee_id = ${userId}`;
-      await txSql`DELETE FROM auth_users WHERE id = ${userId}`;
-      return true;
-    });
-
-    if (!deleted) return Response.json({ error: "User not found" }, { status: 404 });
-
-    return Response.json({ success: true });
+    return Response.json(
+      {
+        error: "Direct deletion is disabled. Use the verified account lifecycle workflow.",
+        code: "LIFECYCLE_REQUIRED",
+      },
+      { status: 409 },
+    );
   } catch (err) {
-    if (err.code === "23503") {
-      return Response.json(
-        { error: "User is retained by historical records" },
-        { status: 409 },
-      );
-    }
     console.error("DELETE /api/super-admin/users error:", err);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
