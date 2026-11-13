@@ -1,16 +1,22 @@
 # Gate 6A privacy and legal readiness
 
 - Status: **DRAFT — REQUIRES OWNER/LEGAL APPROVAL**
-- Prepared: 2026-11-10
+- Prepared: 2026-11-10; reconciled with the accepted engineering on 2026-11-12 (Gate 6A closure slice S0)
 - Jurisdictional focus: South Africa / POPIA readiness
 
-This is a technical readiness assessment, not legal advice and not a statement that NovaChrono is compliant. No policy text in this document is approved for publication.
+This is a technical readiness assessment, not legal advice and not a statement that NovaChrono is compliant. No policy text in this document is approved for publication, and nothing in it has been published. Open owner and legal questions are itemised in the decision register (`6A-Q01`-`6A-Q15`) at the end of [account-lifecycle-design.md](account-lifecycle-design.md).
+
+**Terminology.** The accepted engineering produces a *de-identified* account (state `deidentified`): credentials deleted, direct identifiers replaced, stable user UUID kept. That is **not** anonymisation: audit content including free-text reasons, rows in tables the lifecycle does not touch (for example production-only `join_requests` and `players`), processor copies and backups can still relate to the person. Earlier drafts used "anonymised"; wherever this document or any future user-facing text says "anonymised" it must be reconciled with this definition by the owner and legal review.
 
 ## Current readiness summary
 
-The application has technical controls for credential hashing, email verification, session revocation, tenant/role checks, token hashing, push-token ownership, and limited public responses. It does not currently expose a privacy policy, terms of use, account-deletion route, retention schedule, privacy-request contact, or signup acknowledgement. Mobile notification permission is requested through the operating-system permission flow.
+The application has technical controls for credential hashing, email verification, session revocation, tenant/role checks, token hashing, push-token ownership, and limited public responses.
 
-The obsolete admin password-reset utility pages and their hardcoded reset details were confirmed to have no corresponding API routes or supported workflow. They have been removed locally. The supported password-reset, email-verification, invitation, and mobile logout flows remain.
+**Implemented but disabled.** The accepted engineering at `68c964c` (draft pull request #11, unmerged; canonical CI PASS on PostgreSQL 17.11, run `43207282894` attempt 2) contains an account-deletion request path: a web settings screen, mobile screens (parse-checked only, not device-tested), `POST /api/account/deletion`, administrator succession and completion screens, and a de-identification service. It is **not live**: migration `0011` is applied to no hosted database and both lifecycle flags are unset in every hosted environment (observed 2026-11-12), so no deletion option is exposed anywhere.
+
+**Still absent:** a privacy policy, terms of use, a retention schedule, a privacy-request contact or published request page, a signup acknowledgement, a completion-confirmation notice, and any process for player records or the production-only `join_requests` table (the deletion screens say player records "are handled separately", but no such process exists). Mobile notification permission is requested through the operating-system permission flow.
+
+The obsolete admin password-reset utility pages and their hardcoded reset details were confirmed to have no corresponding API routes or supported workflow. They are removed in the accepted engineering (a test pins their absence) but remain in the public Git history. The supported password-reset, email-verification, invitation, and mobile logout flows remain.
 
 ## 1. Personal data inventory
 
@@ -23,6 +29,7 @@ The obsolete admin password-reset utility pages and their hardcoded reset detail
 | Administration/audit | Actor UUID, action type, old/new JSON, reason, invitation issuer | Administrators and other actors | PostgreSQL/Neon; authorised admin routes |
 | Communications | Email recipient/name, email body, notification title/body, delivery metadata | Account holders, invitees | Resend, Expo, PostgreSQL notifications |
 | Security/usage | Canonical email and IP-derived rate-limit keys, timestamps, server/error logs | Visitors and account holders | PostgreSQL rate-limit tables; Vercel/runtime logs; optional Sentry |
+| Legacy production-only records | `join_requests`: captain name, captain email, captain phone, team name, status, created time, linked to a league but not to an account. `players.user_id`: an unconstrained text link from a player row to an account. `auth_sessions`: dormant adapter sessions. None is created or read by current source or migrations (per the 7 October schema evidence and the 10 November read-only catalogue inspection; to be re-verified before release) | Captains and players who used earlier versions; possibly minors (unknown) | PostgreSQL/Neon only. Account de-identification does **not** change `join_requests` or `players`; it deletes `auth_sessions` rows for the account if the table exists |
 | Venue data | Venue name, location, latitude/longitude | Organisations/venues; may identify operators indirectly | PostgreSQL/Neon; OpenWeather request; public/admin UI as applicable |
 | Public configuration/asset access | App URL/version, public Sentry DSN, mobile API base URL; CDN request metadata for logo asset | Visitors/devices | Client bundles; Vercel/Sentry/Uploadcare network requests |
 
@@ -63,7 +70,8 @@ Cross-border transfers are likely because several processors are international. 
 No retention periods should be invented. The owner/legal review must set and justify periods for:
 
 - Active accounts and pending deletion requests.
-- Anonymised captain/referee tombstones and historical sporting records.
+- De-identified captain/referee tombstones (not claimed to be anonymous) and historical sporting records.
+- Legacy `join_requests` rows (captain name, email, phone) and the `players.user_id` link.
 - Player names/numbers and records involving minors.
 - Match events, results, standings and league history.
 - Audit logs and the personal fields allowed inside JSON snapshots.
@@ -99,7 +107,7 @@ Official references reviewed:
 6. Children/minors and captain/guardian responsibilities.
 7. Cookies, web sessions, mobile SecureStore, push permissions and diagnostics.
 8. Recipients, processors and international transfers.
-9. Retention schedule and deletion/anonymisation model.
+9. Retention schedule and deletion/de-identification model (use the owner-approved term; see the terminology note above).
 10. Security safeguards and incident communication at a non-sensitive level.
 11. Data-subject rights, identity verification and request procedure.
 12. Complaint route and Information Regulator details.
@@ -126,7 +134,9 @@ Official references reviewed:
 - Approved processing purposes and lawful bases.
 - Whether players may be minors and the guardian/club authority model.
 - Which roster, result and referee information is public.
-- Retention schedule and anonymised-history presentation.
+- Retention schedule and de-identified-history presentation.
+- Treatment of production `join_requests` rows and of `players.user_id` / `players.name` when a linked account is de-identified (`6A-Q03`, `6A-Q04`).
+- Whether any administrator-custody rule (`6A-Q01`, `6A-Q02`) needs to appear in user-facing terms.
 - Account-deletion completion time, grace/cancellation policy and succession authority.
 - Processor list, contracted regions, subprocessors and cross-border safeguards.
 - Sentry enablement, scrubbing, sampling and retention.
@@ -135,6 +145,8 @@ Official references reviewed:
 - Versioned acknowledgement required at signup/invitation acceptance and how proof is recorded.
 
 ## 9. App-store compliance checklist
+
+**Status on 2026-11-12 (no box below is ticked, because none is verified in a store submission):** the in-app initiation path exists on web (account settings) and in the mobile app (`account/delete` screen), but only behind the disabled flags and the mobile screens are parse-checked, not device-tested. The de-identification service deletes credentials and de-identifies the account rather than merely freezing it, and automated tests exercise captain, referee, venue-administrator and organisation-administrator fixtures while asserting that results, standings and events are unchanged. Still missing: the completion confirmation, timing and retention explanation, the functional external web resource that works after uninstall, any published policy or terms link, and the store disclosures.
 
 ### Apple
 
@@ -177,9 +189,9 @@ Official references reviewed:
 
 **DRAFT — REQUIRES OWNER/LEGAL APPROVAL**
 
-> You can request deletion of your NovaChrono account from Account settings or through our published privacy-request page. We will verify the request, revoke account access, and explain any active team, referee or administrative responsibilities that must be handed over safely. We will delete or anonymise personal information that is no longer required. Match results, standings and other sporting records may be retained in an anonymised form where needed to preserve competition integrity or meet approved legal obligations. We will tell you what is retained and confirm when the request is complete.
+> You can request deletion of your NovaChrono account from Account settings or through our published privacy-request page. We will verify the request, revoke account access, and explain any active team, referee or administrative responsibilities that must be handed over safely. We will delete or de-identify personal information that is no longer required. Match results, standings and other sporting records may be retained under a generic label where needed to preserve competition integrity or meet approved legal obligations. We will tell you what is retained and confirm when the request is complete.
 
-This wording must not be published until the operator identity, contact details, retention decisions, timing and legal bases are approved.
+This wording must not be published until the operator identity, contact details, retention decisions, timing and legal bases are approved. Drafting note: the term "de-identify" replaces the earlier "anonymise"/"anonymised" because the accepted engineering does not anonymise (see the terminology note at the top). The sentence "we will confirm when the request is complete" describes a completion notice that is **not implemented** (`6A-Q10`), and "published privacy-request page" refers to a page that does not exist (`6A-Q09`).
 
 ## Secure production configuration checklist
 
@@ -189,8 +201,8 @@ No hosted configuration is changed by Gate 6A local work.
 - [ ] After the remediated app is deployed and verified, remove obsolete `MOBILE_SECRET` and `EXPO_PUBLIC_MOBILE_SECRET` from hosted/build configuration; no rotation is required merely to remove the invalid design assumption.
 - [ ] Keep `DATABASE_URL`, `RESEND_API_KEY`, `CRON_SECRET`, `OPENWEATHER_API_KEY` and `SENTRY_AUTH_TOKEN` server-only.
 - [ ] Treat `NEXT_PUBLIC_APP_URL`, release labels, public Sentry DSN/sampling and `EXPO_PUBLIC_BASE_URL` as public configuration.
-- [ ] Confirm Vercel remains the trusted edge for production client-IP headers; a future reverse proxy requires an explicit trusted-proxy design. Outside Vercel (`VERCEL` is not `1`) every caller deliberately shares one `unknown` rate-limit bucket, so a non-Vercel production host would throttle all users together (for example signup at 5 per hour and mobile sign-in at 20 per 15 minutes in total). Do not deploy to another host without that design.
+- [ ] Confirm Vercel remains the trusted edge for production client-IP headers; a future reverse proxy requires an explicit trusted-proxy design. Outside Vercel (`VERCEL` is not `1`) every caller of the shared helper (signup, email status, mobile sign-in, password reset) deliberately shares one `unknown` rate-limit bucket, so a non-Vercel production host would throttle all users together (for example signup at 5 per hour and mobile sign-in at 20 per 15 minutes in total). Do not deploy to another host without that design. Known exception: two public read-only routes (`GET /api/matches`, `GET /api/stats`) use the raw `X-Forwarded-For` header on every host (runbook section 7, TD-4).
 - [ ] Credential hygiene for the removed utility pages: they hard-coded a super-administrator email address and two plaintext temporary passwords, and the repository is public, so Git history still contains them. Treat those passwords as exposed. Owner to confirm, without printing or logging any password, that no production account has used them, force a reset for any account that did, and keep the super-administrator password unique. Rewriting history is not proposed here.
 - [ ] Review Vercel/Sentry logging and scrubbing so credentials, bearer tokens, raw reset/invite links and full request bodies are never recorded.
-- [ ] Confirm production and preview environments do not share credentials unnecessarily.
+- [ ] Confirm production and preview environments do not share credentials unnecessarily. Open: the status is held in a private operator record and needs a separate operational approval before any further Gate 6A branch is pushed; see runbook section 12 and `6A-Q11`.
 - [ ] Document secret ownership, rotation, incident response and rollback without exposing values.
