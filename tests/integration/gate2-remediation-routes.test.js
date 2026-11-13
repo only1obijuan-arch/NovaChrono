@@ -1331,6 +1331,40 @@ async function waitForLockQueue(queryFragment, failureMessage) {
   }
 }
 
+// Counts the backends that are waiting on a heavyweight lock AND whose current statement contains
+// `queryFragment`, and returns only when exactly `expected` of them are queued. Unlike
+// waitForLockQueue (which is satisfied by ANY waiter) this lets a test release operations into a
+// lock queue one at a time, so the arrival order - and therefore the winner - is dictated by the
+// test rather than by scheduler timing. It observes the database; it never sleeps to hide a race.
+async function waitForLockWaiters(queryFragment, expected, failureMessage) {
+  const observer = await pool.connect();
+  try {
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      const { rows: [state] } = await observer.query(`
+        SELECT count(*)::int AS waiting
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query LIKE $1
+      `, [`%${queryFragment}%`]);
+      if (state.waiting === expected) return;
+      if (state.waiting > expected) {
+        throw new Error(`${failureMessage}: ${state.waiting} queued, expected exactly ${expected}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const { rows } = await observer.query(`
+      SELECT pid, state, wait_event_type, wait_event, query, pg_blocking_pids(pid) AS blockers
+      FROM pg_stat_activity
+      WHERE datname = current_database() AND pid <> pg_backend_pid()
+      ORDER BY pid
+    `);
+    throw new Error(`${failureMessage}: ${JSON.stringify(rows)}`);
+  } finally {
+    observer.release();
+  }
+}
+
 async function setPoolSessionTimeZone(timeZone) {
   pool.options.options = `-c timezone=${timeZone}`;
   const clients = (pool._clients ?? []).filter((client) => (
@@ -1988,16 +2022,113 @@ describe("Gate 4A fixture and result operations", () => {
     expect(Number((await pool.query("SELECT count(*) FROM audit_logs WHERE target_id = $1", [IDS.match4])).rows[0].count)).toBe(0);
   });
 
-  it("serializes correction racing finalisation and preserves final truth", async () => {
-    authState.actorId = IDS.super;
-    await pool.query("UPDATE matches SET status = 'live', home_score = 1 WHERE id = $1", [IDS.match4]);
-    const responses = await Promise.all([
-      postMatch({ action: "END_MATCH", matchId: IDS.match4 }),
-      postMatch({ action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 0, status: "final", reason: "Official correction" }),
-    ]);
-    expect(responses.every((response) => response.status === 200)).toBe(true);
-    expect((await pool.query("SELECT status, home_score, away_score FROM matches WHERE id = $1", [IDS.match4])).rows[0])
-      .toMatchObject({ status: "final", home_score: 2, away_score: 0 });
+  // END_MATCH and ADMIN_OVERRIDE both begin with lockMatch (`... FOR UPDATE OF m`), so a correction racing a
+  // finalisation is decided by which of them takes the match row first, and the two orders have DIFFERENT
+  // correct outcomes: a correction that arrives first finds the match still live and is refused (409), while
+  // one that arrives second corrects the finalised result. The previous test fired both with Promise.all and
+  // asserted 200/200, i.e. it assumed END_MATCH always won, and failed whenever the scheduler let ADMIN_OVERRIDE
+  // arrive first. Here a holder transaction owns the row, the operations are released into the lock queue one at
+  // a time (each only once it is visibly queued), and the outcome of EACH order is asserted exactly. The
+  // production behaviour is not changed; the test now verifies both legal serialisations deterministically.
+  describe("serializes correction racing finalisation and preserves final truth", () => {
+    const CORRECTION = { action: "ADMIN_OVERRIDE", matchId: IDS.match4, homeScore: 2, awayScore: 0, status: "final", reason: "Official correction" };
+
+    async function raceLiveMatch(firstAction) {
+      authState.actorId = IDS.super;
+      await pool.query("UPDATE matches SET status = 'live', home_score = 1, away_score = 0 WHERE id = $1", [IDS.match4]);
+      const start = {
+        END_MATCH: () => postMatch({ action: "END_MATCH", matchId: IDS.match4 }),
+        ADMIN_OVERRIDE: () => postMatch({ ...CORRECTION }),
+      };
+      const order = firstAction === "END_MATCH" ? ["END_MATCH", "ADMIN_OVERRIDE"] : ["ADMIN_OVERRIDE", "END_MATCH"];
+      const holder = await pool.connect();
+      const pending = {};
+      try {
+        await holder.query("BEGIN");
+        await holder.query("SELECT id FROM matches WHERE id = $1 FOR UPDATE", [IDS.match4]);
+        pending[order[0]] = start[order[0]]();
+        await waitForLockWaiters("FOR UPDATE OF m", 1, `${order[0]} never queued on the held match row`);
+        pending[order[1]] = start[order[1]]();
+        await waitForLockWaiters("FOR UPDATE OF m", 2, `${order[1]} never queued behind ${order[0]}`);
+        await holder.query("COMMIT");
+      } finally {
+        await holder.query("ROLLBACK").catch(() => {});
+        holder.release();
+        await Promise.allSettled(Object.values(pending));
+      }
+      const read = async (action) => {
+        const response = await pending[action];
+        return { status: response.status, body: await response.json() };
+      };
+      return { end: await read("END_MATCH"), override: await read("ADMIN_OVERRIDE") };
+    }
+
+    const finalState = async () => ({
+      match: (await pool.query("SELECT status, home_score, away_score, result_type, end_time IS NOT NULL AS has_end_time FROM matches WHERE id = $1", [IDS.match4])).rows[0],
+      endEvents: Number((await pool.query("SELECT count(*) FROM match_events WHERE match_id = $1 AND type = 'end_match'", [IDS.match4])).rows[0].count),
+      audit: (await pool.query("SELECT action_type, old_value, new_value, reason FROM audit_logs WHERE target_id = $1 ORDER BY created_at", [IDS.match4])).rows,
+      standings: (await pool.query(`
+        SELECT team_id, played, won, drawn, lost, goals_for, goals_against, goal_difference, points
+        FROM standings WHERE league_id = $1 ORDER BY team_id
+      `, [IDS.league])).rows,
+    });
+
+    // Stored standings must equal what an authoritative rebuild from the final matches produces.
+    async function expectStandingsAuthoritative(stored) {
+      await withTransaction((txSql) => recomputeLeagueStandings(txSql, IDS.league));
+      const rebuilt = (await pool.query(`
+        SELECT team_id, played, won, drawn, lost, goals_for, goals_against, goal_difference, points
+        FROM standings WHERE league_id = $1 ORDER BY team_id
+      `, [IDS.league])).rows;
+      expect(stored).toEqual(rebuilt);
+    }
+
+    it("END_MATCH first: the match is finalised, then the correction rewrites the final result and is audited", async () => {
+      const { end, override } = await raceLiveMatch("END_MATCH");
+      expect(end).toEqual({ status: 200, body: { success: true, idempotent: false } });
+      expect(override).toEqual({ status: 200, body: { success: true, idempotent: false } });
+
+      const state = await finalState();
+      expect(state.match).toMatchObject({ status: "final", home_score: 2, away_score: 0, result_type: "played", has_end_time: true });
+      expect(state.endEvents).toBe(1);
+      expect(state.audit).toHaveLength(1);
+      expect(state.audit[0]).toMatchObject({ action_type: "ADMIN_OVERRIDE", reason: "Official correction" });
+      // The correction saw the FINALISED match (1-0), which proves it was serialised after END_MATCH.
+      expect(state.audit[0].old_value).toMatchObject({ status: "final", home_score: 1, away_score: 0 });
+      expect(state.audit[0].new_value).toMatchObject({ status: "final", home_score: 2, away_score: 0, result_type: "played" });
+      expect(state.standings.find((row) => row.team_id === IDS.team)).toMatchObject({ played: 1, won: 1, lost: 0, goals_for: 2, goals_against: 0 });
+      expect(state.standings.find((row) => row.team_id === IDS.teamB)).toMatchObject({ played: 1, won: 0, lost: 1, goals_for: 0, goals_against: 2 });
+      await expectStandingsAuthoritative(state.standings);
+    }, 20_000);
+
+    it("ADMIN_OVERRIDE first: correcting a live match is refused, finalisation stands, and nothing is audited or rewritten", async () => {
+      const { end, override } = await raceLiveMatch("ADMIN_OVERRIDE");
+      expect(override.status).toBe(409);
+      expect(override.body.error).toBe("Cannot correct a match with status 'live'");
+      expect(end).toEqual({ status: 200, body: { success: true, idempotent: false } });
+
+      const state = await finalState();
+      // Only the successful operation is reflected: the finalised 1-0, not the refused 2-0 correction.
+      expect(state.match).toMatchObject({ status: "final", home_score: 1, away_score: 0, result_type: "played", has_end_time: true });
+      expect(state.endEvents).toBe(1);
+      expect(state.audit).toEqual([]);
+      expect(state.standings.find((row) => row.team_id === IDS.team)).toMatchObject({ played: 1, won: 1, lost: 0, goals_for: 1, goals_against: 0 });
+      expect(state.standings.find((row) => row.team_id === IDS.teamB)).toMatchObject({ played: 1, won: 0, lost: 1, goals_for: 0, goals_against: 1 });
+      await expectStandingsAuthoritative(state.standings);
+    }, 20_000);
+
+    it("a correction sent after finalisation completes is the same permitted rewrite as the END_MATCH-first order", async () => {
+      // Sequential control: no race at all. It pins the shared end state of the END_MATCH-first order so a
+      // change to either operation shows up here as well as in the concurrent test.
+      authState.actorId = IDS.super;
+      await pool.query("UPDATE matches SET status = 'live', home_score = 1, away_score = 0 WHERE id = $1", [IDS.match4]);
+      expect((await postMatch({ action: "END_MATCH", matchId: IDS.match4 })).status).toBe(200);
+      expect((await postMatch({ ...CORRECTION })).status).toBe(200);
+      const state = await finalState();
+      expect(state.match).toMatchObject({ status: "final", home_score: 2, away_score: 0 });
+      expect(state.audit).toHaveLength(1);
+      await expectStandingsAuthoritative(state.standings);
+    });
   });
 
   it("serializes cancellation racing a forfeit", async () => {
