@@ -51,7 +51,12 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/novachrono_ci
           DATABASE_DRIVER: pg
-        run: npm run migrate
+        run: |
+          npm run migrate
+          # The fresh chain is 0001-0012 and migration 0012 is purely additive: it creates objects and writes no row.
+          test "$(psql "$DATABASE_URL" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM schema_migrations")" = "12"
+          test "$(psql "$DATABASE_URL" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM schema_migrations WHERE name = '0012_gate6a_admin_scope_custody.sql'")" = "1"
+          test "$(psql "$DATABASE_URL" -X -At -v ON_ERROR_STOP=1 -c "SELECT (SELECT count(*) FROM admin_scope_custody) + (SELECT count(*) FROM admin_routing_state)")" = "0"
 
       - name: Rehearse production-shaped migration chain
         shell: bash
@@ -171,6 +176,8 @@ jobs:
           createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate6a_missing_0010
           createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate6a_reserved_email
           createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_gate6a_duplicate_email
+          # Cloned BEFORE 0011 is applied or recorded: the negative case for Gate 6A S2a (migration 0012).
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_s2a_unmigrated_0011
 
           missing_0010_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_gate6a_missing_0010'
           psql "$missing_0010_url" -X -v ON_ERROR_STOP=1 -c "DELETE FROM schema_migrations WHERE name = '0010_gate5_availability_notifications.sql'"
@@ -196,6 +203,139 @@ jobs:
           psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0011_gate6a_account_lifecycle.sql
           test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('auth_users_account_status_supported', 'auth_users_lifecycle_state_consistent', 'auth_users_lifecycle_email_consistent') AND convalidated")" = "3"
           test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class WHERE relname IN ('auth_users_deletion_request_unique', 'auth_users_active_role_idx')")" = "2"
+
+          # Gate 6A S2a: migration 0012 (administrator scope custody, recipient views, routing state).
+          # psql applies a file without recording it, but 0012 requires 0011 to be RECORDED, so record what scripts/migrate.js would have recorded.
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO schema_migrations (name) VALUES ('0011_gate6a_account_lifecycle.sql')"
+
+          # M02: 0012 refuses, with its own message, a database whose 0011 is not recorded - and leaves nothing behind.
+          s2a_err="$(mktemp)"
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_s2a_missing_0011_record
+          missing_0011_record_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_s2a_missing_0011_record'
+          unmigrated_0011_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_s2a_unmigrated_0011'
+          psql "$missing_0011_record_url" -X -v ON_ERROR_STOP=1 -c "DELETE FROM schema_migrations WHERE name = '0011_gate6a_account_lifecycle.sql'"
+          for negative_url in "$missing_0011_record_url" "$unmigrated_0011_url"; do
+            if psql "$negative_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0012_gate6a_admin_scope_custody.sql 2>"$s2a_err"; then
+              echo "Gate 6A S2a unexpectedly accepted a database without recorded migration 0011"
+              exit 1
+            fi
+            grep -q "migration 0011 is not recorded" "$s2a_err" || { cat "$s2a_err"; echo "Gate 6A S2a refused for the wrong reason"; exit 1; }
+            test "$(psql "$negative_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class WHERE relname IN ('admin_scope_custody', 'admin_routing_state', 'venue_alert_recipients', 'venue_alert_recipients_effective', 'organization_cover')")" = "0"
+            test "$(psql "$negative_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_constraint WHERE conname = 'notifications_type_supported' AND pg_get_constraintdef(oid) LIKE '%venue_unrouted%'")" = "0"
+          done
+
+          # Legacy preservation: the recipients that exist BEFORE 0012 are the recipients that remain AFTER it. Separate disposable
+          # database (a clone of the production-shaped database taken after 0011 is recorded and before 0012 exists), so that M10 below is
+          # fingerprinted on a database that never held any of these rows. Every row is synthetic and fixed here.
+          # The accepted rule (src/app/api/utils/match-reminders.js: admin.venue_id = venue AND admin.role IN ('venue_admin', 'super_admin')
+          # AND admin.account_status = 'active') is executed unchanged before the migration; the delivery view must reproduce its result exactly.
+          s2a_expect() {
+            if [ "$3" != "$2" ]; then echo "Gate 6A S2a legacy preservation FAILED: $1 (expected '$2', got '$3')"; exit 1; fi
+          }
+          s2a_org='a2a00000-0000-4000-8000-000000000001'
+          s2a_venue='a2a00000-0000-4000-8000-000000000002'
+          s2a_native='a2a00000-0000-4000-8000-000000000003'
+          s2a_legacy='a2a00000-0000-4000-8000-000000000004'
+          s2a_assigner='a2a00000-0000-4000-8000-000000000005'
+          s2a_expected_recipients="$s2a_venue:$s2a_native,$s2a_venue:$s2a_legacy"
+          s2a_original_rule="SELECT coalesce(string_agg(admin.venue_id::text || ':' || admin.id::text, ',' ORDER BY admin.venue_id, admin.id), '') FROM venues v JOIN auth_users admin ON admin.venue_id = v.id AND admin.role IN ('venue_admin', 'super_admin') AND admin.account_status = 'active'"
+          s2a_delivery_set="SELECT coalesce(string_agg(venue_id::text || ':' || user_id::text, ',' ORDER BY venue_id, user_id), '') FROM venue_alert_recipients_effective"
+          s2a_delivery_detail="SELECT coalesce(string_agg(user_id::text || ':' || source, ',' ORDER BY user_id), '') FROM venue_alert_recipients_effective WHERE venue_id = '$s2a_venue'"
+          s2a_strict_detail="SELECT coalesce(string_agg(user_id::text || ':' || source, ',' ORDER BY user_id), '') FROM venue_alert_recipients WHERE venue_id = '$s2a_venue'"
+          s2a_legacy_rows="SELECT count(*) FROM venue_alert_recipients_effective WHERE user_id = '$s2a_legacy'"
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_s2a_preservation
+          s2a_pre_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_s2a_preservation'
+          psql "$s2a_pre_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO organizations (id, name) VALUES ('$s2a_org', 'S2a synthetic organisation'); INSERT INTO venues (id, organization_id, name) VALUES ('$s2a_venue', '$s2a_org', 'S2a synthetic venue'); INSERT INTO auth_users (id, name, email, role, venue_id, organization_id) VALUES ('$s2a_native', 'S2a synthetic venue administrator', 's2a-native@example.test', 'venue_admin', '$s2a_venue', '$s2a_org'), ('$s2a_legacy', 'S2a synthetic legacy super administrator', 's2a-legacy@example.test', 'super_admin', '$s2a_venue', '$s2a_org'), ('$s2a_assigner', 'S2a synthetic assigning super administrator', 's2a-assigner@example.test', 'super_admin', NULL, NULL)"
+          # Before 0012: no custody exists at all, so the super administrator that has this venue is legacy-only by construction.
+          s2a_expect "before 0012 no custody table exists" "t" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.admin_scope_custody') IS NULL")"
+          s2a_expect "before 0012 the fixture holds a legacy-only super administrator" "1" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM auth_users WHERE id = '$s2a_legacy' AND role = 'super_admin' AND venue_id = '$s2a_venue' AND account_status = 'active'")"
+          s2a_expect "before 0012 the original rule returns exactly the venue administrator and the legacy super administrator" "$s2a_expected_recipients" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_original_rule WHERE v.id = '$s2a_venue'")"
+          s2a_global_before="$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_original_rule")"
+          s2a_expect "before 0012 the synthetic recipients are part of the database-wide original rule" "t" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT position('$s2a_expected_recipients' IN '$s2a_global_before') > 0")"
+          psql "$s2a_pre_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0012_gate6a_admin_scope_custody.sql
+          psql "$s2a_pre_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO schema_migrations (name) VALUES ('0012_gate6a_admin_scope_custody.sql')"
+          # After 0012, default (absent routing state) mode: the same recipients, the legacy super administrator once, nothing seeded.
+          s2a_expect "after 0012 no routing-state row exists (absent row means legacy mode)" "0" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM admin_routing_state")"
+          s2a_expect "after 0012 no custody row exists" "0" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM admin_scope_custody")"
+          s2a_expect "after 0012 the delivery set for the venue is exactly the pre-migration recipients" "$s2a_expected_recipients" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_delivery_set WHERE venue_id = '$s2a_venue'")"
+          s2a_expect "after 0012 the database-wide delivery set equals the database-wide original rule" "$s2a_global_before" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_delivery_set")"
+          s2a_expect "after 0012 the legacy super administrator appears exactly once" "1" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_legacy_rows")"
+          # Strict coverage is a different set: the native venue administrator only; the super administrator without custody is not cover.
+          s2a_expect "after 0012 strict coverage is the native venue administrator only" "$s2a_native:native" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_strict_detail")"
+          s2a_expect "after 0012 delivery sources are native and legacy" "$s2a_native:native,$s2a_legacy:legacy" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_delivery_detail")"
+          # A valid explicit venue-scope custody assignment for the same super administrator (assigned by a venue-less super administrator).
+          psql "$s2a_pre_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO admin_scope_custody (venue_id, custodian_user_id, assigned_by, assigned_reason, review_due_at) VALUES ('$s2a_venue', '$s2a_legacy', '$s2a_assigner', 'S2a rehearsal: synthetic explicit custody', now() + interval '90 days')"
+          s2a_expect "with custody strict coverage adds the super administrator" "$s2a_native:native,$s2a_legacy:custody" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_strict_detail")"
+          s2a_expect "with custody the super administrator appears exactly once (no duplicate legacy row)" "1" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_legacy_rows")"
+          s2a_expect "with custody the delivery source is custody, not legacy" "$s2a_native:native,$s2a_legacy:custody" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_delivery_detail")"
+          s2a_expect "with custody the delivery set is still exactly the original recipients" "$s2a_expected_recipients" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_delivery_set WHERE venue_id = '$s2a_venue'")"
+          s2a_expect "no (venue, user) pair is delivered twice" "0" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM (SELECT venue_id, user_id FROM venue_alert_recipients_effective GROUP BY 1, 2 HAVING count(*) > 1) d")"
+          # Strict mode (a disposable database only): custody still delivers once; once the custody is released the legacy-only super
+          # administrator is no longer delivered to, and returning to the absent-row default restores it exactly once.
+          psql "$s2a_pre_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO admin_routing_state (mode, custody_enabled, change_reason) VALUES ('strict', true, 'S2a rehearsal on a disposable database')"
+          s2a_expect "strict mode with custody delivers the super administrator once, as custody" "$s2a_native:native,$s2a_legacy:custody" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_delivery_detail")"
+          psql "$s2a_pre_url" -X -v ON_ERROR_STOP=1 -c "UPDATE admin_scope_custody SET released_at = now(), released_by = '$s2a_assigner', release_reason = 'S2a rehearsal: synthetic release' WHERE custodian_user_id = '$s2a_legacy'"
+          s2a_expect "strict mode without custody no longer delivers to the legacy-only super administrator" "$s2a_native:native" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_delivery_detail")"
+          psql "$s2a_pre_url" -X -v ON_ERROR_STOP=1 -c "DELETE FROM admin_routing_state"
+          s2a_expect "the absent-row default restores the legacy super administrator exactly once" "$s2a_native:native,$s2a_legacy:legacy" "$(psql "$s2a_pre_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_delivery_detail")"
+          # The production-shaped database that M10 fingerprints must not have received any of this.
+          s2a_expect "the production-shaped database holds no synthetic preservation row and no 0012 object" "0" "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT (SELECT count(*) FROM auth_users WHERE id IN ('$s2a_native', '$s2a_legacy', '$s2a_assigner')) + (SELECT count(*) FROM venues WHERE id = '$s2a_venue') + (SELECT count(*) FROM organizations WHERE id = '$s2a_org') + (SELECT count(*) FROM pg_class WHERE relname IN ('admin_scope_custody', 'admin_routing_state', 'venue_alert_recipients', 'venue_alert_recipients_effective', 'organization_cover'))")"
+
+          # M10: 0012 is inert on production-shaped data. Fingerprint every table that holds accounts, sporting history or
+          # notifications before and after, and require that the fixture really contains rows (a fingerprint of empty tables proves nothing).
+          s2a_fingerprint() {
+            psql "$1" -X -At -v ON_ERROR_STOP=1 -c "SELECT string_agg(t, ' ' ORDER BY t) FROM (
+              SELECT 'auth_users=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) AS t FROM auth_users x
+              UNION ALL SELECT 'auth_accounts=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM auth_accounts x
+              UNION ALL SELECT 'notifications=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM notifications x
+              UNION ALL SELECT 'audit_logs=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM audit_logs x
+              UNION ALL SELECT 'organizations=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM organizations x
+              UNION ALL SELECT 'venues=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM venues x
+              UNION ALL SELECT 'leagues=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM leagues x
+              UNION ALL SELECT 'league_slots=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM league_slots x
+              UNION ALL SELECT 'teams=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM teams x
+              UNION ALL SELECT 'players=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM players x
+              UNION ALL SELECT 'matches=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM matches x
+              UNION ALL SELECT 'match_events=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM match_events x
+              UNION ALL SELECT 'standings=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM standings x
+              UNION ALL SELECT 'availability_responses=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM availability_responses x
+              UNION ALL SELECT 'invite_tokens=' || count(*) || ':' || md5(coalesce(string_agg(x::text, '|' ORDER BY x::text), '')) FROM invite_tokens x
+            ) s"
+          }
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT (SELECT count(*) FROM auth_users) > 0 AND (SELECT count(*) FROM teams) > 0 AND (SELECT count(*) FROM matches) > 0 AND (SELECT count(*) FROM venues) > 0")" = "t"
+          s2a_before="$(s2a_fingerprint "$production_shape_url")"
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -1 -f migrations/0012_gate6a_admin_scope_custody.sql
+          psql "$production_shape_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO schema_migrations (name) VALUES ('0012_gate6a_admin_scope_custody.sql')"
+          s2a_after="$(s2a_fingerprint "$production_shape_url")"
+          if [ "$s2a_before" != "$s2a_after" ]; then
+            echo "Gate 6A S2a changed existing rows"; echo "before: $s2a_before"; echo "after:  $s2a_after"; exit 1
+          fi
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT (SELECT count(*) FROM admin_scope_custody) + (SELECT count(*) FROM admin_routing_state)")" = "0"
+
+          # The designed objects exist, every constraint is validated and every custody foreign key is restrictive.
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class WHERE relname IN ('admin_scope_custody', 'admin_routing_state', 'venue_alert_recipients', 'venue_alert_recipients_effective', 'organization_cover')")" = "5"
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_indexes WHERE tablename = 'admin_scope_custody'")" = "7"
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('admin_scope_custody_one_scope', 'admin_scope_custody_assign_reason', 'admin_scope_custody_release_consistent', 'admin_scope_custody_review_after_assign', 'admin_routing_state_singleton_only', 'admin_routing_state_mode_supported', 'admin_routing_state_strict_requires_custody', 'notifications_type_supported') AND convalidated")" = "8"
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT string_agg(confdeltype::text, ',' ORDER BY conname) FROM pg_constraint WHERE conrelid = 'admin_scope_custody'::regclass AND contype = 'f'")" = "a,a,a,a,a,a"
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_constraint WHERE conname = 'notifications_type_supported' AND pg_get_constraintdef(oid) LIKE '%venue_unrouted%' AND pg_get_constraintdef(oid) LIKE '%unconfirmed_alert%'")" = "1"
+
+          # Post-migration probe, complementary to the preservation proof above (which creates its recipients BEFORE 0012 and is the
+          # evidence that migrating removes no recipient). Here: with no custody and no routing-state row, the delivery set equals the
+          # accepted recipient rule on the production-shaped database. That fixture has no venue administrator and no super administrator
+          # with a venue, so on its own this comparison is vacuous; it is repeated on a throw-away clone that gains one of each AFTER 0012,
+          # which checks the two modes (legacy keeps the super administrator, strict drops it) but cannot show that migrating preserved anything.
+          s2a_same_as_accepted_rule="SELECT count(*) FROM ((SELECT venue_id, user_id FROM venue_alert_recipients_effective EXCEPT SELECT venue_id, id FROM auth_users WHERE venue_id IS NOT NULL AND role IN ('venue_admin', 'super_admin') AND account_status = 'active') UNION ALL (SELECT venue_id, id FROM auth_users WHERE venue_id IS NOT NULL AND role IN ('venue_admin', 'super_admin') AND account_status = 'active' EXCEPT SELECT venue_id, user_id FROM venue_alert_recipients_effective)) d"
+          test "$(psql "$production_shape_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_same_as_accepted_rule")" = "0"
+          createdb -h 127.0.0.1 -U postgres -T novachrono_production_shape novachrono_s2a_legacy_probe
+          legacy_probe_url='postgresql://postgres:postgres@127.0.0.1:5432/novachrono_s2a_legacy_probe'
+          psql "$legacy_probe_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO auth_users (name, email, role, venue_id, organization_id) SELECT 'Probe venue admin', 's2a-probe-va@example.test', 'venue_admin', v.id, v.organization_id FROM venues v ORDER BY v.id LIMIT 1; INSERT INTO auth_users (name, email, role, venue_id, organization_id) SELECT 'Probe super admin', 's2a-probe-sa@example.test', 'super_admin', v.id, v.organization_id FROM venues v ORDER BY v.id LIMIT 1"
+          test "$(psql "$legacy_probe_url" -X -At -v ON_ERROR_STOP=1 -c "$s2a_same_as_accepted_rule")" = "0"
+          test "$(psql "$legacy_probe_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM venue_alert_recipients_effective WHERE source = 'native'")" = "1"
+          test "$(psql "$legacy_probe_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM venue_alert_recipients_effective WHERE source = 'legacy'")" = "1"
+          test "$(psql "$legacy_probe_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM venue_alert_recipients")" = "1"
+          psql "$legacy_probe_url" -X -v ON_ERROR_STOP=1 -c "INSERT INTO admin_routing_state (mode, custody_enabled) VALUES ('strict', true)"
+          test "$(psql "$legacy_probe_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM venue_alert_recipients_effective WHERE source = 'legacy'")" = "0"
+          test "$(psql "$legacy_probe_url" -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM venue_alert_recipients_effective")" = "1"
 
           # Route and concurrency suites run against the final production-shaped
           # schema because every authenticated request reads auth_users.account_status.
